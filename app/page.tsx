@@ -66,6 +66,7 @@ function FlowEditor() {
   const { setViewport, getZoom } = useReactFlow();
   const fileInputRef = useRef<HTMLInputElement>(null);
   
+  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [files, setFiles] = useState<Record<string, any>>({});
   const [activeFileId, setActiveFileId] = useState<string>('default');
   
@@ -84,23 +85,26 @@ function FlowEditor() {
 
   const selectedNode = useMemo(() => nodes.find(n => n.id === selectedNodeId) || null, [nodes, selectedNodeId]);
 
+  // 初回ロード
   useEffect(() => {
     const saved = localStorage.getItem('my-logic-files');
     if (saved) {
       const parsed = JSON.parse(saved);
       setFiles(parsed);
       const lastId = localStorage.getItem('my-logic-active-id') || 'default';
-      if (parsed[lastId]) loadFile(lastId, parsed);
+      if (parsed[lastId]) loadFileInitial(lastId, parsed);
     } else {
       const initial = { 'default': { name: '無題のノート', levelData: { root: { nodes: [], edges: [], bgColor: '#ffffff' } }, currentLevel: 'root', currentLabel: 'TOP層' } };
       setFiles(initial); localStorage.setItem('my-logic-files', JSON.stringify(initial));
     }
   }, []);
 
+  // 常に現在のレベルデータを同期
   useEffect(() => {
     setLevelData(prev => ({ ...prev, [currentLevel]: { ...(prev[currentLevel] || {}), nodes, edges } }));
   }, [nodes, edges, currentLevel]);
 
+  // 常にファイルデータを同期（完全オートセーブ）
   useEffect(() => {
     if (!activeFileId || !files[activeFileId]) return;
     const updated = { ...files, [activeFileId]: { ...(files[activeFileId] || {}), levelData: { ...(levelData || {}), [currentLevel]: { ...(levelData[currentLevel] || {}), nodes, edges } }, currentLevel, currentLabel } };
@@ -108,7 +112,7 @@ function FlowEditor() {
     localStorage.setItem('my-logic-active-id', activeFileId);
   }, [nodes, edges, currentLevel, currentLabel, levelData, activeFileId, files]);
 
-  const loadFile = (id: string, allFiles = files) => {
+  const loadFileInitial = (id: string, allFiles = files) => {
     const t = allFiles[id]; if (!t) return;
     const loadedLevelData = t.levelData || { root: { nodes: [], edges: [], bgColor: '#ffffff' } };
     const initialLevel = t.currentLevel || 'root';
@@ -117,19 +121,44 @@ function FlowEditor() {
     setHistory([]); setSelectedNodeId(null);
   };
 
+  // ★ データ消失を防ぐ、完璧なノート切り替えシステム ★
+  const switchFile = (newId: string) => {
+    setFiles(prevFiles => {
+      const updatedFiles = { ...prevFiles };
+      if (activeFileId && updatedFiles[activeFileId]) {
+        updatedFiles[activeFileId] = {
+          ...updatedFiles[activeFileId],
+          levelData: { ...levelData, [currentLevel]: { ...(levelData[currentLevel] || {}), nodes, edges } },
+          currentLevel, currentLabel
+        };
+      }
+      const target = updatedFiles[newId];
+      if (target) {
+        setActiveFileId(newId);
+        localStorage.setItem('my-logic-active-id', newId);
+        const nextLevelData = target.levelData || { root: { nodes: [], edges: [], bgColor: '#ffffff' } };
+        const nextLevel = target.currentLevel || 'root';
+        setLevelData(nextLevelData); setCurrentLevel(nextLevel); setCurrentLabel(target.currentLabel || 'TOP層');
+        setNodes(nextLevelData[nextLevel]?.nodes || []); setEdges(nextLevelData[nextLevel]?.edges || []);
+        setHistory([]); setSelectedNodeId(null);
+      }
+      return updatedFiles;
+    });
+  };
+
   const createNewFile = () => {
     const name = prompt("ファイル名", `ノート ${Object.keys(files).length + 1}`);
     if (!name) return;
     const newId = `file-${Date.now()}`;
     const newF = { name, levelData: { root: { nodes: [], edges: [], bgColor: '#ffffff' } }, currentLevel: 'root', currentLabel: 'TOP層' };
-    setFiles(prev => ({ ...prev, [newId]: newF })); loadFile(newId, { ...files, [newId]: newF });
+    setFiles(prev => ({ ...prev, [newId]: newF })); switchFile(newId);
   };
 
   const deleteFile = (id: string) => {
     if (Object.keys(files).length <= 1) return;
     if (!confirm("削除しますか？")) return;
     const updated = { ...files }; delete updated[id];
-    setFiles(updated); if (id === activeFileId) loadFile(Object.keys(updated)[0], updated);
+    setFiles(updated); if (id === activeFileId) switchFile(Object.keys(updated)[0]);
   };
 
   const updateNode = useCallback((newData: any, newStyle: any = {}) => {
@@ -288,8 +317,8 @@ function FlowEditor() {
               {levelData[n.id]?.nodes?.length ? (
                 <div style={{ transform: 'scale(0.15)', transformOrigin: 'top left', width: '1200px', height: '800px', position: 'relative', pointerEvents: 'none' }}>
                   {levelData[n.id].nodes.map((cn: any) => cn.id !== 'center-mark' ? (
-                    <div key={cn.id} style={{ position: 'absolute', left: cn.position.x, top: cn.position.y, width: cn.style?.width || 200, height: cn.style?.height || 100, backgroundColor: cn.style?.backgroundColor || '#fff', border: cn.style?.border || '4px solid #333', borderRadius: cn.style?.borderRadius || '12px', display: 'flex', alignItems: 'center', justifyContent: cn.style?.textAlign === 'left' ? 'flex-start' : cn.style?.textAlign === 'right' ? 'flex-end' : 'center', fontSize: '32px', color: cn.style?.color || '#000', overflow: 'hidden' }}>
-                      {cn.data?.isImage ? <img src={cn.data.imageUrl as string} style={{width:'100%', height:'100%', objectFit:'cover'}} alt="mini" /> : cn.data?.isShape ? null : <div style={{padding:'15px', fontWeight: cn.style?.fontWeight || 'normal'}}>{String(cn.data?.content || '')}</div>}
+                    <div key={cn.id} style={{ position: 'absolute', left: cn.position.x, top: cn.position.y, width: cn.style?.width || 200, height: cn.style?.height || 100, backgroundColor: cn.style?.backgroundColor || '#fff', border: cn.style?.border || '4px solid #333', borderRadius: cn.style?.borderRadius || '12px', display: 'flex', alignItems: cn.style?.alignItems || 'center', justifyContent: cn.style?.justifyContent || 'center', fontSize: '32px', color: cn.style?.color || '#000', overflow: 'hidden' }}>
+                      {cn.data?.isImage ? <img src={cn.data.imageUrl as string} style={{width:'100%', height:'100%', objectFit:'cover'}} alt="mini" /> : cn.data?.isShape ? null : <div style={{padding:'15px', fontWeight: cn.style?.fontWeight || 'normal', textAlign: cn.style?.textAlign || 'center'}}>{String(cn.data?.content || '')}</div>}
                     </div>
                   ) : null)}
                 </div>
@@ -304,15 +333,18 @@ function FlowEditor() {
         data: {
           ...n.data,
           label: (
-            <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: n.style?.textAlign || 'center', position: 'relative' }}>
+            <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: n.style?.alignItems || 'center', justifyContent: n.style?.justifyContent || 'center', position: 'relative' }}>
               {previewElement}
               
               {n.data?.isImage ? (
                 <div style={{ width: '100%', height: '100%', overflow: 'hidden', position: 'relative', borderRadius: n.style?.borderRadius || 0 }}>
                   <img src={n.data.imageUrl as string} style={{ position: 'absolute', width: 'auto', height: 'auto', minWidth: '100%', minHeight: '100%', transform: `translate(${n.data.imgPosX || 0}px, ${n.data.imgPosY || 0}px) scale(${n.data.imgZoom || 1})`, transformOrigin: 'center center', pointerEvents: 'none' }} alt="img" />
+                  <div className="markdown-content" style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: n.style?.alignItems || 'center', justifyContent: n.style?.justifyContent || 'center', pointerEvents: 'none', color: n.style?.color || '#000', fontWeight: n.style?.fontWeight || 'normal', textDecoration: n.style?.textDecoration || 'none', fontFamily: n.style?.fontFamily || 'sans-serif', whiteSpace: 'pre-wrap', lineHeight: '1.2' }}>
+                    <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>{String(n.data?.content || '').replace(/\n/g, '  \n')}</ReactMarkdown>
+                  </div>
                 </div>
               ) : n.id !== 'center-mark' ? (
-                <div className="markdown-content" style={{ pointerEvents: 'none', width: '100%', color: n.style?.color || '#000', fontWeight: n.style?.fontWeight || 'normal', textDecoration: n.style?.textDecoration || 'none', fontFamily: n.style?.fontFamily || 'sans-serif', whiteSpace: 'pre-wrap', lineHeight: '1.2' }}>
+                <div className="markdown-content" style={{ pointerEvents: 'none', width: '100%', color: n.style?.color || '#000', fontWeight: n.style?.fontWeight || 'normal', textDecoration: n.style?.textDecoration || 'none', fontFamily: n.style?.fontFamily || 'sans-serif', whiteSpace: 'pre-wrap', lineHeight: '1.2', textAlign: n.style?.textAlign || 'center' }}>
                   <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>{String(n.data?.content || '').replace(/\n/g, '  \n')}</ReactMarkdown>
                 </div>
               ) : null}
@@ -338,76 +370,128 @@ function FlowEditor() {
 
   const isRoot = history.length === 0;
 
+  // 豪華なボタン用スタイル
+  const actionBtnStyle = { padding: '10px 16px', borderRadius: '8px', border: '1px solid #ccc', backgroundColor: '#fff', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '5px', boxShadow: '0 2px 4px rgba(0,0,0,0.05)', fontWeight: 'bold', fontSize: '14px', transition: 'all 0.2s' };
+  const primaryBtnStyle = { ...actionBtnStyle, backgroundColor: '#3b82f6', color: '#fff', border: 'none', boxShadow: '0 4px 6px rgba(59, 130, 246, 0.3)' };
+
   return (
-    <div style={{ width: '100vw', height: '100vh', display: 'flex', flexDirection: 'row' }}>
+    <div style={{ width: '100vw', height: '100vh', display: 'flex', flexDirection: 'row', overflow: 'hidden' }}>
       <style>{`.markdown-content p { margin: 0; }`}</style>
       <input type="file" ref={fileInputRef} style={{ display: 'none' }} onChange={handleFileChange} accept="image/*" />
-      <div style={{ width: '220px', backgroundColor: '#f8f9fa', borderRight: '1px solid #ddd', display: 'flex', flexDirection: 'column', padding: '15px', zIndex: 10 }}>
-        <h2>ファイル一覧</h2>
-        <button onClick={createNewFile} style={{ padding: '8px', marginBottom: '20px', backgroundColor: '#fff', border: '1px solid #ddd', cursor: 'pointer' }}>＋ 新規ノート</button>
-        <div style={{ flexGrow: 1, overflowY: 'auto' }}>
-          {Object.entries(files).map(([id, f]: [string, any]) => (
-            <div key={id} onClick={() => loadFile(id)} style={{ padding: '8px', marginBottom: '5px', borderRadius: '4px', cursor: 'pointer', backgroundColor: activeFileId === id ? '#e7f1ff' : 'transparent', fontSize: '13px' }}>
-              {f.name} <span onClick={(e) => { e.stopPropagation(); deleteFile(id); }} style={{ float: 'right' }}>×</span>
-            </div>
-          ))}
+      
+      {/* 左サイドバー（開閉アニメーション付き） */}
+      <div style={{ width: isSidebarOpen ? '220px' : '0px', transition: 'width 0.3s ease', backgroundColor: '#f8f9fa', borderRight: isSidebarOpen ? '1px solid #ddd' : 'none', display: 'flex', flexDirection: 'column', overflow: 'hidden', zIndex: 10 }}>
+        <div style={{ width: '220px', display: 'flex', flexDirection: 'column', height: '100%', padding: '15px' }}>
+          <h2>ファイル一覧</h2>
+          <button onClick={createNewFile} style={{ padding: '8px', marginBottom: '20px', backgroundColor: '#fff', border: '1px solid #ddd', cursor: 'pointer', borderRadius: '6px', fontWeight: 'bold' }}>＋ 新規ノート</button>
+          <div style={{ flexGrow: 1, overflowY: 'auto' }}>
+            {Object.entries(files).map(([id, f]: [string, any]) => (
+              <div key={id} onClick={() => switchFile(id)} style={{ padding: '10px', marginBottom: '5px', borderRadius: '6px', cursor: 'pointer', backgroundColor: activeFileId === id ? '#e7f1ff' : 'transparent', border: activeFileId === id ? '1px solid #3b82f6' : '1px solid transparent', fontSize: '14px', fontWeight: activeFileId === id ? 'bold' : 'normal' }}>
+                {f.name} <span onClick={(e) => { e.stopPropagation(); deleteFile(id); }} style={{ float: 'right', color: '#999' }}>×</span>
+              </div>
+            ))}
+          </div>
         </div>
       </div>
-      <div style={{ flexGrow: 1, display: 'flex', flexDirection: 'column', backgroundColor: levelData[currentLevel]?.bgColor || '#ffffff' }}>
-        <div style={{ padding: '10px', backgroundColor: 'rgba(255,255,255,0.8)', borderBottom: '1px solid #eee', textAlign: 'center', fontWeight: 'bold' }}>階層: {currentLabel}</div>
+
+      <div style={{ flexGrow: 1, display: 'flex', flexDirection: 'column', backgroundColor: levelData[currentLevel]?.bgColor || '#ffffff', transition: 'background-color 0.3s' }}>
+        
+        {/* 上部ヘッダー（ハンバーガーボタン付き） */}
+        <div style={{ padding: '10px 15px', backgroundColor: 'rgba(255,255,255,0.8)', borderBottom: '1px solid #eee', display: 'flex', alignItems: 'center', zIndex: 100 }}>
+          <button onClick={() => setIsSidebarOpen(!isSidebarOpen)} style={{ background: 'none', border: 'none', fontSize: '24px', cursor: 'pointer', marginRight: '15px', padding: '0 5px' }}>☰</button>
+          <div style={{ flex: 1, textAlign: 'center', fontWeight: 'bold', fontSize: '16px' }}>階層: {currentLabel}</div>
+          <div style={{ width: '40px' }}></div> {/* 中央寄せ用のスペーサー */}
+        </div>
+
         <div style={{ flexGrow: 1, position: 'relative' }}>
           <ReactFlow nodes={flowNodes} edges={edges} edgeTypes={edgeTypes} elevateNodesOnSelect={false} onNodesChange={u => setNodes(nds => applyNodeChanges(u, nds))} onEdgesChange={u => setEdges(eds => applyEdgeChanges(u, eds))} onConnect={p => setEdges(eds => addEdge({...p, type:'default', style: {strokeWidth: 2}}, eds))} onNodeClick={(_, n) => { setSelectedNodeId(n.id !== 'center-mark' ? n.id : null); setSelectedEdge(null); }} onEdgeClick={(_, e) => { setSelectedEdge(e); setSelectedNodeId(null); }} onPaneClick={() => { setSelectedNodeId(null); setSelectedEdge(null); }} onNodeDoubleClick={(_, n) => enterLevel(n.id, String(n.data?.content || ''))} onNodeDrag={onNodeDrag} onNodeDragStop={onNodeDragStop} fitView>
             <Background color="#f1f1f1" /><Controls /><SmartGuides guides={guides} />
           </ReactFlow>
+          
           {selectedNode && (
-            <div style={{ position:'absolute', right:0, top:0, bottom:0, width:'340px', borderLeft:'1px solid #ddd', padding:'20px', backgroundColor:'#fff', zIndex:1000, overflowY: 'auto' }}>
-              <button onClick={() => setSelectedNodeId(null)} style={{ float: 'right', border: 'none', background: 'none', fontSize: '20px' }}>×</button>
-              <h3>{selectedNode.data?.isImage ? '画像編集' : selectedNode.data?.isShape ? '図形設定' : '項目設定'}</h3>
+            <div style={{ position:'absolute', right:0, top:0, bottom:0, width:'340px', borderLeft:'1px solid #ddd', padding:'20px', backgroundColor:'#fff', zIndex:1000, overflowY: 'auto', boxShadow: '-4px 0 10px rgba(0,0,0,0.05)' }}>
+              <button onClick={() => setSelectedNodeId(null)} style={{ float: 'right', border: 'none', background: 'none', fontSize: '20px', cursor: 'pointer' }}>×</button>
+              <h3 style={{fontSize:'16px'}}>{selectedNode.data?.isImage ? '画像編集' : selectedNode.data?.isShape ? '図形設定' : 'テキスト設定'}</h3>
               
               <div style={{ display:'flex', gap:'5px', marginBottom:'15px', marginTop:'10px' }}>
-                <button onClick={() => setNodes(nds => { const maxZ = Math.max(0, ...nds.map(n => Number(n.zIndex) || 0)); return nds.map(n => n.id === selectedNodeId ? {...n, zIndex: maxZ + 1} : n); })} style={{flex:1, padding:'8px', fontSize:'12px', fontWeight: 'bold', background: '#f0f0f0', border: '1px solid #ccc', cursor: 'pointer'}}>↑ 最前面へ</button>
-                <button onClick={() => setNodes(nds => { const minZ = Math.min(0, ...nds.map(n => Number(n.zIndex) || 0)); return nds.map(n => n.id === selectedNodeId ? {...n, zIndex: minZ - 1} : n); })} style={{flex:1, padding:'8px', fontSize:'12px', fontWeight: 'bold', background: '#f0f0f0', border: '1px solid #ccc', cursor: 'pointer'}}>↓ 最背面へ</button>
+                <button onClick={() => setNodes(nds => { const maxZ = Math.max(0, ...nds.map(n => Number(n.zIndex) || 0)); return nds.map(n => n.id === selectedNodeId ? {...n, zIndex: maxZ + 1} : n); })} style={{flex:1, padding:'8px', fontSize:'12px', fontWeight: 'bold', background: '#f0f0f0', border: '1px solid #ccc', cursor: 'pointer', borderRadius: '4px'}}>↑ 最前面へ</button>
+                <button onClick={() => setNodes(nds => { const minZ = Math.min(0, ...nds.map(n => Number(n.zIndex) || 0)); return nds.map(n => n.id === selectedNodeId ? {...n, zIndex: minZ - 1} : n); })} style={{flex:1, padding:'8px', fontSize:'12px', fontWeight: 'bold', background: '#f0f0f0', border: '1px solid #ccc', cursor: 'pointer', borderRadius: '4px'}}>↓ 最背面へ</button>
               </div>
 
               {selectedNode.data?.isImage && (
                 <div style={{ marginBottom: '20px', padding: '10px', border: '1px solid #eee', borderRadius: '8px' }}>
-                  <label style={{fontSize: '11px', fontWeight: 'bold'}}>ズーム / 位置</label>
-                  <input type="range" min="0.5" max="3" step="0.1" value={Number(selectedNode.data?.imgZoom || 1)} onChange={(e) => updateNode({ imgZoom: parseFloat(e.target.value) })} style={{width:'100%'}} />
-                  <input type="range" min="-600" max="600" value={Number(selectedNode.data?.imgPosX || 0)} onChange={(e) => updateNode({ imgPosX: parseInt(e.target.value) })} style={{width:'100%'}} />
+                  <label style={{fontSize: '11px', fontWeight: 'bold'}}>画像のズーム / 位置調整</label>
+                  <input type="range" min="0.5" max="3" step="0.1" value={Number(selectedNode.data?.imgZoom || 1)} onChange={(e) => updateNode({ imgZoom: parseFloat(e.target.value) })} style={{width:'100%', marginBottom: '5px'}} />
+                  <input type="range" min="-600" max="600" value={Number(selectedNode.data?.imgPosX || 0)} onChange={(e) => updateNode({ imgPosX: parseInt(e.target.value) })} style={{width:'100%', marginBottom: '5px'}} />
                   <input type="range" min="-600" max="600" value={Number(selectedNode.data?.imgPosY || 0)} onChange={(e) => updateNode({ imgPosY: parseInt(e.target.value) })} style={{width:'100%'}} />
                 </div>
               )}
               
               {selectedNode.data?.isShape && (
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '5px', marginBottom: '15px' }}>
-                  <button onClick={() => { const size = Math.max(Number(selectedNode.style?.width) || 150, Number(selectedNode.style?.height) || 150); updateNode({ shapeType: 'rect', keepRatio: true }, { borderRadius: '0px', width: size, height: size }); }} style={{ padding: '8px', cursor: 'pointer', background: selectedNode.data?.shapeType === 'rect' && selectedNode.data?.keepRatio ? '#ddd' : '#fff', border: '1px solid #ccc' }}>■ 正方形</button>
-                  <button onClick={() => updateNode({ shapeType: 'rect', keepRatio: false }, { borderRadius: '0px' })} style={{ padding: '8px', cursor: 'pointer', background: selectedNode.data?.shapeType === 'rect' && !selectedNode.data?.keepRatio ? '#ddd' : '#fff', border: '1px solid #ccc' }}>▬ 長方形</button>
-                  <button onClick={() => { const size = Math.max(Number(selectedNode.style?.width) || 150, Number(selectedNode.style?.height) || 150); updateNode({ shapeType: 'circ', keepRatio: true }, { borderRadius: '50%', width: size, height: size }); }} style={{ padding: '8px', cursor: 'pointer', background: selectedNode.data?.shapeType === 'circ' && selectedNode.data?.keepRatio ? '#ddd' : '#fff', border: '1px solid #ccc' }}>● 正円</button>
-                  <button onClick={() => updateNode({ shapeType: 'circ', keepRatio: false }, { borderRadius: '50%' })} style={{ padding: '8px', cursor: 'pointer', background: selectedNode.data?.shapeType === 'circ' && !selectedNode.data?.keepRatio ? '#ddd' : '#fff', border: '1px solid #ccc' }}>⬭ 楕円</button>
+                  <button onClick={() => { const size = Math.max(Number(selectedNode.style?.width) || 150, Number(selectedNode.style?.height) || 150); updateNode({ shapeType: 'rect', keepRatio: true }, { borderRadius: '0px', width: size, height: size }); }} style={{ padding: '8px', cursor: 'pointer', borderRadius: '4px', background: selectedNode.data?.shapeType === 'rect' && selectedNode.data?.keepRatio ? '#ddd' : '#fff', border: '1px solid #ccc' }}>■ 正方形</button>
+                  <button onClick={() => updateNode({ shapeType: 'rect', keepRatio: false }, { borderRadius: '0px' })} style={{ padding: '8px', cursor: 'pointer', borderRadius: '4px', background: selectedNode.data?.shapeType === 'rect' && !selectedNode.data?.keepRatio ? '#ddd' : '#fff', border: '1px solid #ccc' }}>▬ 長方形</button>
+                  <button onClick={() => { const size = Math.max(Number(selectedNode.style?.width) || 150, Number(selectedNode.style?.height) || 150); updateNode({ shapeType: 'circ', keepRatio: true }, { borderRadius: '50%', width: size, height: size }); }} style={{ padding: '8px', cursor: 'pointer', borderRadius: '4px', background: selectedNode.data?.shapeType === 'circ' && selectedNode.data?.keepRatio ? '#ddd' : '#fff', border: '1px solid #ccc' }}>● 正円</button>
+                  <button onClick={() => updateNode({ shapeType: 'circ', keepRatio: false }, { borderRadius: '50%' })} style={{ padding: '8px', cursor: 'pointer', borderRadius: '4px', background: selectedNode.data?.shapeType === 'circ' && !selectedNode.data?.keepRatio ? '#ddd' : '#fff', border: '1px solid #ccc' }}>⬭ 楕円</button>
                 </div>
               )}
 
-              {!selectedNode.data?.isImage && <textarea value={String(selectedNode.data?.content || '')} onChange={(e) => updateNode({ content: e.target.value })} style={{ width:'100%', height:'100px' }} />}
+              {/* 画像にもテキスト入力可能にするため条件解除 */}
+              <label style={{fontSize: '11px', fontWeight: 'bold'}}>文字内容</label>
+              <textarea value={String(selectedNode.data?.content || '')} onChange={(e) => updateNode({ content: e.target.value })} style={{ width:'100%', height:'80px', marginBottom: '10px', padding: '8px', border: '1px solid #ddd', borderRadius: '4px' }} />
               
-              <div style={{ display:'flex', gap:'5px', margin:'10px 0' }}>
-                <button onClick={() => updateNode({}, { textAlign: 'left' })}>左</button><button onClick={() => updateNode({}, { textAlign: 'center' })}>中</button><button onClick={() => updateNode({}, { textAlign: 'right' })}>右</button>
+              <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'5px', marginBottom:'10px' }}>
+                <button onClick={() => updateNode({}, { fontFamily: 'serif' })} style={{cursor:'pointer', border:'1px solid #ccc', padding: '5px', borderRadius: '4px'}}>明朝</button>
+                <button onClick={() => updateNode({}, { fontFamily: 'sans-serif' })} style={{cursor:'pointer', border:'1px solid #ccc', padding: '5px', borderRadius: '4px'}}>ゴシック</button>
+                <button onClick={() => updateNode({}, { fontWeight: selectedNode.style?.fontWeight === 'bold' ? 'normal' : 'bold' })} style={{ cursor:'pointer', border:'1px solid #ccc', padding: '5px', borderRadius: '4px', background: selectedNode.style?.fontWeight === 'bold' ? '#ddd' : '#f0f0f0' }}>太字</button>
+                <button onClick={() => updateNode({}, { textDecoration: selectedNode.style?.textDecoration?.includes('double') ? 'none' : 'line-through double' })} style={{ cursor:'pointer', border:'1px solid #ccc', padding: '5px', borderRadius: '4px', background: selectedNode.style?.textDecoration?.includes('double') ? '#ddd' : '#f0f0f0' }}>二重線</button>
               </div>
-              <input type="range" min="10" max="200" value={parseInt(String(selectedNode.style?.fontSize || 18))} onChange={(e) => updateNode({}, { fontSize: `${e.target.value}px` })} />
-              
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '5px' }}>
-                {PASTEL_COLORS.map(c => <button key={c} onClick={() => updateNode({}, { backgroundColor: c })} style={{ width:'25px', height:'25px', backgroundColor:c }} />)}
+
+              <div style={{ display:'flex', gap:'5px', marginBottom:'5px' }}>
+                <button onClick={() => updateNode({}, { justifyContent: 'flex-start', textAlign: 'left' })} style={{flex:1, cursor:'pointer', border:'1px solid #ccc', padding: '5px', borderRadius: '4px'}}>左</button>
+                <button onClick={() => updateNode({}, { justifyContent: 'center', textAlign: 'center' })} style={{flex:1, cursor:'pointer', border:'1px solid #ccc', padding: '5px', borderRadius: '4px'}}>中央</button>
+                <button onClick={() => updateNode({}, { justifyContent: 'flex-end', textAlign: 'right' })} style={{flex:1, cursor:'pointer', border:'1px solid #ccc', padding: '5px', borderRadius: '4px'}}>右</button>
               </div>
-              
+              <div style={{ display:'flex', gap:'5px', marginBottom:'15px' }}>
+                <button onClick={() => updateNode({}, { alignItems: 'flex-start' })} style={{flex:1, cursor:'pointer', border:'1px solid #ccc', padding: '5px', borderRadius: '4px'}}>上</button>
+                <button onClick={() => updateNode({}, { alignItems: 'center' })} style={{flex:1, cursor:'pointer', border:'1px solid #ccc', padding: '5px', borderRadius: '4px'}}>中</button>
+                <button onClick={() => updateNode({}, { alignItems: 'flex-end' })} style={{flex:1, cursor:'pointer', border:'1px solid #ccc', padding: '5px', borderRadius: '4px'}}>下</button>
+              </div>
+
+              <label style={{fontSize:'11px', fontWeight: 'bold'}}>文字サイズ (px)</label>
+              <div style={{display:'flex', alignItems:'center', gap:'10px', marginBottom: '10px'}}>
+                <input type="range" min="10" max="250" value={parseInt(String(selectedNode.style?.fontSize || 18))} onChange={(e) => updateNode({}, { fontSize: `${e.target.value}px` })} style={{flex:1}} />
+                <input type="number" min="10" max="250" value={parseInt(String(selectedNode.style?.fontSize || 18))} onChange={(e) => updateNode({}, { fontSize: `${e.target.value}px` })} style={{width:'60px', padding:'4px', border:'1px solid #ccc', borderRadius:'4px'}} />
+              </div>
+              <label style={{fontSize:'11px', fontWeight: 'bold'}}>全体の透明度</label>
+              <input type="range" min="0.1" max="1" step="0.1" value={Number(selectedNode.style?.opacity ?? 1)} onChange={(e) => updateNode({}, { opacity: parseFloat(e.target.value) })} style={{width:'100%', marginBottom:'15px'}} />
+
+              <label style={{fontSize:'11px', fontWeight: 'bold'}}>文字色</label>
+              <div style={{ display: 'flex', gap: '5px', marginTop: '5px', marginBottom: '10px' }}>
+                {QUICK_TEXT_COLORS.map(c => <button key={c} onClick={() => updateNode({}, { color: c })} style={{ width:'30px', height:'30px', backgroundColor:c, border: '1px solid #ddd', borderRadius: '4px', cursor: 'pointer' }} />)}
+                <input type="color" value={String(selectedNode.style?.color || '#000000')} onChange={(e) => updateNode({}, { color: e.target.value })} style={{width:'30px', height:'30px', cursor: 'pointer', border: 'none', padding: 0}} />
+              </div>
+
+              <label style={{fontSize:'11px', fontWeight: 'bold'}}>背景色</label>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: '5px', marginTop: '5px', marginBottom: '15px' }}>
+                {PASTEL_COLORS.map(c => <button key={c} onClick={() => updateNode({}, { backgroundColor: c })} style={{ width:'100%', aspectRatio:'1', backgroundColor:c, border: '1px solid #eee', borderRadius: '4px', cursor: 'pointer' }} />)}
+                <input type="color" value={String(selectedNode.style?.backgroundColor || '#ffffff')} onChange={(e) => updateNode({}, { backgroundColor: e.target.value })} style={{width:'100%', aspectRatio:'1', cursor: 'pointer', border: 'none', padding: 0}} />
+              </div>
+
+              {/* 吹き出しボタン機能 */}
               {!selectedNode.data?.isShape && !selectedNode.data?.isImage && (
                 <>
-                  <button onClick={() => updateNode({ previewVisible: !selectedNode.data?.previewVisible })} style={{ width:'100%', marginTop:'10px', padding:'8px' }}>{selectedNode.data?.previewVisible ? '吹き出し消去' : '吹き出し追加'}</button>
+                  <button onClick={() => updateNode({ previewVisible: !selectedNode.data?.previewVisible })} style={{ width:'100%', marginTop:'10px', padding:'10px', background: selectedNode.data?.previewVisible ? '#3b82f6' : '#fff', color: selectedNode.data?.previewVisible ? '#fff' : '#333', border: '1px solid #ccc', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', transition: 'all 0.2s' }}>
+                    {selectedNode.data?.previewVisible ? '💬 吹き出しを消す' : '💬 吹き出しを追加'}
+                  </button>
                   {selectedNode.data?.previewVisible && (
-                    <div style={{ marginTop: '10px' }}>
-                      <div style={{display:'flex', gap:'5px', marginBottom:'5px'}}>
+                    <div style={{ marginTop: '10px', padding: '10px', background: '#f8f9fa', borderRadius: '8px' }}>
+                      <p style={{fontSize: '10px', color: '#666', marginBottom: '5px'}}>※位置は画面上で吹き出しを直接ドラッグして動かせます</p>
+                      <div style={{display:'flex', alignItems: 'center', gap:'5px', marginBottom:'5px'}}>
                         <div style={{fontSize:'10px', width:'30px'}}>幅</div>
                         <input type="range" min="50" max="500" value={Number(selectedNode.data?.previewStyle?.width || 180)} onChange={(e) => updateNode({ previewStyle: { ...(selectedNode.data?.previewStyle || {}), width: parseInt(e.target.value) } })} style={{flex:1}} />
                       </div>
-                      <div style={{display:'flex', gap:'5px', marginBottom:'5px'}}>
+                      <div style={{display:'flex', alignItems: 'center', gap:'5px', marginBottom:'5px'}}>
                         <div style={{fontSize:'10px', width:'30px'}}>高さ</div>
                         <input type="range" min="50" max="500" value={Number(selectedNode.data?.previewStyle?.height || 120)} onChange={(e) => updateNode({ previewStyle: { ...(selectedNode.data?.previewStyle || {}), height: parseInt(e.target.value) } })} style={{flex:1}} />
                       </div>
@@ -415,27 +499,52 @@ function FlowEditor() {
                   )}
                 </>
               )}
-              <button onClick={() => setNodes(nds => nds.filter(n => n.id !== selectedNodeId))} style={{ color:'red', marginTop:'20px' }}>削除</button>
+              <button onClick={() => { setNodes(nds => nds.filter(n => n.id !== selectedNodeId)); setSelectedNodeId(null); }} style={{ width:'100%', marginTop:'20px', color: 'red', border: '1px solid red', padding: '10px', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold', background: '#fffcfc' }}>ゴミ箱へ削除</button>
             </div>
           )}
+
           {selectedEdge && (
             <div style={{ position:'absolute', right:0, top:0, bottom:0, width:'320px', borderLeft:'1px solid #ddd', padding:'20px', backgroundColor:'#fff', zIndex:1000 }}>
-              <button onClick={() => setSelectedEdge(null)} style={{ float: 'right' }}>×</button>
-              <h3>線デザイン</h3>
-              <button onClick={() => updateEdgeDesign({ arrow: true })}>片矢印</button>
-              <button onClick={() => updateEdgeDesign({ both: true })}>両矢印</button>
-              <button onClick={() => setEdges(eds => eds.filter(e => e.id !== selectedEdge.id))}>削除</button>
+              <button onClick={() => setSelectedEdge(null)} style={{ float: 'right', border: 'none', background: 'none', fontSize: '20px', cursor: 'pointer' }}>×</button>
+              <h3>線のデザイン</h3>
+              
+              <label style={{fontSize:'11px', fontWeight: 'bold'}}>太さ</label>
+              <div style={{ display:'flex', gap:'5px', marginBottom:'20px', marginTop: '5px' }}>
+                {[2, 6, 12].map(w => <button key={w} onClick={() => setEdges(eds => eds.map(e => e.id === selectedEdge.id ? { ...e, style: { ...e.style, strokeWidth: w } } : e))} style={{flex:1, padding:'10px', cursor: 'pointer', border: '1px solid #ccc', borderRadius: '4px', background: selectedEdge.style?.strokeWidth === w ? '#ddd' : '#fff'}}>{w === 2 ? '細' : w === 6 ? '中' : '太'}</button>)}
+              </div>
+              
+              <label style={{fontSize:'11px', fontWeight: 'bold'}}>種類 (7種)</label>
+              <div style={{ display:'flex', flexDirection:'column', gap:'8px', marginTop: '5px' }}>
+                {[{l:'普通',c:{}},{l:'片矢印 (→)',c:{arrow:true}},{l:'二重片矢印 (⇒)',c:{double:true,arrow:true}},{l:'両矢印 (↔)',c:{both:true}},{l:'二重両矢印 (⇔)',c:{double:true,both:true}},{l:'論理和 (∧)',c:{label:'∧'}},{l:'論理積 (∨)',c:{label:'∨'}}].map(item => (
+                  <button key={item.l} onClick={() => updateEdgeDesign(item.c)} style={{padding:'10px', border: '1px solid #ccc', background: '#f9f9f9', cursor: 'pointer', borderRadius: '4px', textAlign: 'left', fontWeight: 'bold'}}>{item.l}</button>
+                ))}
+              </div>
+              <button onClick={() => { setEdges(eds => eds.filter(e => e.id !== selectedEdge.id)); setSelectedEdge(null); }} style={{ width:'100%', marginTop:'30px', color: 'red', border: '1px solid red', background: '#fffcfc', padding: '10px', cursor: 'pointer', fontWeight: 'bold', borderRadius: '8px' }}>線を削除</button>
             </div>
           )}
         </div>
-        <div style={{ padding: '15px', backgroundColor: '#fff', borderTop: '1px solid #eee', display: 'flex', justifyContent: 'center', gap: '15px', zIndex: 1001 }}>
-          <button onClick={goBack} disabled={isRoot}>← 1つ前</button>
-          <button onClick={goTop} disabled={isRoot}>TOP層へ</button>
-          <button onClick={() => setViewport({ x: 0, y: 0, zoom: 1 }, { duration: 800 })}>中央</button>
-          <button onClick={() => addNode('text')}>＋ テキスト</button>
-          <button onClick={() => addNode('image')}>📷 画像</button>
-          <button onClick={() => addNode('shape')}>square 図形</button>
-          <input type="color" value={levelData[currentLevel]?.bgColor || '#ffffff'} onChange={(e) => setLevelData(prev => ({ ...prev, [currentLevel]: { ...(prev[currentLevel] || {}), bgColor: e.target.value } }))} />
+
+        {/* 豪華になった下部メニューバー */}
+        <div style={{ padding: '15px', backgroundColor: 'rgba(255,255,255,0.95)', borderTop: '1px solid #eee', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '10px', zIndex: 1001, boxShadow: '0 -4px 10px rgba(0,0,0,0.03)' }}>
+          <button onClick={goBack} disabled={isRoot} style={{ ...actionBtnStyle, opacity: isRoot ? 0.4 : 1, cursor: isRoot ? 'default' : 'pointer' }}>🔙 1つ前へ</button>
+          <button onClick={goTop} disabled={isRoot} style={{ ...actionBtnStyle, opacity: isRoot ? 0.4 : 1, cursor: isRoot ? 'default' : 'pointer' }}>🏠 TOP層へ</button>
+          
+          <div style={{ width: '1px', height: '30px', backgroundColor: '#ddd', margin: '0 5px' }} />
+          
+          <button onClick={() => setViewport({ x: 0, y: 0, zoom: 1 }, { duration: 800 })} style={actionBtnStyle}>🎯 中央リセット</button>
+          <button onClick={() => addNode('text')} style={primaryBtnStyle}>📝 テキスト</button>
+          <button onClick={() => addNode('image')} style={{ ...primaryBtnStyle, backgroundColor: '#10b981', boxShadow: '0 4px 6px rgba(16, 185, 129, 0.3)' }}>📸 画像</button>
+          <button onClick={() => addNode('shape')} style={{ ...primaryBtnStyle, backgroundColor: '#f59e0b', boxShadow: '0 4px 6px rgba(245, 158, 11, 0.3)' }}>🟦 図形</button>
+          
+          <div style={{ width: '1px', height: '30px', backgroundColor: '#ddd', margin: '0 5px' }} />
+          
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', fontWeight: 'bold', color: '#555', backgroundColor: '#fff', padding: '6px 12px', borderRadius: '8px', border: '1px solid #ccc' }}>
+            <span>🎨 階層の背景色</span>
+            <input type="color" value={levelData[currentLevel]?.bgColor || '#ffffff'} onChange={(e) => {
+              const newColor = e.target.value;
+              setLevelData(prev => ({ ...prev, [currentLevel]: { ...(prev[currentLevel] || {}), bgColor: newColor } }));
+            }} style={{width:'24px', height:'24px', cursor:'pointer', border: 'none', padding: 0, borderRadius: '4px'}} />
+          </div>
         </div>
       </div>
     </div>
