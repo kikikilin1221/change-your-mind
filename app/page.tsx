@@ -58,6 +58,68 @@ function SmartGuides({ guides }: { guides: { lineX?: number, lineY?: number } })
   );
 }
 
+// --- カスタムMarkdownレンダラー（部分編集用） ---
+const MarkdownComponents: any = {
+  a: ({node, href, children, ...props}: any) => {
+    if (href?.startsWith('#style:')) {
+      const styles = href.replace('#style:', '').split(';');
+      let styleObj: any = {};
+      styles.forEach((s: string) => {
+        const [k, v] = s.split('=');
+        if (k==='color') styleObj.color = v;
+        if (k==='size') styleObj.fontSize = v;
+        if (k==='bold') styleObj.fontWeight = v === 'true' ? 'bold' : 'normal';
+        if (k==='font') styleObj.fontFamily = v;
+        if (k==='double') styleObj.textDecoration = v === 'true' ? 'line-through double' : 'none';
+      });
+      return <span style={styleObj}>{children}</span>;
+    }
+    return <a href={href} {...props}>{children}</a>;
+  }
+};
+
+// --- 部分編集ロジック ---
+const applyStyleToText = (text: string, newStyleKey: string, newStyleValue: string) => {
+  const regex = /\[(.*?)\]\(#style:([^)]+)\)/g;
+  let lastIndex = 0;
+  let result = '';
+  let match;
+  if (!text.includes('](#style:')) {
+      if (newStyleValue === 'false') return text;
+      return `[${text}](#style:${newStyleKey}=${newStyleValue})`;
+  }
+  while ((match = regex.exec(text)) !== null) {
+      if (match.index > lastIndex) {
+          let unstyled = text.substring(lastIndex, match.index);
+          result += newStyleValue === 'false' ? unstyled : `[${unstyled}](#style:${newStyleKey}=${newStyleValue})`;
+      }
+      let innerText = match[1];
+      let existingStyles = match[2];
+      let styleMap = new Map();
+      existingStyles.split(';').forEach((s: string) => {
+          let [k,v] = s.split('=');
+          if (k && v) styleMap.set(k,v);
+      });
+      if (newStyleValue === 'false') {
+          styleMap.delete(newStyleKey);
+      } else {
+          styleMap.set(newStyleKey, newStyleValue);
+      }
+      if (styleMap.size === 0) {
+          result += innerText;
+      } else {
+          let merged = Array.from(styleMap.entries()).map(([k,v]) => `${k}=${v}`).join(';');
+          result += `[${innerText}](#style:${merged})`;
+      }
+      lastIndex = regex.lastIndex;
+  }
+  if (lastIndex < text.length) {
+      let unstyled = text.substring(lastIndex);
+      result += newStyleValue === 'false' ? unstyled : `[${unstyled}](#style:${newStyleKey}=${newStyleValue})`;
+  }
+  return result;
+};
+
 const edgeTypes = { default: DoubleEdge };
 const PASTEL_COLORS = ['#FFB7B2', '#FFDAC1', '#E2F0CB', '#B5EAD7', '#C7CEEA', '#F3E5F5', '#E1F5FE', '#FFF9C4', '#FCE4EC', '#E8F5E9'];
 const QUICK_TEXT_COLORS = ['#000000', '#FF0000', '#008000', '#0000FF', '#FFF000'];
@@ -82,10 +144,12 @@ function FlowEditor() {
   const [guides, setGuides] = useState<{ lineX?: number, lineY?: number }>({});
   
   const previewDragRef = useRef<{ id: string, startX: number, startY: number, initX: number, initY: number, moved: boolean } | null>(null);
+  
+  // 選択範囲の追跡用
+  const [selection, setSelection] = useState({start: 0, end: 0});
 
   const selectedNode = useMemo(() => nodes.find(n => n.id === selectedNodeId) || null, [nodes, selectedNodeId]);
 
-  // 初回ロード
   useEffect(() => {
     const saved = localStorage.getItem('my-logic-files');
     if (saved) {
@@ -99,7 +163,10 @@ function FlowEditor() {
     }
   }, []);
 
-  // 常にデータを最新に保つ完全オートセーブ
+  useEffect(() => {
+    setLevelData(prev => ({ ...prev, [currentLevel]: { ...(prev[currentLevel] || {}), nodes, edges } }));
+  }, [nodes, edges, currentLevel]);
+
   useEffect(() => {
     if (!activeFileId) return;
     setFiles(prev => {
@@ -126,7 +193,6 @@ function FlowEditor() {
     setHistory([]); setSelectedNodeId(null);
   };
 
-  // ノート切り替え時のデータ消失を完全防止する安全な切り替え処理
   const switchFile = (newId: string) => {
     setFiles(prev => {
       const updated = { ...prev };
@@ -170,43 +236,72 @@ function FlowEditor() {
     setNodes(nds => nds.map(n => n.id === selectedNodeId ? { ...n, data: { ...(n.data || {}), ...newData }, style: { ...(n.style || {}), ...newStyle } } : n));
   }, [selectedNodeId]);
 
-  // ★ 部分編集（装飾）をリセットする関数 ★
-  const stripPartialFormats = (content: string) => {
-    let clean = String(content);
-    clean = clean.replace(/\*\*(.*?)\*\*/g, '$1'); // 太字リセット
-    clean = clean.replace(/\$\\textcolor\{[^}]+\}\{\\text\{(.*?)\}\}\$/g, '$1'); // 色リセット
-    clean = clean.replace(/\$\\Large \\text\{(.*?)\}\$/g, '$1'); // サイズリセット
-    return clean;
-  };
-
-  // 全体スタイル変更時は、部分編集をリセットして上書きする
-  const updateGlobalStyle = (newStyle: any) => {
+  // --- 全体と部分の統合フォーマットロジック ---
+  const applyPartialFormat = (styleKey: string, styleValue: string, isToggle: boolean = false) => {
     if (!selectedNode) return;
-    const cleanContent = stripPartialFormats(String(selectedNode.data?.content || ''));
-    updateNode({ content: cleanContent }, newStyle);
+    const text = String(selectedNode.data?.content || '');
+    const start = selection.start;
+    const end = selection.end;
+    if (start === end) return;
+
+    const selectedText = text.substring(start, end);
+    let finalValue = styleValue;
+    if (isToggle) {
+        if (selectedText.includes(`${styleKey}=true`)) finalValue = 'false';
+        else finalValue = 'true';
+    }
+
+    const newSelectedText = applyStyleToText(selectedText, styleKey, finalValue);
+    const newContent = text.substring(0, start) + newSelectedText + text.substring(end);
+
+    updateNode({ content: newContent });
+    
+    // カーソルと選択範囲を復元
+    setTimeout(() => {
+        const ta = document.getElementById('node-textarea') as HTMLTextAreaElement;
+        if (ta) {
+            ta.focus();
+            ta.setSelectionRange(start, start + newSelectedText.length);
+            setSelection({start, end: start + newSelectedText.length});
+        }
+    }, 10);
   };
 
-  // ★ 部分編集（選択文字のみ変更）★
-  const applyPartialFormat = (type: string) => {
-    const ta = document.getElementById('node-textarea') as HTMLTextAreaElement;
-    if (!ta || !selectedNode) return;
-    const start = ta.selectionStart;
-    const end = ta.selectionEnd;
-    if (start === end) { alert('文字を選択してからボタンを押してください！'); return; }
+  const updateGlobalStyle = (globalKey: string, globalValue: any, partialKey: string) => {
+    if (!selectedNode) return;
+    let newStyle = { [globalKey]: globalValue };
+    let currentContent = String(selectedNode.data?.content || '');
     
-    const text = String(selectedNode.data?.content || '');
-    const selectedText = text.substring(start, end);
-    if (selectedText.includes('\n')) { alert('改行を含まない範囲を選択してください。'); return; }
+    // 全体編集時に、同じプロパティの部分編集を剥がす（カスケード）
+    if (partialKey) {
+        let newContent = currentContent.replace(/\[(.*?)\]\(#style:([^)]+)\)/g, (match, innerText, stylesStr) => {
+            let styleMap = new Map();
+            stylesStr.split(';').forEach((s: string) => {
+                let [k,v] = s.split('=');
+                if (k && v && k !== partialKey) styleMap.set(k,v);
+            });
+            if (styleMap.size === 0) return innerText;
+            let merged = Array.from(styleMap.entries()).map(([k,v]) => `${k}=${v}`).join(';');
+            return `[${innerText}](#style:${merged})`;
+        });
+        updateNode({ content: newContent }, newStyle);
+    } else {
+        updateNode({}, newStyle);
+    }
+  };
 
-    let wrapped = selectedText;
-    if (type === 'bold') wrapped = `**${selectedText}**`;
-    if (type === 'red') wrapped = `$\\textcolor{#ef4444}{\\text{${selectedText}}}$`;
-    if (type === 'blue') wrapped = `$\\textcolor{#3b82f6}{\\text{${selectedText}}}$`;
-    if (type === 'large') wrapped = `$\\Large \\text{${selectedText}}$`;
-
-    const newContent = text.substring(0, start) + wrapped + text.substring(end);
-    updateNode({ content: newContent });
-    setTimeout(() => { ta.focus(); ta.setSelectionRange(start, start + wrapped.length); }, 0);
+  const handleFormat = (globalKey: string, partialKey: string, val1: any, isToggle: boolean = false) => {
+    const hasSelection = selection.start !== selection.end;
+    if (hasSelection) {
+        applyPartialFormat(partialKey, val1, isToggle);
+    } else {
+        let finalVal = val1;
+        if (isToggle) {
+            if (globalKey === 'fontWeight') finalVal = selectedNode?.style?.fontWeight === 'bold' ? 'normal' : 'bold';
+            if (globalKey === 'textDecoration') finalVal = selectedNode?.style?.textDecoration?.includes('double') ? 'none' : 'line-through double';
+        }
+        updateGlobalStyle(globalKey, finalVal, partialKey);
+    }
   };
 
   const enterLevel = useCallback((id: string, label: string) => {
@@ -384,12 +479,12 @@ function FlowEditor() {
                 <div style={{ width: '100%', height: '100%', overflow: 'hidden', position: 'relative', borderRadius: n.style?.borderRadius || 0 }}>
                   <img src={n.data.imageUrl as string} style={{ position: 'absolute', width: 'auto', height: 'auto', minWidth: '100%', minHeight: '100%', transform: `translate(${n.data.imgPosX || 0}px, ${n.data.imgPosY || 0}px) scale(${n.data.imgZoom || 1})`, transformOrigin: 'center center', pointerEvents: 'none' }} alt="img" />
                   <div className="markdown-content" style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: n.style?.alignItems || 'center', justifyContent: n.style?.justifyContent || 'center', pointerEvents: 'none', color: n.style?.color || '#000', fontWeight: n.style?.fontWeight || 'normal', textDecoration: n.style?.textDecoration || 'none', fontFamily: n.style?.fontFamily || 'sans-serif', whiteSpace: 'pre-wrap', lineHeight: '1.2' }}>
-                    <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>{String(n.data?.content || '').replace(/\n/g, '  \n')}</ReactMarkdown>
+                    <ReactMarkdown components={MarkdownComponents} remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>{String(n.data?.content || '').replace(/\n/g, '  \n')}</ReactMarkdown>
                   </div>
                 </div>
               ) : n.id !== 'center-mark' ? (
                 <div className="markdown-content" style={{ pointerEvents: 'none', width: '100%', color: n.style?.color || '#000', fontWeight: n.style?.fontWeight || 'normal', textDecoration: n.style?.textDecoration || 'none', fontFamily: n.style?.fontFamily || 'sans-serif', whiteSpace: 'pre-wrap', lineHeight: '1.2', textAlign: n.style?.textAlign || 'center' }}>
-                  <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>{String(n.data?.content || '').replace(/\n/g, '  \n')}</ReactMarkdown>
+                  <ReactMarkdown components={MarkdownComponents} remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>{String(n.data?.content || '').replace(/\n/g, '  \n')}</ReactMarkdown>
                 </div>
               ) : null}
 
@@ -420,10 +515,23 @@ function FlowEditor() {
 
   return (
     <div style={{ width: '100vw', height: '100vh', display: 'flex', flexDirection: 'row', overflow: 'hidden' }}>
+      {/* 🌟 接続の黒い点を巨大化して押しやすくするCSS */}
       <style>{`
         .markdown-content p { margin: 0; }
-        .react-flow__handle { width: 20px !important; height: 20px !important; background: #333 !important; border: 3px solid #fff !important; transition: transform 0.2s, background 0.2s !important; }
-        .react-flow__handle:hover { transform: scale(1.5) !important; background: #3b82f6 !important; }
+        .react-flow__handle {
+            width: 24px !important;
+            height: 24px !important;
+            background: #333 !important;
+            border: 4px solid #fff !important;
+            transition: all 0.2s cubic-bezier(0.34, 1.56, 0.64, 1) !important;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.2) !important;
+            cursor: crosshair !important;
+        }
+        .react-flow__handle:hover {
+            transform: scale(1.6) !important;
+            background: #3b82f6 !important;
+            border-color: #fff !important;
+        }
       `}</style>
       <input type="file" ref={fileInputRef} style={{ display: 'none' }} onChange={handleFileChange} accept="image/*" />
       
@@ -483,25 +591,40 @@ function FlowEditor() {
               )}
 
               <label style={{fontSize: '11px', fontWeight: 'bold'}}>文字内容</label>
-              <textarea id="node-textarea" value={String(selectedNode.data?.content || '')} onChange={(e) => updateNode({ content: e.target.value })} style={{ width:'100%', height:'80px', marginBottom: '5px', padding: '8px', border: '1px solid #ddd', borderRadius: '4px' }} />
+              <textarea 
+                id="node-textarea" 
+                value={String(selectedNode.data?.content || '')} 
+                onChange={(e) => updateNode({ content: e.target.value })} 
+                onSelect={(e) => setSelection({start: e.currentTarget.selectionStart, end: e.currentTarget.selectionEnd})}
+                onClick={(e) => setSelection({start: e.currentTarget.selectionStart, end: e.currentTarget.selectionEnd})}
+                onKeyUp={(e) => setSelection({start: e.currentTarget.selectionStart, end: e.currentTarget.selectionEnd})}
+                style={{ width:'100%', height:'80px', marginBottom: '5px', padding: '8px', border: '1px solid #ddd', borderRadius: '4px' }} 
+              />
               
-              <label style={{fontSize: '10px', color: '#666', fontWeight: 'bold'}}>部分編集 (選択した文字のみ)</label>
-              <div style={{ display:'flex', gap:'5px', marginBottom:'15px', marginTop: '5px' }}>
-                <button onClick={() => applyPartialFormat('bold')} style={{flex:1, cursor:'pointer', border:'1px solid #ccc', padding: '5px', borderRadius: '4px', fontWeight: 'bold'}}>太字</button>
-                <button onClick={() => applyPartialFormat('red')} style={{flex:1, cursor:'pointer', border:'1px solid #ccc', padding: '5px', borderRadius: '4px', color: 'red', fontWeight: 'bold'}}>赤</button>
-                <button onClick={() => applyPartialFormat('blue')} style={{flex:1, cursor:'pointer', border:'1px solid #ccc', padding: '5px', borderRadius: '4px', color: 'blue', fontWeight: 'bold'}}>青</button>
-                <button onClick={() => applyPartialFormat('large')} style={{flex:1, cursor:'pointer', border:'1px solid #ccc', padding: '5px', borderRadius: '4px', fontWeight: 'bold'}}>大きく</button>
-              </div>
-
-              <label style={{fontSize: '10px', color: '#666', fontWeight: 'bold'}}>全体編集 (※部分編集を上書きします)</label>
+              <label style={{fontSize: '10px', color: '#666', fontWeight: 'bold'}}>テキスト編集 (※文字選択で部分編集になります)</label>
+              
               <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'5px', marginBottom:'5px', marginTop: '5px' }}>
-                <button onClick={() => updateGlobalStyle({ fontFamily: 'serif' })} style={{cursor:'pointer', border:'1px solid #ccc', padding: '5px', borderRadius: '4px'}}>明朝</button>
-                <button onClick={() => updateGlobalStyle({ fontFamily: 'sans-serif' })} style={{cursor:'pointer', border:'1px solid #ccc', padding: '5px', borderRadius: '4px'}}>ゴシック</button>
-                <button onClick={() => updateGlobalStyle({ fontWeight: selectedNode.style?.fontWeight === 'bold' ? 'normal' : 'bold' })} style={{ cursor:'pointer', border:'1px solid #ccc', padding: '5px', borderRadius: '4px', background: selectedNode.style?.fontWeight === 'bold' ? '#ddd' : '#f0f0f0' }}>太字</button>
-                <button onClick={() => updateGlobalStyle({ textDecoration: selectedNode.style?.textDecoration?.includes('double') ? 'none' : 'line-through double' })} style={{ cursor:'pointer', border:'1px solid #ccc', padding: '5px', borderRadius: '4px', background: selectedNode.style?.textDecoration?.includes('double') ? '#ddd' : '#f0f0f0' }}>二重線</button>
+                <button onClick={() => handleFormat('fontFamily', 'font', 'serif')} style={{cursor:'pointer', border:'1px solid #ccc', padding: '5px', borderRadius: '4px'}}>明朝</button>
+                <button onClick={() => handleFormat('fontFamily', 'font', 'sans-serif')} style={{cursor:'pointer', border:'1px solid #ccc', padding: '5px', borderRadius: '4px'}}>ゴシック</button>
+                <button onClick={() => handleFormat('fontWeight', 'bold', 'true', true)} style={{ cursor:'pointer', border:'1px solid #ccc', padding: '5px', borderRadius: '4px', background: selectedNode.style?.fontWeight === 'bold' ? '#ddd' : '#f0f0f0' }}>太字</button>
+                <button onClick={() => handleFormat('textDecoration', 'double', 'true', true)} style={{ cursor:'pointer', border:'1px solid #ccc', padding: '5px', borderRadius: '4px', background: selectedNode.style?.textDecoration?.includes('double') ? '#ddd' : '#f0f0f0' }}>二重線</button>
               </div>
 
-              <div style={{ display:'flex', gap:'5px', marginBottom:'5px' }}>
+              <div style={{ display: 'flex', gap: '5px', marginTop: '5px', marginBottom: '15px' }}>
+                {QUICK_TEXT_COLORS.map(c => <button key={c} onClick={() => handleFormat('color', 'color', c)} style={{ width:'30px', height:'30px', backgroundColor:c, border: '1px solid #ddd', borderRadius: '4px', cursor: 'pointer' }} />)}
+                <input type="color" value={String(selectedNode.style?.color || '#000000')} onChange={(e) => handleFormat('color', 'color', e.target.value)} style={{width:'30px', height:'30px', cursor: 'pointer', border: 'none', padding: 0}} />
+              </div>
+
+              <label style={{fontSize:'11px', fontWeight: 'bold'}}>文字サイズ (px)</label>
+              <div style={{display:'flex', alignItems:'center', gap:'10px', marginBottom: '10px'}}>
+                <input type="range" min="10" max="250" value={parseInt(String(selectedNode.style?.fontSize || 18))} onChange={(e) => handleFormat('fontSize', 'size', `${e.target.value}px`)} style={{flex:1}} />
+                <input type="number" min="10" max="250" value={parseInt(String(selectedNode.style?.fontSize || 18))} onChange={(e) => handleFormat('fontSize', 'size', `${e.target.value}px`)} style={{width:'60px', padding:'4px', border:'1px solid #ccc', borderRadius:'4px'}} />
+              </div>
+
+              <hr style={{margin: '15px 0', border: 'none', borderTop: '1px solid #eee'}} />
+              <label style={{fontSize: '10px', color: '#666', fontWeight: 'bold'}}>レイアウト (全体のみ)</label>
+
+              <div style={{ display:'flex', gap:'5px', marginBottom:'5px', marginTop: '5px' }}>
                 <button onClick={() => updateNode({}, { justifyContent: 'flex-start', textAlign: 'left' })} style={{flex:1, cursor:'pointer', border:'1px solid #ccc', padding: '5px', borderRadius: '4px'}}>左</button>
                 <button onClick={() => updateNode({}, { justifyContent: 'center', textAlign: 'center' })} style={{flex:1, cursor:'pointer', border:'1px solid #ccc', padding: '5px', borderRadius: '4px'}}>中央</button>
                 <button onClick={() => updateNode({}, { justifyContent: 'flex-end', textAlign: 'right' })} style={{flex:1, cursor:'pointer', border:'1px solid #ccc', padding: '5px', borderRadius: '4px'}}>右</button>
@@ -512,19 +635,8 @@ function FlowEditor() {
                 <button onClick={() => updateNode({}, { alignItems: 'flex-end' })} style={{flex:1, cursor:'pointer', border:'1px solid #ccc', padding: '5px', borderRadius: '4px'}}>下</button>
               </div>
 
-              <label style={{fontSize:'11px', fontWeight: 'bold'}}>文字サイズ (px)</label>
-              <div style={{display:'flex', alignItems:'center', gap:'10px', marginBottom: '10px'}}>
-                <input type="range" min="10" max="250" value={parseInt(String(selectedNode.style?.fontSize || 18))} onChange={(e) => updateGlobalStyle({ fontSize: `${e.target.value}px` })} style={{flex:1}} />
-                <input type="number" min="10" max="250" value={parseInt(String(selectedNode.style?.fontSize || 18))} onChange={(e) => updateGlobalStyle({ fontSize: `${e.target.value}px` })} style={{width:'60px', padding:'4px', border:'1px solid #ccc', borderRadius:'4px'}} />
-              </div>
               <label style={{fontSize:'11px', fontWeight: 'bold'}}>全体の透明度</label>
               <input type="range" min="0.1" max="1" step="0.1" value={Number(selectedNode.style?.opacity ?? 1)} onChange={(e) => updateNode({}, { opacity: parseFloat(e.target.value) })} style={{width:'100%', marginBottom:'15px'}} />
-
-              <label style={{fontSize:'11px', fontWeight: 'bold'}}>文字色</label>
-              <div style={{ display: 'flex', gap: '5px', marginTop: '5px', marginBottom: '10px' }}>
-                {QUICK_TEXT_COLORS.map(c => <button key={c} onClick={() => updateGlobalStyle({ color: c })} style={{ width:'30px', height:'30px', backgroundColor:c, border: '1px solid #ddd', borderRadius: '4px', cursor: 'pointer' }} />)}
-                <input type="color" value={String(selectedNode.style?.color || '#000000')} onChange={(e) => updateGlobalStyle({ color: e.target.value })} style={{width:'30px', height:'30px', cursor: 'pointer', border: 'none', padding: 0}} />
-              </div>
 
               <label style={{fontSize:'11px', fontWeight: 'bold'}}>背景色</label>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: '5px', marginTop: '5px', marginBottom: '15px' }}>
