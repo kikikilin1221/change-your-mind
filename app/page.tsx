@@ -78,7 +78,6 @@ const MarkdownComponents: any = {
   }
 };
 
-// --- 部分編集ロジック ---
 const applyStyleToText = (text: string, newStyleKey: string, newStyleValue: string) => {
   const regex = /\[(.*?)\]\(#style:([^)]+)\)/g;
   let lastIndex = 0;
@@ -144,8 +143,9 @@ function FlowEditor() {
   const [guides, setGuides] = useState<{ lineX?: number, lineY?: number }>({});
   
   const previewDragRef = useRef<{ id: string, startX: number, startY: number, initX: number, initY: number, moved: boolean } | null>(null);
+  // ★ 画像トリミング（パン）用のRef ★
+  const imageCropDragRef = useRef<{ id: string, startX: number, startY: number, initX: number, initY: number } | null>(null);
   
-  // 選択範囲の追跡用
   const [selection, setSelection] = useState({start: 0, end: 0});
 
   const selectedNode = useMemo(() => nodes.find(n => n.id === selectedNodeId) || null, [nodes, selectedNodeId]);
@@ -236,7 +236,6 @@ function FlowEditor() {
     setNodes(nds => nds.map(n => n.id === selectedNodeId ? { ...n, data: { ...(n.data || {}), ...newData }, style: { ...(n.style || {}), ...newStyle } } : n));
   }, [selectedNodeId]);
 
-  // --- 全体と部分の統合フォーマットロジック ---
   const applyPartialFormat = (styleKey: string, styleValue: string, isToggle: boolean = false) => {
     if (!selectedNode) return;
     const text = String(selectedNode.data?.content || '');
@@ -256,7 +255,6 @@ function FlowEditor() {
 
     updateNode({ content: newContent });
     
-    // カーソルと選択範囲を復元
     setTimeout(() => {
         const ta = document.getElementById('node-textarea') as HTMLTextAreaElement;
         if (ta) {
@@ -272,7 +270,6 @@ function FlowEditor() {
     let newStyle = { [globalKey]: globalValue };
     let currentContent = String(selectedNode.data?.content || '');
     
-    // 全体編集時に、同じプロパティの部分編集を剥がす（カスケード）
     if (partialKey) {
         let newContent = currentContent.replace(/\[(.*?)\]\(#style:([^)]+)\)/g, (match, innerText, stylesStr) => {
             let styleMap = new Map();
@@ -356,11 +353,14 @@ function FlowEditor() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [addNode]);
 
+  // ★ ドラッグイベントの監視（吹き出し ＆ 画像トリミング） ★
   useEffect(() => {
     const onMouseMove = (e: MouseEvent) => {
+      const zoom = getZoom();
+      
+      // 吹き出しドラッグ
       const drag = previewDragRef.current;
       if (drag) {
-        const zoom = getZoom();
         const dx = (e.clientX - drag.startX) / zoom;
         const dy = (e.clientY - drag.startY) / zoom;
         if (Math.abs(dx) > 3 || Math.abs(dy) > 3) drag.moved = true;
@@ -368,8 +368,23 @@ function FlowEditor() {
           ...n, data: { ...(n.data || {}), previewStyle: { ...(n.data?.previewStyle || {}), offsetX: drag.initX + dx, offsetY: drag.initY + dy } }
         } : n));
       }
+
+      // 画像トリミングドラッグ
+      const imgDrag = imageCropDragRef.current;
+      if (imgDrag) {
+        const dx = (e.clientX - imgDrag.startX) / zoom;
+        const dy = (e.clientY - imgDrag.startY) / zoom;
+        setNodes(nds => nds.map(n => n.id === imgDrag.id ? {
+          ...n, data: { ...(n.data || {}), imgPosX: imgDrag.initX + dx, imgPosY: imgDrag.initY + dy }
+        } : n));
+      }
     };
-    const onMouseUp = () => { setTimeout(() => { previewDragRef.current = null; }, 50); };
+    
+    const onMouseUp = () => { 
+      setTimeout(() => { previewDragRef.current = null; }, 50); 
+      imageCropDragRef.current = null;
+    };
+    
     window.addEventListener('mousemove', onMouseMove);
     window.addEventListener('mouseup', onMouseUp);
     return () => { window.removeEventListener('mousemove', onMouseMove); window.removeEventListener('mouseup', onMouseUp); };
@@ -384,7 +399,7 @@ function FlowEditor() {
           const maxZ = Math.max(0, ...nds.map(n => Number(n.zIndex) || 0));
           return [...nds, { 
             id: `img-${Date.now()}`, position: { x: 50, y: 50 }, zIndex: maxZ + 1,
-            data: { isImage: true, imageUrl: ev.target?.result, imgPosX: 0, imgPosY: 0, imgZoom: 1 }, 
+            data: { isImage: true, imageUrl: ev.target?.result, imgPosX: 0, imgPosY: 0, imgZoom: 1, isCropping: false }, 
             style: { width: 300, height: 200, background: '#fff', padding: 0, border: '1px solid #ccc' } 
           }];
         });
@@ -476,8 +491,24 @@ function FlowEditor() {
               {previewElement}
               
               {n.data?.isImage ? (
-                <div style={{ width: '100%', height: '100%', overflow: 'hidden', position: 'relative', borderRadius: n.style?.borderRadius || 0 }}>
+                // ★ 画像描画部分（トリミングロジック） ★
+                <div 
+                  className={n.data?.isCropping ? "nodrag" : ""}
+                  onMouseDown={(e) => {
+                     if (n.data?.isCropping) {
+                        e.stopPropagation();
+                        imageCropDragRef.current = { id: n.id, startX: e.clientX, startY: e.clientY, initX: Number(n.data?.imgPosX || 0), initY: Number(n.data?.imgPosY || 0) };
+                     }
+                  }}
+                  style={{ width: '100%', height: '100%', overflow: 'hidden', position: 'relative', borderRadius: n.style?.borderRadius || 0, cursor: n.data?.isCropping ? 'move' : 'default' }}
+                >
                   <img src={n.data.imageUrl as string} style={{ position: 'absolute', width: 'auto', height: 'auto', minWidth: '100%', minHeight: '100%', transform: `translate(${n.data.imgPosX || 0}px, ${n.data.imgPosY || 0}px) scale(${n.data.imgZoom || 1})`, transformOrigin: 'center center', pointerEvents: 'none' }} alt="img" />
+                  
+                  {/* トリミング中の赤いガイド枠 */}
+                  {n.data?.isCropping && (
+                    <div style={{ position: 'absolute', inset: 0, border: '3px dashed #ef4444', pointerEvents: 'none', zIndex: 10 }}></div>
+                  )}
+
                   <div className="markdown-content" style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: n.style?.alignItems || 'center', justifyContent: n.style?.justifyContent || 'center', pointerEvents: 'none', color: n.style?.color || '#000', fontWeight: n.style?.fontWeight || 'normal', textDecoration: n.style?.textDecoration || 'none', fontFamily: n.style?.fontFamily || 'sans-serif', whiteSpace: 'pre-wrap', lineHeight: '1.2' }}>
                     <ReactMarkdown components={MarkdownComponents} remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>{String(n.data?.content || '').replace(/\n/g, '  \n')}</ReactMarkdown>
                   </div>
@@ -509,15 +540,14 @@ function FlowEditor() {
 
   const isRoot = history.length === 0;
 
-  // ボタンデザイン
   const actionBtnStyle = { padding: '10px 16px', borderRadius: '8px', border: '1px solid #ccc', backgroundColor: '#fff', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '5px', boxShadow: '0 2px 4px rgba(0,0,0,0.05)', fontWeight: 'bold', fontSize: '14px', transition: 'all 0.2s' };
   const primaryBtnStyle = { ...actionBtnStyle, backgroundColor: '#3b82f6', color: '#fff', border: 'none', boxShadow: '0 4px 6px rgba(59, 130, 246, 0.3)' };
 
   return (
     <div style={{ width: '100vw', height: '100vh', display: 'flex', flexDirection: 'row', overflow: 'hidden' }}>
-      {/* 🌟 接続の黒い点を巨大化して押しやすくするCSS */}
       <style>{`
         .markdown-content p { margin: 0; }
+        /* 黒い点を大きくして吸着しやすくする魔法のCSS */
         .react-flow__handle {
             width: 24px !important;
             height: 24px !important;
@@ -535,7 +565,6 @@ function FlowEditor() {
       `}</style>
       <input type="file" ref={fileInputRef} style={{ display: 'none' }} onChange={handleFileChange} accept="image/*" />
       
-      {/* 左サイドバー */}
       <div style={{ width: isSidebarOpen ? '220px' : '0px', transition: 'width 0.3s ease', backgroundColor: '#f8f9fa', borderRight: isSidebarOpen ? '1px solid #ddd' : 'none', display: 'flex', flexDirection: 'column', overflow: 'hidden', zIndex: 10 }}>
         <div style={{ width: '220px', display: 'flex', flexDirection: 'column', height: '100%', padding: '15px' }}>
           <h2>ファイル一覧</h2>
@@ -574,10 +603,27 @@ function FlowEditor() {
 
               {selectedNode.data?.isImage && (
                 <div style={{ marginBottom: '20px', padding: '10px', border: '1px solid #eee', borderRadius: '8px' }}>
-                  <label style={{fontSize: '11px', fontWeight: 'bold'}}>画像のズーム / 位置調整</label>
-                  <input type="range" min="0.5" max="3" step="0.1" value={Number(selectedNode.data?.imgZoom || 1)} onChange={(e) => updateNode({ imgZoom: parseFloat(e.target.value) })} style={{width:'100%', marginBottom: '5px'}} />
-                  <input type="range" min="-600" max="600" value={Number(selectedNode.data?.imgPosX || 0)} onChange={(e) => updateNode({ imgPosX: parseInt(e.target.value) })} style={{width:'100%', marginBottom: '5px'}} />
-                  <input type="range" min="-600" max="600" value={Number(selectedNode.data?.imgPosY || 0)} onChange={(e) => updateNode({ imgPosY: parseInt(e.target.value) })} style={{width:'100%'}} />
+                  <button 
+                     onClick={() => updateNode({ isCropping: !selectedNode.data?.isCropping })} 
+                     style={{ width: '100%', padding: '10px', background: selectedNode.data?.isCropping ? '#ef4444' : '#fff', color: selectedNode.data?.isCropping ? '#fff' : '#333', border: '1px solid #ccc', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', transition: 'all 0.2s', marginBottom: '15px' }}
+                  >
+                     {selectedNode.data?.isCropping ? '✅ トリミングを完了' : '✂️ トリミング (直接ドラッグ)'}
+                  </button>
+
+                  {selectedNode.data?.isCropping ? (
+                     <div style={{ padding: '10px', backgroundColor: '#fef2f2', borderRadius: '6px', marginBottom: '10px' }}>
+                        <p style={{fontSize: '11px', color: '#b91c1c', margin: 0}}><strong>トリミングモード中</strong><br/>・青い枠を動かして切り取るサイズを変更<br/>・画像を直接ドラッグして位置を調整</p>
+                     </div>
+                  ) : (
+                     <>
+                        <label style={{fontSize: '11px', fontWeight: 'bold'}}>微調整 (X / Y位置)</label>
+                        <input type="range" min="-600" max="600" value={Number(selectedNode.data?.imgPosX || 0)} onChange={(e) => updateNode({ imgPosX: parseInt(e.target.value) })} style={{width:'100%', marginBottom: '5px'}} />
+                        <input type="range" min="-600" max="600" value={Number(selectedNode.data?.imgPosY || 0)} onChange={(e) => updateNode({ imgPosY: parseInt(e.target.value) })} style={{width:'100%', marginBottom: '10px'}} />
+                     </>
+                  )}
+
+                  <label style={{fontSize: '11px', fontWeight: 'bold'}}>ズーム倍率</label>
+                  <input type="range" min="0.5" max="3" step="0.1" value={Number(selectedNode.data?.imgZoom || 1)} onChange={(e) => updateNode({ imgZoom: parseFloat(e.target.value) })} style={{width:'100%'}} />
                 </div>
               )}
               
