@@ -99,51 +99,56 @@ function FlowEditor() {
     }
   }, []);
 
-  // 常に現在のレベルデータを同期
+  // 常にデータを最新に保つ完全オートセーブ
   useEffect(() => {
-    setLevelData(prev => ({ ...prev, [currentLevel]: { ...(prev[currentLevel] || {}), nodes, edges } }));
-  }, [nodes, edges, currentLevel]);
+    if (!activeFileId) return;
+    setFiles(prev => {
+      const currentFileData = prev[activeFileId];
+      if (!currentFileData) return prev;
+      const updatedLevelData = { ...levelData, [currentLevel]: { ...(levelData[currentLevel] || {}), nodes, edges } };
+      return { ...prev, [activeFileId]: { ...currentFileData, levelData: updatedLevelData, currentLevel, currentLabel } };
+    });
+  }, [nodes, edges, currentLevel, currentLabel, levelData, activeFileId]);
 
-  // 常にファイルデータを同期（完全オートセーブ）
   useEffect(() => {
-    if (!activeFileId || !files[activeFileId]) return;
-    const updated = { ...files, [activeFileId]: { ...(files[activeFileId] || {}), levelData: { ...(levelData || {}), [currentLevel]: { ...(levelData[currentLevel] || {}), nodes, edges } }, currentLevel, currentLabel } };
-    localStorage.setItem('my-logic-files', JSON.stringify(updated));
-    localStorage.setItem('my-logic-active-id', activeFileId);
-  }, [nodes, edges, currentLevel, currentLabel, levelData, activeFileId, files]);
+    if (Object.keys(files).length > 0) {
+      localStorage.setItem('my-logic-files', JSON.stringify(files));
+      localStorage.setItem('my-logic-active-id', activeFileId);
+    }
+  }, [files, activeFileId]);
 
   const loadFileInitial = (id: string, allFiles = files) => {
-    const t = allFiles[id]; if (!t) return;
-    const loadedLevelData = t.levelData || { root: { nodes: [], edges: [], bgColor: '#ffffff' } };
-    const initialLevel = t.currentLevel || 'root';
-    setActiveFileId(id); setLevelData(loadedLevelData); setCurrentLevel(initialLevel); setCurrentLabel(t.currentLabel || 'TOP層');
+    const target = allFiles[id]; if (!target) return;
+    const loadedLevelData = target.levelData || { root: { nodes: [], edges: [], bgColor: '#ffffff' } };
+    const initialLevel = target.currentLevel || 'root';
+    setActiveFileId(id); setLevelData(loadedLevelData); setCurrentLevel(initialLevel); setCurrentLabel(target.currentLabel || 'TOP層');
     setNodes(loadedLevelData[initialLevel]?.nodes || []); setEdges(loadedLevelData[initialLevel]?.edges || []);
     setHistory([]); setSelectedNodeId(null);
   };
 
-  // ★ データ消失を防ぐ、完璧なノート切り替えシステム ★
+  // ノート切り替え時のデータ消失を完全防止する安全な切り替え処理
   const switchFile = (newId: string) => {
-    setFiles(prevFiles => {
-      const updatedFiles = { ...prevFiles };
-      if (activeFileId && updatedFiles[activeFileId]) {
-        updatedFiles[activeFileId] = {
-          ...updatedFiles[activeFileId],
-          levelData: { ...levelData, [currentLevel]: { ...(levelData[currentLevel] || {}), nodes, edges } },
-          currentLevel, currentLabel
-        };
+    setFiles(prev => {
+      const updated = { ...prev };
+      if (activeFileId && updated[activeFileId]) {
+        updated[activeFileId] = { ...updated[activeFileId], levelData: { ...levelData, [currentLevel]: { ...(levelData[currentLevel] || {}), nodes, edges } }, currentLevel, currentLabel };
       }
-      const target = updatedFiles[newId];
-      if (target) {
-        setActiveFileId(newId);
-        localStorage.setItem('my-logic-active-id', newId);
-        const nextLevelData = target.levelData || { root: { nodes: [], edges: [], bgColor: '#ffffff' } };
-        const nextLevel = target.currentLevel || 'root';
-        setLevelData(nextLevelData); setCurrentLevel(nextLevel); setCurrentLabel(target.currentLabel || 'TOP層');
-        setNodes(nextLevelData[nextLevel]?.nodes || []); setEdges(nextLevelData[nextLevel]?.edges || []);
-        setHistory([]); setSelectedNodeId(null);
-      }
-      return updatedFiles;
+      return updated;
     });
+    setTimeout(() => {
+      setFiles(currentFiles => {
+        const target = currentFiles[newId];
+        if (target) {
+          setActiveFileId(newId);
+          const nextLevelData = target.levelData || { root: { nodes: [], edges: [], bgColor: '#ffffff' } };
+          const nextLevel = target.currentLevel || 'root';
+          setLevelData(nextLevelData); setCurrentLevel(nextLevel); setCurrentLabel(target.currentLabel || 'TOP層');
+          setNodes(nextLevelData[nextLevel]?.nodes || []); setEdges(nextLevelData[nextLevel]?.edges || []);
+          setSelectedNodeId(null); setSelectedEdge(null);
+        }
+        return currentFiles;
+      });
+    }, 0);
   };
 
   const createNewFile = () => {
@@ -164,6 +169,45 @@ function FlowEditor() {
   const updateNode = useCallback((newData: any, newStyle: any = {}) => {
     setNodes(nds => nds.map(n => n.id === selectedNodeId ? { ...n, data: { ...(n.data || {}), ...newData }, style: { ...(n.style || {}), ...newStyle } } : n));
   }, [selectedNodeId]);
+
+  // ★ 部分編集（装飾）をリセットする関数 ★
+  const stripPartialFormats = (content: string) => {
+    let clean = String(content);
+    clean = clean.replace(/\*\*(.*?)\*\*/g, '$1'); // 太字リセット
+    clean = clean.replace(/\$\\textcolor\{[^}]+\}\{\\text\{(.*?)\}\}\$/g, '$1'); // 色リセット
+    clean = clean.replace(/\$\\Large \\text\{(.*?)\}\$/g, '$1'); // サイズリセット
+    return clean;
+  };
+
+  // 全体スタイル変更時は、部分編集をリセットして上書きする
+  const updateGlobalStyle = (newStyle: any) => {
+    if (!selectedNode) return;
+    const cleanContent = stripPartialFormats(String(selectedNode.data?.content || ''));
+    updateNode({ content: cleanContent }, newStyle);
+  };
+
+  // ★ 部分編集（選択文字のみ変更）★
+  const applyPartialFormat = (type: string) => {
+    const ta = document.getElementById('node-textarea') as HTMLTextAreaElement;
+    if (!ta || !selectedNode) return;
+    const start = ta.selectionStart;
+    const end = ta.selectionEnd;
+    if (start === end) { alert('文字を選択してからボタンを押してください！'); return; }
+    
+    const text = String(selectedNode.data?.content || '');
+    const selectedText = text.substring(start, end);
+    if (selectedText.includes('\n')) { alert('改行を含まない範囲を選択してください。'); return; }
+
+    let wrapped = selectedText;
+    if (type === 'bold') wrapped = `**${selectedText}**`;
+    if (type === 'red') wrapped = `$\\textcolor{#ef4444}{\\text{${selectedText}}}$`;
+    if (type === 'blue') wrapped = `$\\textcolor{#3b82f6}{\\text{${selectedText}}}$`;
+    if (type === 'large') wrapped = `$\\Large \\text{${selectedText}}$`;
+
+    const newContent = text.substring(0, start) + wrapped + text.substring(end);
+    updateNode({ content: newContent });
+    setTimeout(() => { ta.focus(); ta.setSelectionRange(start, start + wrapped.length); }, 0);
+  };
 
   const enterLevel = useCallback((id: string, label: string) => {
     setNodes(nds => {
@@ -370,16 +414,20 @@ function FlowEditor() {
 
   const isRoot = history.length === 0;
 
-  // 豪華なボタン用スタイル
+  // ボタンデザイン
   const actionBtnStyle = { padding: '10px 16px', borderRadius: '8px', border: '1px solid #ccc', backgroundColor: '#fff', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '5px', boxShadow: '0 2px 4px rgba(0,0,0,0.05)', fontWeight: 'bold', fontSize: '14px', transition: 'all 0.2s' };
   const primaryBtnStyle = { ...actionBtnStyle, backgroundColor: '#3b82f6', color: '#fff', border: 'none', boxShadow: '0 4px 6px rgba(59, 130, 246, 0.3)' };
 
   return (
     <div style={{ width: '100vw', height: '100vh', display: 'flex', flexDirection: 'row', overflow: 'hidden' }}>
-      <style>{`.markdown-content p { margin: 0; }`}</style>
+      <style>{`
+        .markdown-content p { margin: 0; }
+        .react-flow__handle { width: 20px !important; height: 20px !important; background: #333 !important; border: 3px solid #fff !important; transition: transform 0.2s, background 0.2s !important; }
+        .react-flow__handle:hover { transform: scale(1.5) !important; background: #3b82f6 !important; }
+      `}</style>
       <input type="file" ref={fileInputRef} style={{ display: 'none' }} onChange={handleFileChange} accept="image/*" />
       
-      {/* 左サイドバー（開閉アニメーション付き） */}
+      {/* 左サイドバー */}
       <div style={{ width: isSidebarOpen ? '220px' : '0px', transition: 'width 0.3s ease', backgroundColor: '#f8f9fa', borderRight: isSidebarOpen ? '1px solid #ddd' : 'none', display: 'flex', flexDirection: 'column', overflow: 'hidden', zIndex: 10 }}>
         <div style={{ width: '220px', display: 'flex', flexDirection: 'column', height: '100%', padding: '15px' }}>
           <h2>ファイル一覧</h2>
@@ -395,12 +443,10 @@ function FlowEditor() {
       </div>
 
       <div style={{ flexGrow: 1, display: 'flex', flexDirection: 'column', backgroundColor: levelData[currentLevel]?.bgColor || '#ffffff', transition: 'background-color 0.3s' }}>
-        
-        {/* 上部ヘッダー（ハンバーガーボタン付き） */}
         <div style={{ padding: '10px 15px', backgroundColor: 'rgba(255,255,255,0.8)', borderBottom: '1px solid #eee', display: 'flex', alignItems: 'center', zIndex: 100 }}>
           <button onClick={() => setIsSidebarOpen(!isSidebarOpen)} style={{ background: 'none', border: 'none', fontSize: '24px', cursor: 'pointer', marginRight: '15px', padding: '0 5px' }}>☰</button>
           <div style={{ flex: 1, textAlign: 'center', fontWeight: 'bold', fontSize: '16px' }}>階層: {currentLabel}</div>
-          <div style={{ width: '40px' }}></div> {/* 中央寄せ用のスペーサー */}
+          <div style={{ width: '40px' }}></div>
         </div>
 
         <div style={{ flexGrow: 1, position: 'relative' }}>
@@ -436,15 +482,23 @@ function FlowEditor() {
                 </div>
               )}
 
-              {/* 画像にもテキスト入力可能にするため条件解除 */}
               <label style={{fontSize: '11px', fontWeight: 'bold'}}>文字内容</label>
-              <textarea value={String(selectedNode.data?.content || '')} onChange={(e) => updateNode({ content: e.target.value })} style={{ width:'100%', height:'80px', marginBottom: '10px', padding: '8px', border: '1px solid #ddd', borderRadius: '4px' }} />
+              <textarea id="node-textarea" value={String(selectedNode.data?.content || '')} onChange={(e) => updateNode({ content: e.target.value })} style={{ width:'100%', height:'80px', marginBottom: '5px', padding: '8px', border: '1px solid #ddd', borderRadius: '4px' }} />
               
-              <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'5px', marginBottom:'10px' }}>
-                <button onClick={() => updateNode({}, { fontFamily: 'serif' })} style={{cursor:'pointer', border:'1px solid #ccc', padding: '5px', borderRadius: '4px'}}>明朝</button>
-                <button onClick={() => updateNode({}, { fontFamily: 'sans-serif' })} style={{cursor:'pointer', border:'1px solid #ccc', padding: '5px', borderRadius: '4px'}}>ゴシック</button>
-                <button onClick={() => updateNode({}, { fontWeight: selectedNode.style?.fontWeight === 'bold' ? 'normal' : 'bold' })} style={{ cursor:'pointer', border:'1px solid #ccc', padding: '5px', borderRadius: '4px', background: selectedNode.style?.fontWeight === 'bold' ? '#ddd' : '#f0f0f0' }}>太字</button>
-                <button onClick={() => updateNode({}, { textDecoration: selectedNode.style?.textDecoration?.includes('double') ? 'none' : 'line-through double' })} style={{ cursor:'pointer', border:'1px solid #ccc', padding: '5px', borderRadius: '4px', background: selectedNode.style?.textDecoration?.includes('double') ? '#ddd' : '#f0f0f0' }}>二重線</button>
+              <label style={{fontSize: '10px', color: '#666', fontWeight: 'bold'}}>部分編集 (選択した文字のみ)</label>
+              <div style={{ display:'flex', gap:'5px', marginBottom:'15px', marginTop: '5px' }}>
+                <button onClick={() => applyPartialFormat('bold')} style={{flex:1, cursor:'pointer', border:'1px solid #ccc', padding: '5px', borderRadius: '4px', fontWeight: 'bold'}}>太字</button>
+                <button onClick={() => applyPartialFormat('red')} style={{flex:1, cursor:'pointer', border:'1px solid #ccc', padding: '5px', borderRadius: '4px', color: 'red', fontWeight: 'bold'}}>赤</button>
+                <button onClick={() => applyPartialFormat('blue')} style={{flex:1, cursor:'pointer', border:'1px solid #ccc', padding: '5px', borderRadius: '4px', color: 'blue', fontWeight: 'bold'}}>青</button>
+                <button onClick={() => applyPartialFormat('large')} style={{flex:1, cursor:'pointer', border:'1px solid #ccc', padding: '5px', borderRadius: '4px', fontWeight: 'bold'}}>大きく</button>
+              </div>
+
+              <label style={{fontSize: '10px', color: '#666', fontWeight: 'bold'}}>全体編集 (※部分編集を上書きします)</label>
+              <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'5px', marginBottom:'5px', marginTop: '5px' }}>
+                <button onClick={() => updateGlobalStyle({ fontFamily: 'serif' })} style={{cursor:'pointer', border:'1px solid #ccc', padding: '5px', borderRadius: '4px'}}>明朝</button>
+                <button onClick={() => updateGlobalStyle({ fontFamily: 'sans-serif' })} style={{cursor:'pointer', border:'1px solid #ccc', padding: '5px', borderRadius: '4px'}}>ゴシック</button>
+                <button onClick={() => updateGlobalStyle({ fontWeight: selectedNode.style?.fontWeight === 'bold' ? 'normal' : 'bold' })} style={{ cursor:'pointer', border:'1px solid #ccc', padding: '5px', borderRadius: '4px', background: selectedNode.style?.fontWeight === 'bold' ? '#ddd' : '#f0f0f0' }}>太字</button>
+                <button onClick={() => updateGlobalStyle({ textDecoration: selectedNode.style?.textDecoration?.includes('double') ? 'none' : 'line-through double' })} style={{ cursor:'pointer', border:'1px solid #ccc', padding: '5px', borderRadius: '4px', background: selectedNode.style?.textDecoration?.includes('double') ? '#ddd' : '#f0f0f0' }}>二重線</button>
               </div>
 
               <div style={{ display:'flex', gap:'5px', marginBottom:'5px' }}>
@@ -460,16 +514,16 @@ function FlowEditor() {
 
               <label style={{fontSize:'11px', fontWeight: 'bold'}}>文字サイズ (px)</label>
               <div style={{display:'flex', alignItems:'center', gap:'10px', marginBottom: '10px'}}>
-                <input type="range" min="10" max="250" value={parseInt(String(selectedNode.style?.fontSize || 18))} onChange={(e) => updateNode({}, { fontSize: `${e.target.value}px` })} style={{flex:1}} />
-                <input type="number" min="10" max="250" value={parseInt(String(selectedNode.style?.fontSize || 18))} onChange={(e) => updateNode({}, { fontSize: `${e.target.value}px` })} style={{width:'60px', padding:'4px', border:'1px solid #ccc', borderRadius:'4px'}} />
+                <input type="range" min="10" max="250" value={parseInt(String(selectedNode.style?.fontSize || 18))} onChange={(e) => updateGlobalStyle({ fontSize: `${e.target.value}px` })} style={{flex:1}} />
+                <input type="number" min="10" max="250" value={parseInt(String(selectedNode.style?.fontSize || 18))} onChange={(e) => updateGlobalStyle({ fontSize: `${e.target.value}px` })} style={{width:'60px', padding:'4px', border:'1px solid #ccc', borderRadius:'4px'}} />
               </div>
               <label style={{fontSize:'11px', fontWeight: 'bold'}}>全体の透明度</label>
               <input type="range" min="0.1" max="1" step="0.1" value={Number(selectedNode.style?.opacity ?? 1)} onChange={(e) => updateNode({}, { opacity: parseFloat(e.target.value) })} style={{width:'100%', marginBottom:'15px'}} />
 
               <label style={{fontSize:'11px', fontWeight: 'bold'}}>文字色</label>
               <div style={{ display: 'flex', gap: '5px', marginTop: '5px', marginBottom: '10px' }}>
-                {QUICK_TEXT_COLORS.map(c => <button key={c} onClick={() => updateNode({}, { color: c })} style={{ width:'30px', height:'30px', backgroundColor:c, border: '1px solid #ddd', borderRadius: '4px', cursor: 'pointer' }} />)}
-                <input type="color" value={String(selectedNode.style?.color || '#000000')} onChange={(e) => updateNode({}, { color: e.target.value })} style={{width:'30px', height:'30px', cursor: 'pointer', border: 'none', padding: 0}} />
+                {QUICK_TEXT_COLORS.map(c => <button key={c} onClick={() => updateGlobalStyle({ color: c })} style={{ width:'30px', height:'30px', backgroundColor:c, border: '1px solid #ddd', borderRadius: '4px', cursor: 'pointer' }} />)}
+                <input type="color" value={String(selectedNode.style?.color || '#000000')} onChange={(e) => updateGlobalStyle({ color: e.target.value })} style={{width:'30px', height:'30px', cursor: 'pointer', border: 'none', padding: 0}} />
               </div>
 
               <label style={{fontSize:'11px', fontWeight: 'bold'}}>背景色</label>
@@ -478,7 +532,6 @@ function FlowEditor() {
                 <input type="color" value={String(selectedNode.style?.backgroundColor || '#ffffff')} onChange={(e) => updateNode({}, { backgroundColor: e.target.value })} style={{width:'100%', aspectRatio:'1', cursor: 'pointer', border: 'none', padding: 0}} />
               </div>
 
-              {/* 吹き出しボタン機能 */}
               {!selectedNode.data?.isShape && !selectedNode.data?.isImage && (
                 <>
                   <button onClick={() => updateNode({ previewVisible: !selectedNode.data?.previewVisible })} style={{ width:'100%', marginTop:'10px', padding:'10px', background: selectedNode.data?.previewVisible ? '#3b82f6' : '#fff', color: selectedNode.data?.previewVisible ? '#fff' : '#333', border: '1px solid #ccc', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', transition: 'all 0.2s' }}>
@@ -507,12 +560,10 @@ function FlowEditor() {
             <div style={{ position:'absolute', right:0, top:0, bottom:0, width:'320px', borderLeft:'1px solid #ddd', padding:'20px', backgroundColor:'#fff', zIndex:1000 }}>
               <button onClick={() => setSelectedEdge(null)} style={{ float: 'right', border: 'none', background: 'none', fontSize: '20px', cursor: 'pointer' }}>×</button>
               <h3>線のデザイン</h3>
-              
               <label style={{fontSize:'11px', fontWeight: 'bold'}}>太さ</label>
               <div style={{ display:'flex', gap:'5px', marginBottom:'20px', marginTop: '5px' }}>
                 {[2, 6, 12].map(w => <button key={w} onClick={() => setEdges(eds => eds.map(e => e.id === selectedEdge.id ? { ...e, style: { ...e.style, strokeWidth: w } } : e))} style={{flex:1, padding:'10px', cursor: 'pointer', border: '1px solid #ccc', borderRadius: '4px', background: selectedEdge.style?.strokeWidth === w ? '#ddd' : '#fff'}}>{w === 2 ? '細' : w === 6 ? '中' : '太'}</button>)}
               </div>
-              
               <label style={{fontSize:'11px', fontWeight: 'bold'}}>種類 (7種)</label>
               <div style={{ display:'flex', flexDirection:'column', gap:'8px', marginTop: '5px' }}>
                 {[{l:'普通',c:{}},{l:'片矢印 (→)',c:{arrow:true}},{l:'二重片矢印 (⇒)',c:{double:true,arrow:true}},{l:'両矢印 (↔)',c:{both:true}},{l:'二重両矢印 (⇔)',c:{double:true,both:true}},{l:'論理和 (∧)',c:{label:'∧'}},{l:'論理積 (∨)',c:{label:'∨'}}].map(item => (
@@ -524,20 +575,15 @@ function FlowEditor() {
           )}
         </div>
 
-        {/* 豪華になった下部メニューバー */}
         <div style={{ padding: '15px', backgroundColor: 'rgba(255,255,255,0.95)', borderTop: '1px solid #eee', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '10px', zIndex: 1001, boxShadow: '0 -4px 10px rgba(0,0,0,0.03)' }}>
           <button onClick={goBack} disabled={isRoot} style={{ ...actionBtnStyle, opacity: isRoot ? 0.4 : 1, cursor: isRoot ? 'default' : 'pointer' }}>🔙 1つ前へ</button>
           <button onClick={goTop} disabled={isRoot} style={{ ...actionBtnStyle, opacity: isRoot ? 0.4 : 1, cursor: isRoot ? 'default' : 'pointer' }}>🏠 TOP層へ</button>
-          
           <div style={{ width: '1px', height: '30px', backgroundColor: '#ddd', margin: '0 5px' }} />
-          
           <button onClick={() => setViewport({ x: 0, y: 0, zoom: 1 }, { duration: 800 })} style={actionBtnStyle}>🎯 中央リセット</button>
           <button onClick={() => addNode('text')} style={primaryBtnStyle}>📝 テキスト</button>
           <button onClick={() => addNode('image')} style={{ ...primaryBtnStyle, backgroundColor: '#10b981', boxShadow: '0 4px 6px rgba(16, 185, 129, 0.3)' }}>📸 画像</button>
           <button onClick={() => addNode('shape')} style={{ ...primaryBtnStyle, backgroundColor: '#f59e0b', boxShadow: '0 4px 6px rgba(245, 158, 11, 0.3)' }}>🟦 図形</button>
-          
           <div style={{ width: '1px', height: '30px', backgroundColor: '#ddd', margin: '0 5px' }} />
-          
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', fontWeight: 'bold', color: '#555', backgroundColor: '#fff', padding: '6px 12px', borderRadius: '8px', border: '1px solid #ccc' }}>
             <span>🎨 階層の背景色</span>
             <input type="color" value={levelData[currentLevel]?.bgColor || '#ffffff'} onChange={(e) => {
