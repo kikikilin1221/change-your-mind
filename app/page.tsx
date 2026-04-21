@@ -33,7 +33,7 @@ const getEdgePoint = (cx: number, cy: number, w: number, h: number, tx: number, 
 const DoubleEdge = ({ id, sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, style = {}, markerEnd, markerStart, data, label }: EdgeProps) => {
   const [edgePath, labelX, labelY] = getBezierPath({ sourceX, sourceY, sourcePosition, targetX, targetY, targetPosition });
   const isDouble = data?.double;
-  const strokeWidth = Number(style.strokeWidth) || 2;
+  const strokeWidth = Number(style?.strokeWidth) || 2;
   return (
     <>
       <BaseEdge id={id} path={edgePath} markerEnd={markerEnd} markerStart={markerStart} style={{ ...style, strokeWidth: isDouble ? strokeWidth + 4 : strokeWidth, stroke: '#333' }} />
@@ -49,7 +49,7 @@ const DoubleEdge = ({ id, sourceX, sourceY, targetX, targetY, sourcePosition, ta
 
 // --- スマートガイド ---
 function SmartGuides({ guides }: { guides: { lineX?: number, lineY?: number } }) {
-  const transform = useStore((s) => s.transform);
+  const transform = useStore(s => s.transform);
   if (guides.lineX === undefined && guides.lineY === undefined) return null;
   return (
     <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 9999 }}>
@@ -80,6 +80,7 @@ function FlowEditor() {
   const [guides, setGuides] = useState<{ lineX?: number, lineY?: number }>({});
   
   const previewDragRef = useRef<{ id: string, startX: number, startY: number, initX: number, initY: number, moved: boolean } | null>(null);
+
   const selectedNode = useMemo(() => nodes.find(n => n.id === selectedNodeId) || null, [nodes, selectedNodeId]);
 
   useEffect(() => {
@@ -95,13 +96,15 @@ function FlowEditor() {
     }
   }, []);
 
+  // Vercel(TS)用修正：prev[currentLevel]のフォールバックを追加
   useEffect(() => {
-    setLevelData(prev => ({ ...prev, [currentLevel]: { ...prev[currentLevel], nodes, edges } }));
+    setLevelData(prev => ({ ...prev, [currentLevel]: { ...(prev[currentLevel] || {}), nodes, edges } }));
   }, [nodes, edges, currentLevel]);
 
+  // Vercel(TS)用修正：filesやlevelDataのフォールバックを追加
   useEffect(() => {
     if (!activeFileId || !files[activeFileId]) return;
-    const updated = { ...files, [activeFileId]: { ...files[activeFileId], levelData: { ...levelData, [currentLevel]: { ...levelData[currentLevel], nodes, edges } }, currentLevel, currentLabel } };
+    const updated = { ...files, [activeFileId]: { ...(files[activeFileId] || {}), levelData: { ...(levelData || {}), [currentLevel]: { ...(levelData[currentLevel] || {}), nodes, edges } }, currentLevel, currentLabel } };
     localStorage.setItem('my-logic-files', JSON.stringify(updated));
     localStorage.setItem('my-logic-active-id', activeFileId);
   }, [nodes, edges, currentLevel, currentLabel, levelData, activeFileId, files]);
@@ -123,8 +126,16 @@ function FlowEditor() {
     setFiles(prev => ({ ...prev, [newId]: newF })); loadFile(newId, { ...files, [newId]: newF });
   };
 
+  const deleteFile = (id: string) => {
+    if (Object.keys(files).length <= 1) return;
+    if (!confirm("削除しますか？")) return;
+    const updated = { ...files }; delete updated[id];
+    setFiles(updated); if (id === activeFileId) loadFile(Object.keys(updated)[0], updated);
+  };
+
+  // Vercel(TS)用修正：n.data と n.style のフォールバックを追加
   const updateNode = useCallback((newData: any, newStyle: any = {}) => {
-    setNodes(nds => nds.map(n => n.id === selectedNodeId ? { ...n, data: { ...n.data, ...newData }, style: { ...n.style, ...newStyle } } : n));
+    setNodes(nds => nds.map(n => n.id === selectedNodeId ? { ...n, data: { ...(n.data || {}), ...newData }, style: { ...(n.style || {}), ...newStyle } } : n));
   }, [selectedNodeId]);
 
   const enterLevel = useCallback((id: string, label: string) => {
@@ -179,6 +190,7 @@ function FlowEditor() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [addNode]);
 
+  // Vercel(TS)用修正：n.data.previewStyle に || {} を追加して厳格に保護
   useEffect(() => {
     const onMouseMove = (e: MouseEvent) => {
       const drag = previewDragRef.current;
@@ -188,7 +200,7 @@ function FlowEditor() {
         const dy = (e.clientY - drag.startY) / zoom;
         if (Math.abs(dx) > 3 || Math.abs(dy) > 3) drag.moved = true;
         setNodes(nds => nds.map(n => n.id === drag.id ? {
-          ...n, data: { ...n.data, previewStyle: { ...n.data.previewStyle, offsetX: drag.initX + dx, offsetY: drag.initY + dy } }
+          ...n, data: { ...(n.data || {}), previewStyle: { ...(n.data?.previewStyle || {}), offsetX: drag.initX + dx, offsetY: drag.initY + dy } }
         } : n));
       }
     };
@@ -197,6 +209,24 @@ function FlowEditor() {
     window.addEventListener('mouseup', onMouseUp);
     return () => { window.removeEventListener('mousemove', onMouseMove); window.removeEventListener('mouseup', onMouseUp); };
   }, [getZoom]);
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onload = (ev) => {
+        setNodes(nds => {
+          const maxZ = Math.max(0, ...nds.map(n => Number(n.zIndex) || 0));
+          return [...nds, { 
+            id: `img-${Date.now()}`, position: { x: 50, y: 50 }, zIndex: maxZ + 1,
+            data: { isImage: true, imageUrl: ev.target?.result, imgPosX: 0, imgPosY: 0, imgZoom: 1 }, 
+            style: { width: 300, height: 200, background: '#fff', padding: 0, border: '1px solid #ccc' } 
+          }];
+        });
+      };
+      reader.readAsDataURL(file);
+    }
+  };
 
   const onNodeDrag = useCallback((_: any, node: Node) => {
     let snapX: number | undefined, snapY: number | undefined;
@@ -253,25 +283,27 @@ function FlowEditor() {
                   <div className="nodrag"
                     onMouseDown={(e) => { e.stopPropagation(); previewDragRef.current = { id: n.id, startX: e.clientX, startY: e.clientY, initX: offsetX, initY: offsetY, moved: false }; }}
                     onClick={(e) => { e.stopPropagation(); if (!previewDragRef.current?.moved) enterLevel(n.id, String(n.data.content)); }}
-                    style={{ position:'absolute', left: offsetX, top: offsetY, width: `${w2}px`, height: `${h2}px`, backgroundColor:`rgba(255,255,255,${n.data.previewStyle?.opacity || 0.7})`, borderRadius: '12px', border: '1px solid #ccc', zIndex: -1, cursor: 'grab', overflow: 'hidden' }}
+                    style={{ position:'absolute', left: offsetX, top: offsetY, width: `${w2}px`, height: `${h2}px`, backgroundColor:`rgba(255,255,255,${n.data.previewStyle?.opacity || 0.7})`, borderRadius: '12px', border: '1px solid #ccc', zIndex: -1, cursor: 'grab', overflow: 'hidden', boxShadow: '0 8px 12px rgba(0,0,0,0.1)' }}
                   >
                     {levelData[n.id]?.nodes?.length ? (
-                      <div style={{ transform: 'scale(0.15)', transformOrigin: 'top left', width: '1200px', height: '800px', position: 'relative' }}>
+                      <div style={{ transform: 'scale(0.15)', transformOrigin: 'top left', width: '1200px', height: '800px', position: 'relative', pointerEvents: 'none' }}>
                         {levelData[n.id].nodes.map((cn: any) => cn.id !== 'center-mark' && (
-                          <div key={cn.id} style={{ position: 'absolute', left: cn.position.x, top: cn.position.y, width: cn.style?.width || 200, height: cn.style?.height || 100, backgroundColor: cn.style?.backgroundColor || '#fff', border: cn.style?.border || '4px solid #333', borderRadius: cn.style?.borderRadius || '12px' }}></div>
+                          <div key={cn.id} style={{ position: 'absolute', left: cn.position.x, top: cn.position.y, width: cn.style?.width || 200, height: cn.style?.height || 100, backgroundColor: cn.style?.backgroundColor || '#fff', border: cn.style?.border || '4px solid #333', borderRadius: cn.style?.borderRadius || '12px', display: 'flex', alignItems: 'center', justifyContent: cn.style?.textAlign === 'left' ? 'flex-start' : cn.style?.textAlign === 'right' ? 'flex-end' : 'center', fontSize: '32px', color: cn.style?.color || '#000', overflow: 'hidden' }}>
+                            {cn.data?.isImage ? <img src={cn.data.imageUrl} style={{width:'100%', height:'100%', objectFit:'cover'}} alt="mini" /> : cn.data?.isShape ? '' : <div style={{padding:'15px', fontWeight: cn.style?.fontWeight || 'normal'}}>{cn.data?.content}</div>}
+                          </div>
                         ))}
                       </div>
-                    ) : <div style={{fontSize: '11px', color: '#999', textAlign: 'center', paddingTop: '40px'}}>中身</div>}
+                    ) : <div style={{fontSize: '11px', color: '#999', textAlign: 'center', paddingTop: '40px', pointerEvents: 'none'}}>中身<br/>(クリックで入る)</div>}
                   </div>
                 </>
               );
             })()}
             {n.data.isImage ? (
-              <div style={{ width: '100%', height: '100%', overflow: 'hidden', position: 'relative' }}>
+              <div style={{ width: '100%', height: '100%', overflow: 'hidden', position: 'relative', borderRadius: n.style?.borderRadius || 0 }}>
                 <img src={n.data.imageUrl} style={{ position: 'absolute', width: 'auto', height: 'auto', minWidth: '100%', minHeight: '100%', transform: `translate(${n.data.imgPosX || 0}px, ${n.data.imgPosY || 0}px) scale(${n.data.imgZoom || 1})`, transformOrigin: 'center center', pointerEvents: 'none' }} alt="img" />
               </div>
             ) : n.id !== 'center-mark' && (
-              <div className="markdown-content" style={{ pointerEvents: 'none', width: '100%', color: n.style?.color || '#000', fontWeight: n.style?.fontWeight || 'normal', fontFamily: n.style?.fontFamily || 'sans-serif' }}>
+              <div className="markdown-content" style={{ pointerEvents: 'none', width: '100%', color: n.style?.color || '#000', fontWeight: n.style?.fontWeight || 'normal', textDecoration: n.style?.textDecoration || 'none', fontFamily: n.style?.fontFamily || 'sans-serif', whiteSpace: 'pre-wrap', lineHeight: '1.2' }}>
                 <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>{String(n.data.content || '').replace(/\n/g, '  \n')}</ReactMarkdown>
               </div>
             )}
@@ -282,12 +314,13 @@ function FlowEditor() {
     }))];
   }, [nodes, selectedNodeId, enterLevel, levelData]);
 
+  // Vercel(TS)用修正：e.data のフォールバックを追加
   const updateEdgeDesign = (config: any) => {
     setEdges(eds => eds.map(e => {
       if (e.id !== selectedEdge?.id) return e;
       const mSize = Math.max(8, (Number(e.style?.strokeWidth) || 2) * 1.5);
       const m = { type: MarkerType.ArrowClosed, color: '#333', width: mSize, height: mSize };
-      return { ...e, data: { ...e.data, double: config.double }, markerEnd: config.arrow || config.both ? m : undefined, markerStart: config.both ? m : undefined, label: config.label || '' };
+      return { ...e, data: { ...(e.data || {}), double: config.double }, markerEnd: config.arrow || config.both ? m : undefined, markerStart: config.both ? m : undefined, label: config.label || '' };
     }));
   };
 
@@ -317,21 +350,59 @@ function FlowEditor() {
           {selectedNode && (
             <div style={{ position:'absolute', right:0, top:0, bottom:0, width:'340px', borderLeft:'1px solid #ddd', padding:'20px', backgroundColor:'#fff', zIndex:1000, overflowY: 'auto' }}>
               <button onClick={() => setSelectedNodeId(null)} style={{ float: 'right', border: 'none', background: 'none', fontSize: '20px' }}>×</button>
-              <h3>{selectedNode.data.isImage ? '画像編集' : '項目設定'}</h3>
-              <div style={{ display:'flex', gap:'5px', marginBottom:'15px' }}>
-                <button onClick={() => setNodes(nds => { const maxZ = Math.max(0, ...nds.map(n => Number(n.zIndex) || 0)); return nds.map(n => n.id === selectedNodeId ? {...n, zIndex: maxZ + 1} : n); })}>最前面</button>
-                <button onClick={() => setNodes(nds => { const minZ = Math.min(0, ...nds.map(n => Number(n.zIndex) || 0)); return nds.map(n => n.id === selectedNodeId ? {...n, zIndex: minZ - 1} : n); })}>最背面</button>
+              <h3>{selectedNode.data.isImage ? '画像編集' : selectedNode.data.isShape ? '図形設定' : '項目設定'}</h3>
+              
+              <div style={{ display:'flex', gap:'5px', marginBottom:'15px', marginTop:'10px' }}>
+                <button onClick={() => setNodes(nds => { const maxZ = Math.max(0, ...nds.map(n => Number(n.zIndex) || 0)); return nds.map(n => n.id === selectedNodeId ? {...n, zIndex: maxZ + 1} : n); })} style={{flex:1, padding:'8px', fontSize:'12px', fontWeight: 'bold', background: '#f0f0f0', border: '1px solid #ccc', cursor: 'pointer'}}>↑ 最前面へ</button>
+                <button onClick={() => setNodes(nds => { const minZ = Math.min(0, ...nds.map(n => Number(n.zIndex) || 0)); return nds.map(n => n.id === selectedNodeId ? {...n, zIndex: minZ - 1} : n); })} style={{flex:1, padding:'8px', fontSize:'12px', fontWeight: 'bold', background: '#f0f0f0', border: '1px solid #ccc', cursor: 'pointer'}}>↓ 最背面へ</button>
               </div>
+
+              {selectedNode.data.isImage && (
+                <div style={{ marginBottom: '20px', padding: '10px', border: '1px solid #eee', borderRadius: '8px' }}>
+                  <label style={{fontSize: '11px', fontWeight: 'bold'}}>ズーム / 位置</label>
+                  <input type="range" min="0.5" max="3" step="0.1" value={Number(selectedNode.data.imgZoom || 1)} onChange={(e) => updateNode({ imgZoom: parseFloat(e.target.value) })} style={{width:'100%'}} />
+                  <input type="range" min="-600" max="600" value={Number(selectedNode.data.imgPosX || 0)} onChange={(e) => updateNode({ imgPosX: parseInt(e.target.value) })} style={{width:'100%'}} />
+                  <input type="range" min="-600" max="600" value={Number(selectedNode.data.imgPosY || 0)} onChange={(e) => updateNode({ imgPosY: parseInt(e.target.value) })} style={{width:'100%'}} />
+                </div>
+              )}
+              
+              {selectedNode.data.isShape && (
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '5px', marginBottom: '15px' }}>
+                  <button onClick={() => { const size = Math.max(Number(selectedNode.style?.width) || 150, Number(selectedNode.style?.height) || 150); updateNode({ shapeType: 'rect', keepRatio: true }, { borderRadius: '0px', width: size, height: size }); }} style={{ padding: '8px', cursor: 'pointer', background: selectedNode.data.shapeType === 'rect' && selectedNode.data.keepRatio ? '#ddd' : '#fff', border: '1px solid #ccc' }}>■ 正方形</button>
+                  <button onClick={() => updateNode({ shapeType: 'rect', keepRatio: false }, { borderRadius: '0px' })} style={{ padding: '8px', cursor: 'pointer', background: selectedNode.data.shapeType === 'rect' && !selectedNode.data.keepRatio ? '#ddd' : '#fff', border: '1px solid #ccc' }}>▬ 長方形</button>
+                  <button onClick={() => { const size = Math.max(Number(selectedNode.style?.width) || 150, Number(selectedNode.style?.height) || 150); updateNode({ shapeType: 'circ', keepRatio: true }, { borderRadius: '50%', width: size, height: size }); }} style={{ padding: '8px', cursor: 'pointer', background: selectedNode.data.shapeType === 'circ' && selectedNode.data.keepRatio ? '#ddd' : '#fff', border: '1px solid #ccc' }}>● 正円</button>
+                  <button onClick={() => updateNode({ shapeType: 'circ', keepRatio: false }, { borderRadius: '50%' })} style={{ padding: '8px', cursor: 'pointer', background: selectedNode.data.shapeType === 'circ' && !selectedNode.data.keepRatio ? '#ddd' : '#fff', border: '1px solid #ccc' }}>⬭ 楕円</button>
+                </div>
+              )}
+
               {!selectedNode.data.isImage && <textarea value={String(selectedNode.data.content || '')} onChange={(e) => updateNode({ content: e.target.value })} style={{ width:'100%', height:'100px' }} />}
+              
               <div style={{ display:'flex', gap:'5px', margin:'10px 0' }}>
                 <button onClick={() => updateNode({}, { textAlign: 'left' })}>左</button><button onClick={() => updateNode({}, { textAlign: 'center' })}>中</button><button onClick={() => updateNode({}, { textAlign: 'right' })}>右</button>
               </div>
               <input type="range" min="10" max="200" value={parseInt(String(selectedNode.style?.fontSize || 18))} onChange={(e) => updateNode({}, { fontSize: `${e.target.value}px` })} />
+              
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '5px' }}>
                 {PASTEL_COLORS.map(c => <button key={c} onClick={() => updateNode({}, { backgroundColor: c })} style={{ width:'25px', height:'25px', backgroundColor:c }} />)}
               </div>
+              
               {!selectedNode.data.isShape && !selectedNode.data.isImage && (
-                <button onClick={() => updateNode({ previewVisible: !selectedNode.data.previewVisible })} style={{ width:'100%', marginTop:'10px' }}>{selectedNode.data.previewVisible ? '吹き出し消去' : '吹き出し追加'}</button>
+                <>
+                  <button onClick={() => updateNode({ previewVisible: !selectedNode.data.previewVisible })} style={{ width:'100%', marginTop:'10px', padding:'8px' }}>{selectedNode.data.previewVisible ? '吹き出し消去' : '吹き出し追加'}</button>
+                  {selectedNode.data.previewVisible && (
+                    // Vercel(TS)用修正：n.data?.previewStyle のフォールバックを徹底
+                    <div style={{ marginTop: '10px' }}>
+                      <div style={{display:'flex', gap:'5px', marginBottom:'5px'}}>
+                        <div style={{fontSize:'10px', width:'30px'}}>幅</div>
+                        <input type="range" min="50" max="500" value={Number(selectedNode.data?.previewStyle?.width || 180)} onChange={(e) => updateNode({ previewStyle: { ...(selectedNode.data?.previewStyle || {}), width: parseInt(e.target.value) } })} style={{flex:1}} />
+                      </div>
+                      <div style={{display:'flex', gap:'5px', marginBottom:'5px'}}>
+                        <div style={{fontSize:'10px', width:'30px'}}>高さ</div>
+                        <input type="range" min="50" max="500" value={Number(selectedNode.data?.previewStyle?.height || 120)} onChange={(e) => updateNode({ previewStyle: { ...(selectedNode.data?.previewStyle || {}), height: parseInt(e.target.value) } })} style={{flex:1}} />
+                      </div>
+                    </div>
+                  )}
+                </>
               )}
               <button onClick={() => setNodes(nds => nds.filter(n => n.id !== selectedNodeId))} style={{ color:'red', marginTop:'20px' }}>削除</button>
             </div>
@@ -353,7 +424,7 @@ function FlowEditor() {
           <button onClick={() => addNode('text')}>＋ テキスト</button>
           <button onClick={() => addNode('image')}>📷 画像</button>
           <button onClick={() => addNode('shape')}>square 図形</button>
-          <input type="color" value={levelData[currentLevel]?.bgColor || '#ffffff'} onChange={(e) => setLevelData(prev => ({ ...prev, [currentLevel]: { ...prev[currentLevel], bgColor: e.target.value } }))} />
+          <input type="color" value={levelData[currentLevel]?.bgColor || '#ffffff'} onChange={(e) => setLevelData(prev => ({ ...prev, [currentLevel]: { ...(prev[currentLevel] || {}), bgColor: e.target.value } }))} />
         </div>
       </div>
     </div>
