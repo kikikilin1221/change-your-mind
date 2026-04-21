@@ -366,7 +366,6 @@ function FlowEditor() {
         } : n));
       }
 
-      // 🔴 トリミング中の画像パン移動（ドラッグ）
       const imgDrag = imageCropDragRef.current;
       if (imgDrag) {
         const dx = (e.clientX - imgDrag.startX) / zoom;
@@ -398,7 +397,7 @@ function FlowEditor() {
             id: `img-${Date.now()}`, position: { x: 50, y: 50 }, zIndex: maxZ + 1,
             data: { 
                 isImage: true, imageUrl: ev.target?.result, imgPosX: 0, imgPosY: 0, imgZoom: 1, isCropping: false,
-                cropBaseW: 300, cropBaseH: 200, cropOffsetX: 0, cropOffsetY: 0 // 画像の初期実寸サイズ
+                cropBaseW: 300, cropBaseH: 200, cropOffsetX: 0, cropOffsetY: 0
             }, 
             style: { width: 300, height: 200, background: '#fff', padding: 0, border: '1px solid #ccc' } 
           }];
@@ -482,7 +481,6 @@ function FlowEditor() {
         );
       }
 
-      // 🔴 画像ノードの描画処理（トリミング時のサイズ固定とオフセット調整）
       const baseW = n.data?.cropBaseW ?? (Number(n.style?.width) || 300);
       const baseH = n.data?.cropBaseH ?? (Number(n.style?.height) || 200);
       const offX = n.data?.cropOffsetX || 0;
@@ -490,7 +488,7 @@ function FlowEditor() {
 
       return {
         ...n,
-        draggable: n.data?.isImage && n.data?.isCropping ? false : true, // トリミング中はノード自体のドラッグを無効化
+        draggable: n.data?.isImage && n.data?.isCropping ? false : true,
         data: {
           ...n.data,
           label: (
@@ -503,7 +501,6 @@ function FlowEditor() {
                   onMouseDown={(e) => {
                      if (n.data?.isCropping) {
                         e.stopPropagation();
-                        // 画像を直接ドラッグして表示位置を動かす処理
                         imageCropDragRef.current = { id: n.id, startX: e.clientX, startY: e.clientY, initX: Number(n.data?.imgPosX || 0), initY: Number(n.data?.imgPosY || 0) };
                      }
                   }}
@@ -511,9 +508,11 @@ function FlowEditor() {
                 >
                   <img src={n.data.imageUrl as string} style={{ 
                       position: 'absolute', 
-                      width: `${baseW}px`,    // 🔴 画像自体のサイズを固定
+                      width: `${baseW}px`,
                       height: `${baseH}px`, 
-                      left: `${offX}px`,      // 🔴 枠を動かした分だけ逆方向に補正
+                      maxWidth: 'none',   // 🔴 ここが超重要！Tailwindの自動縮小(おせっかい)を無効化
+                      maxHeight: 'none',  // 🔴 ここが超重要！
+                      left: `${offX}px`,
                       top: `${offY}px`,
                       transform: `translate(${n.data.imgPosX || 0}px, ${n.data.imgPosY || 0}px) scale(${n.data.imgZoom || 1})`, 
                       transformOrigin: 'center center', 
@@ -530,7 +529,6 @@ function FlowEditor() {
                 </div>
               ) : null}
 
-              {/* 🔴 リサイズハンドルの管理（onResizeで逆補正をかける） */}
               {n.id !== 'center-mark' ? (
                  <NodeResizer 
                     minWidth={30} 
@@ -556,13 +554,11 @@ function FlowEditor() {
                     onResize={(_, params) => {
                         if (n.data?.isImage) {
                             if (n.data?.isCropping) {
-                                // トリミング時：枠が動いた分だけ、中の画像を逆方向に動かして「静止」させる
                                 const dx = params.x - n.data._rsX;
                                 const dy = params.y - n.data._rsY;
                                 n.data.cropOffsetX = n.data._rsCropOffX - dx;
                                 n.data.cropOffsetY = n.data._rsCropOffY - dy;
                             } else {
-                                // 通常時：枠と一緒に中身も拡大縮小する
                                 const scaleX = params.width / n.data._rsW;
                                 const scaleY = params.height / n.data._rsH;
                                 n.data.cropBaseW = n.data._rsCropW * scaleX;
@@ -618,7 +614,7 @@ function FlowEditor() {
             background: transparent;
         }
         .react-flow__handle:hover {
-            transform: scale(2) !important;
+            transform: scale(2.2) !important;
             background: #3b82f6 !important;
             border-color: #fff !important;
         }
@@ -664,7 +660,15 @@ function FlowEditor() {
               {selectedNode.data?.isImage && (
                 <div style={{ marginBottom: '20px', padding: '10px', border: '1px solid #eee', borderRadius: '8px' }}>
                   <button 
-                     onClick={() => updateNode({ isCropping: !selectedNode.data?.isCropping })} 
+                     onClick={() => {
+                        const currentW = Number(selectedNode.style?.width) || 300;
+                        const currentH = Number(selectedNode.style?.height) || 200;
+                        updateNode({ 
+                            isCropping: !selectedNode.data?.isCropping,
+                            cropBaseW: selectedNode.data?.cropBaseW ?? currentW,
+                            cropBaseH: selectedNode.data?.cropBaseH ?? currentH
+                        });
+                     }} 
                      style={{ width: '100%', padding: '10px', background: selectedNode.data?.isCropping ? '#ef4444' : '#fff', color: selectedNode.data?.isCropping ? '#fff' : '#333', border: selectedNode.data?.isCropping ? 'none' : '1px solid #ccc', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', transition: 'all 0.2s', marginBottom: '15px' }}
                   >
                      {selectedNode.data?.isCropping ? '✅ トリミングを完了' : '✂️ トリミング (枠の切り抜き)'}
