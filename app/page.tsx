@@ -143,7 +143,6 @@ function FlowEditor() {
   const [guides, setGuides] = useState<{ lineX?: number, lineY?: number }>({});
   
   const previewDragRef = useRef<{ id: string, startX: number, startY: number, initX: number, initY: number, moved: boolean } | null>(null);
-  // ★ 画像トリミング（パン）用のRef ★
   const imageCropDragRef = useRef<{ id: string, startX: number, startY: number, initX: number, initY: number } | null>(null);
   
   const [selection, setSelection] = useState({start: 0, end: 0});
@@ -353,12 +352,10 @@ function FlowEditor() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [addNode]);
 
-  // ★ ドラッグイベントの監視（吹き出し ＆ 画像トリミング） ★
   useEffect(() => {
     const onMouseMove = (e: MouseEvent) => {
       const zoom = getZoom();
       
-      // 吹き出しドラッグ
       const drag = previewDragRef.current;
       if (drag) {
         const dx = (e.clientX - drag.startX) / zoom;
@@ -369,7 +366,6 @@ function FlowEditor() {
         } : n));
       }
 
-      // 画像トリミングドラッグ
       const imgDrag = imageCropDragRef.current;
       if (imgDrag) {
         const dx = (e.clientX - imgDrag.startX) / zoom;
@@ -491,7 +487,6 @@ function FlowEditor() {
               {previewElement}
               
               {n.data?.isImage ? (
-                // ★ 画像描画部分（トリミングロジック） ★
                 <div 
                   className={n.data?.isCropping ? "nodrag" : ""}
                   onMouseDown={(e) => {
@@ -503,12 +498,6 @@ function FlowEditor() {
                   style={{ width: '100%', height: '100%', overflow: 'hidden', position: 'relative', borderRadius: n.style?.borderRadius || 0, cursor: n.data?.isCropping ? 'move' : 'default' }}
                 >
                   <img src={n.data.imageUrl as string} style={{ position: 'absolute', width: 'auto', height: 'auto', minWidth: '100%', minHeight: '100%', transform: `translate(${n.data.imgPosX || 0}px, ${n.data.imgPosY || 0}px) scale(${n.data.imgZoom || 1})`, transformOrigin: 'center center', pointerEvents: 'none' }} alt="img" />
-                  
-                  {/* トリミング中の赤いガイド枠 */}
-                  {n.data?.isCropping && (
-                    <div style={{ position: 'absolute', inset: 0, border: '3px dashed #ef4444', pointerEvents: 'none', zIndex: 10 }}></div>
-                  )}
-
                   <div className="markdown-content" style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: n.style?.alignItems || 'center', justifyContent: n.style?.justifyContent || 'center', pointerEvents: 'none', color: n.style?.color || '#000', fontWeight: n.style?.fontWeight || 'normal', textDecoration: n.style?.textDecoration || 'none', fontFamily: n.style?.fontFamily || 'sans-serif', whiteSpace: 'pre-wrap', lineHeight: '1.2' }}>
                     <ReactMarkdown components={MarkdownComponents} remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>{String(n.data?.content || '').replace(/\n/g, '  \n')}</ReactMarkdown>
                   </div>
@@ -520,7 +509,14 @@ function FlowEditor() {
               ) : null}
 
               {n.id !== 'center-mark' ? (
-                 <NodeResizer minWidth={30} minHeight={30} keepAspectRatio={!!n.data?.keepRatio} isVisible={selectedNodeId === n.id} lineStyle={{ border: '3px solid #3b82f6', zIndex: 100 }} handleStyle={{ background: '#3b82f6', border: '1px solid #fff', width: 12, height: 12, zIndex: 100 }} />
+                 <NodeResizer 
+                    minWidth={30} 
+                    minHeight={30} 
+                    keepAspectRatio={n.data?.isImage && !n.data?.isCropping ? true : !!n.data?.keepRatio} 
+                    isVisible={selectedNodeId === n.id} 
+                    lineStyle={{ border: n.data?.isCropping ? '3px dashed #ef4444' : '3px solid #3b82f6', zIndex: 100 }} 
+                    handleStyle={{ background: n.data?.isCropping ? '#ef4444' : '#3b82f6', border: '1px solid #fff', width: 12, height: 12, zIndex: 100, borderRadius: '50%' }} 
+                 />
               ) : null}
             </div>
           )
@@ -547,18 +543,24 @@ function FlowEditor() {
     <div style={{ width: '100vw', height: '100vh', display: 'flex', flexDirection: 'row', overflow: 'hidden' }}>
       <style>{`
         .markdown-content p { margin: 0; }
-        /* 黒い点を大きくして吸着しやすくする魔法のCSS */
+        /* 接続の黒い点を12pxにしつつ、見えない判定エリアを広げてクリックしやすくする */
         .react-flow__handle {
-            width: 24px !important;
-            height: 24px !important;
+            width: 12px !important;
+            height: 12px !important;
             background: #333 !important;
-            border: 4px solid #fff !important;
+            border: 2px solid #fff !important;
             transition: all 0.2s cubic-bezier(0.34, 1.56, 0.64, 1) !important;
-            box-shadow: 0 2px 6px rgba(0,0,0,0.2) !important;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.2) !important;
             cursor: crosshair !important;
         }
+        .react-flow__handle::after {
+            content: "";
+            position: absolute;
+            top: -10px; left: -10px; right: -10px; bottom: -10px;
+            background: transparent;
+        }
         .react-flow__handle:hover {
-            transform: scale(1.6) !important;
+            transform: scale(2) !important;
             background: #3b82f6 !important;
             border-color: #fff !important;
         }
@@ -605,14 +607,14 @@ function FlowEditor() {
                 <div style={{ marginBottom: '20px', padding: '10px', border: '1px solid #eee', borderRadius: '8px' }}>
                   <button 
                      onClick={() => updateNode({ isCropping: !selectedNode.data?.isCropping })} 
-                     style={{ width: '100%', padding: '10px', background: selectedNode.data?.isCropping ? '#ef4444' : '#fff', color: selectedNode.data?.isCropping ? '#fff' : '#333', border: '1px solid #ccc', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', transition: 'all 0.2s', marginBottom: '15px' }}
+                     style={{ width: '100%', padding: '10px', background: selectedNode.data?.isCropping ? '#ef4444' : '#fff', color: selectedNode.data?.isCropping ? '#fff' : '#333', border: selectedNode.data?.isCropping ? 'none' : '1px solid #ccc', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', transition: 'all 0.2s', marginBottom: '15px' }}
                   >
-                     {selectedNode.data?.isCropping ? '✅ トリミングを完了' : '✂️ トリミング (直接ドラッグ)'}
+                     {selectedNode.data?.isCropping ? '✅ トリミングを完了' : '✂️ トリミング (枠の切り抜き)'}
                   </button>
 
                   {selectedNode.data?.isCropping ? (
-                     <div style={{ padding: '10px', backgroundColor: '#fef2f2', borderRadius: '6px', marginBottom: '10px' }}>
-                        <p style={{fontSize: '11px', color: '#b91c1c', margin: 0}}><strong>トリミングモード中</strong><br/>・青い枠を動かして切り取るサイズを変更<br/>・画像を直接ドラッグして位置を調整</p>
+                     <div style={{ padding: '10px', backgroundColor: '#fef2f2', borderRadius: '6px', marginBottom: '10px', border: '1px dashed #fca5a5' }}>
+                        <p style={{fontSize: '11px', color: '#b91c1c', margin: 0}}><strong>トリミングモード中</strong><br/>・画像の周囲にある<span style={{color:'red'}}>赤い枠</span>を動かして切り取るサイズを変更できます。<br/>・画像を直接ドラッグして表示位置を調整できます。</p>
                      </div>
                   ) : (
                      <>
