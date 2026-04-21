@@ -2,7 +2,6 @@
 import React, { useState, useCallback, useMemo, useRef, useEffect } from 'react';
 import { 
   ReactFlow, Background, Controls, applyNodeChanges, applyEdgeChanges, 
-  Node, Edge, OnNodesChange, OnEdgesChange, addEdge, Connection, 
   NodeResizer, ReactFlowProvider, useReactFlow, MarkerType,
   getBezierPath, EdgeProps, BaseEdge, EdgeLabelRenderer, useStore
 } from '@xyflow/react';
@@ -32,7 +31,7 @@ const getEdgePoint = (cx: number, cy: number, w: number, h: number, tx: number, 
 // --- 二重線エッジ ---
 const DoubleEdge = ({ id, sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, style = {}, markerEnd, markerStart, data, label }: EdgeProps) => {
   const [edgePath, labelX, labelY] = getBezierPath({ sourceX, sourceY, sourcePosition, targetX, targetY, targetPosition });
-  const isDouble = data?.double;
+  const isDouble = (data as any)?.double;
   const strokeWidth = Number(style?.strokeWidth) || 2;
   return (
     <>
@@ -69,14 +68,17 @@ function FlowEditor() {
   
   const [files, setFiles] = useState<Record<string, any>>({});
   const [activeFileId, setActiveFileId] = useState<string>('default');
-  const [nodes, setNodes] = useState<Node[]>([]);
-  const [edges, setEdges] = useState<Edge[]>([]);
-  const [levelData, setLevelData] = useState<Record<string, { nodes: Node[]; edges: Edge[]; bgColor?: string }>>({});
+  
+  // TSエラー回避のため any[] を指定
+  const [nodes, setNodes] = useState<any[]>([]);
+  const [edges, setEdges] = useState<any[]>([]);
+  const [levelData, setLevelData] = useState<Record<string, { nodes: any[]; edges: any[]; bgColor?: string }>>({});
+  
   const [history, setHistory] = useState<string[]>([]);
   const [currentLevel, setCurrentLevel] = useState('root');
   const [currentLabel, setCurrentLabel] = useState('TOP層');
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
-  const [selectedEdge, setSelectedEdge] = useState<Edge | null>(null);
+  const [selectedEdge, setSelectedEdge] = useState<any | null>(null);
   const [guides, setGuides] = useState<{ lineX?: number, lineY?: number }>({});
   
   const previewDragRef = useRef<{ id: string, startX: number, startY: number, initX: number, initY: number, moved: boolean } | null>(null);
@@ -138,7 +140,7 @@ function FlowEditor() {
   const enterLevel = useCallback((id: string, label: string) => {
     setNodes(nds => {
       const target = nds.find(n => n.id === id);
-      if (target?.data.isShape || target?.data.isImage) return nds;
+      if (target?.data?.isShape || target?.data?.isImage) return nds;
       setHistory(prev => [...prev, currentLevel]);
       setCurrentLevel(id); setCurrentLabel(label || '階層中'); setSelectedNodeId(null);
       const nextData = levelData[id] || { nodes: [], edges: [] };
@@ -224,7 +226,7 @@ function FlowEditor() {
     }
   };
 
-  const onNodeDrag = useCallback((_: any, node: Node) => {
+  const onNodeDrag = useCallback((_: any, node: any) => {
     let snapX: number | undefined, snapY: number | undefined;
     let lineX: number | undefined, lineY: number | undefined;
     let snapDiffX = 15, snapDiffY = 15;
@@ -246,21 +248,19 @@ function FlowEditor() {
     setGuides({ lineX, lineY });
   }, [nodes]);
 
-  const onNodeDragStop = useCallback((_: any, node: Node) => {
+  const onNodeDragStop = useCallback((_: any, node: any) => {
     setNodes(nds => nds.map(n => n.id === node.id ? { ...n, position: node.position } : n));
     setGuides({});
   }, []);
 
-  // Vercel(TS)用修正：ノード描画のTSエラーを回避するため、事前にプレビュー要素を構築
   const flowNodes = useMemo(() => {
-    const centerNode = { 
+    const centerNode: any = { 
       id: 'center-mark', type: 'default', position: { x: -10, y: -10 }, draggable: false, selectable: false, 
       data: { label: '＋' }, 
       style: { width: 20, height: 20, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#ef4444', fontSize: '14px', fontWeight: 'bold', background: 'rgba(255,255,255,0.7)', borderRadius: '50%', border: '2px solid #ef4444', zIndex: -1000, pointerEvents: 'none', padding: 0 } 
     };
 
     return [centerNode, ...nodes.map(n => {
-      // 吹き出し（プレビュー）の要素を事前に準備して型エラーを防ぐ
       const isPreview = Boolean(n.data?.previewVisible && !n.data?.isShape && !n.data?.isImage);
       let previewElement: React.ReactNode = null;
 
@@ -290,7 +290,7 @@ function FlowEditor() {
                 <div style={{ transform: 'scale(0.15)', transformOrigin: 'top left', width: '1200px', height: '800px', position: 'relative', pointerEvents: 'none' }}>
                   {levelData[n.id].nodes.map((cn: any) => cn.id !== 'center-mark' ? (
                     <div key={cn.id} style={{ position: 'absolute', left: cn.position.x, top: cn.position.y, width: cn.style?.width || 200, height: cn.style?.height || 100, backgroundColor: cn.style?.backgroundColor || '#fff', border: cn.style?.border || '4px solid #333', borderRadius: cn.style?.borderRadius || '12px', display: 'flex', alignItems: 'center', justifyContent: cn.style?.textAlign === 'left' ? 'flex-start' : cn.style?.textAlign === 'right' ? 'flex-end' : 'center', fontSize: '32px', color: cn.style?.color || '#000', overflow: 'hidden' }}>
-                      {cn.data?.isImage ? <img src={cn.data.imageUrl} style={{width:'100%', height:'100%', objectFit:'cover'}} alt="mini" /> : cn.data?.isShape ? null : <div style={{padding:'15px', fontWeight: cn.style?.fontWeight || 'normal'}}>{String(cn.data?.content || '')}</div>}
+                      {cn.data?.isImage ? <img src={cn.data.imageUrl as string} style={{width:'100%', height:'100%', objectFit:'cover'}} alt="mini" /> : cn.data?.isShape ? null : <div style={{padding:'15px', fontWeight: cn.style?.fontWeight || 'normal'}}>{String(cn.data?.content || '')}</div>}
                     </div>
                   ) : null)}
                 </div>
@@ -310,7 +310,7 @@ function FlowEditor() {
               
               {n.data?.isImage ? (
                 <div style={{ width: '100%', height: '100%', overflow: 'hidden', position: 'relative', borderRadius: n.style?.borderRadius || 0 }}>
-                  <img src={n.data.imageUrl} style={{ position: 'absolute', width: 'auto', height: 'auto', minWidth: '100%', minHeight: '100%', transform: `translate(${n.data.imgPosX || 0}px, ${n.data.imgPosY || 0}px) scale(${n.data.imgZoom || 1})`, transformOrigin: 'center center', pointerEvents: 'none' }} alt="img" />
+                  <img src={n.data.imageUrl as string} style={{ position: 'absolute', width: 'auto', height: 'auto', minWidth: '100%', minHeight: '100%', transform: `translate(${n.data.imgPosX || 0}px, ${n.data.imgPosY || 0}px) scale(${n.data.imgZoom || 1})`, transformOrigin: 'center center', pointerEvents: 'none' }} alt="img" />
                 </div>
               ) : n.id !== 'center-mark' ? (
                 <div className="markdown-content" style={{ pointerEvents: 'none', width: '100%', color: n.style?.color || '#000', fontWeight: n.style?.fontWeight || 'normal', textDecoration: n.style?.textDecoration || 'none', fontFamily: n.style?.fontFamily || 'sans-serif', whiteSpace: 'pre-wrap', lineHeight: '1.2' }}>
