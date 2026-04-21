@@ -366,6 +366,7 @@ function FlowEditor() {
         } : n));
       }
 
+      // 🔴 トリミング中の画像パン移動（ドラッグ）
       const imgDrag = imageCropDragRef.current;
       if (imgDrag) {
         const dx = (e.clientX - imgDrag.startX) / zoom;
@@ -395,7 +396,10 @@ function FlowEditor() {
           const maxZ = Math.max(0, ...nds.map(n => Number(n.zIndex) || 0));
           return [...nds, { 
             id: `img-${Date.now()}`, position: { x: 50, y: 50 }, zIndex: maxZ + 1,
-            data: { isImage: true, imageUrl: ev.target?.result, imgPosX: 0, imgPosY: 0, imgZoom: 1, isCropping: false }, 
+            data: { 
+                isImage: true, imageUrl: ev.target?.result, imgPosX: 0, imgPosY: 0, imgZoom: 1, isCropping: false,
+                cropBaseW: 300, cropBaseH: 200, cropOffsetX: 0, cropOffsetY: 0 // 画像の初期実寸サイズ
+            }, 
             style: { width: 300, height: 200, background: '#fff', padding: 0, border: '1px solid #ccc' } 
           }];
         });
@@ -478,8 +482,15 @@ function FlowEditor() {
         );
       }
 
+      // 🔴 画像ノードの描画処理（トリミング時のサイズ固定とオフセット調整）
+      const baseW = n.data?.cropBaseW ?? (Number(n.style?.width) || 300);
+      const baseH = n.data?.cropBaseH ?? (Number(n.style?.height) || 200);
+      const offX = n.data?.cropOffsetX || 0;
+      const offY = n.data?.cropOffsetY || 0;
+
       return {
         ...n,
+        draggable: n.data?.isImage && n.data?.isCropping ? false : true, // トリミング中はノード自体のドラッグを無効化
         data: {
           ...n.data,
           label: (
@@ -492,12 +503,23 @@ function FlowEditor() {
                   onMouseDown={(e) => {
                      if (n.data?.isCropping) {
                         e.stopPropagation();
+                        // 画像を直接ドラッグして表示位置を動かす処理
                         imageCropDragRef.current = { id: n.id, startX: e.clientX, startY: e.clientY, initX: Number(n.data?.imgPosX || 0), initY: Number(n.data?.imgPosY || 0) };
                      }
                   }}
                   style={{ width: '100%', height: '100%', overflow: 'hidden', position: 'relative', borderRadius: n.style?.borderRadius || 0, cursor: n.data?.isCropping ? 'move' : 'default' }}
                 >
-                  <img src={n.data.imageUrl as string} style={{ position: 'absolute', width: 'auto', height: 'auto', minWidth: '100%', minHeight: '100%', transform: `translate(${n.data.imgPosX || 0}px, ${n.data.imgPosY || 0}px) scale(${n.data.imgZoom || 1})`, transformOrigin: 'center center', pointerEvents: 'none' }} alt="img" />
+                  <img src={n.data.imageUrl as string} style={{ 
+                      position: 'absolute', 
+                      width: `${baseW}px`,    // 🔴 画像自体のサイズを固定
+                      height: `${baseH}px`, 
+                      left: `${offX}px`,      // 🔴 枠を動かした分だけ逆方向に補正
+                      top: `${offY}px`,
+                      transform: `translate(${n.data.imgPosX || 0}px, ${n.data.imgPosY || 0}px) scale(${n.data.imgZoom || 1})`, 
+                      transformOrigin: 'center center', 
+                      pointerEvents: 'none' 
+                  }} alt="img" />
+                  
                   <div className="markdown-content" style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: n.style?.alignItems || 'center', justifyContent: n.style?.justifyContent || 'center', pointerEvents: 'none', color: n.style?.color || '#000', fontWeight: n.style?.fontWeight || 'normal', textDecoration: n.style?.textDecoration || 'none', fontFamily: n.style?.fontFamily || 'sans-serif', whiteSpace: 'pre-wrap', lineHeight: '1.2' }}>
                     <ReactMarkdown components={MarkdownComponents} remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>{String(n.data?.content || '').replace(/\n/g, '  \n')}</ReactMarkdown>
                   </div>
@@ -508,6 +530,7 @@ function FlowEditor() {
                 </div>
               ) : null}
 
+              {/* 🔴 リサイズハンドルの管理（onResizeで逆補正をかける） */}
               {n.id !== 'center-mark' ? (
                  <NodeResizer 
                     minWidth={30} 
@@ -515,7 +538,42 @@ function FlowEditor() {
                     keepAspectRatio={n.data?.isImage && !n.data?.isCropping ? true : !!n.data?.keepRatio} 
                     isVisible={selectedNodeId === n.id} 
                     lineStyle={{ border: n.data?.isCropping ? '3px dashed #ef4444' : '3px solid #3b82f6', zIndex: 100 }} 
-                    handleStyle={{ background: n.data?.isCropping ? '#ef4444' : '#3b82f6', border: '1px solid #fff', width: 12, height: 12, zIndex: 100, borderRadius: '50%' }} 
+                    handleStyle={{ background: n.data?.isCropping ? '#ef4444' : '#3b82f6', zIndex: 100, borderRadius: '50%' }} 
+                    onResizeStart={(_, params) => {
+                        if (n.data?.isImage) {
+                            n.data._rsX = params.x;
+                            n.data._rsY = params.y;
+                            n.data._rsW = params.width;
+                            n.data._rsH = params.height;
+                            n.data._rsCropW = n.data.cropBaseW ?? (Number(n.style?.width) || 300);
+                            n.data._rsCropH = n.data.cropBaseH ?? (Number(n.style?.height) || 200);
+                            n.data._rsCropOffX = n.data.cropOffsetX || 0;
+                            n.data._rsCropOffY = n.data.cropOffsetY || 0;
+                            n.data._rsImgPosX = n.data.imgPosX || 0;
+                            n.data._rsImgPosY = n.data.imgPosY || 0;
+                        }
+                    }}
+                    onResize={(_, params) => {
+                        if (n.data?.isImage) {
+                            if (n.data?.isCropping) {
+                                // トリミング時：枠が動いた分だけ、中の画像を逆方向に動かして「静止」させる
+                                const dx = params.x - n.data._rsX;
+                                const dy = params.y - n.data._rsY;
+                                n.data.cropOffsetX = n.data._rsCropOffX - dx;
+                                n.data.cropOffsetY = n.data._rsCropOffY - dy;
+                            } else {
+                                // 通常時：枠と一緒に中身も拡大縮小する
+                                const scaleX = params.width / n.data._rsW;
+                                const scaleY = params.height / n.data._rsH;
+                                n.data.cropBaseW = n.data._rsCropW * scaleX;
+                                n.data.cropBaseH = n.data._rsCropH * scaleY;
+                                n.data.cropOffsetX = n.data._rsCropOffX * scaleX;
+                                n.data.cropOffsetY = n.data._rsCropOffY * scaleY;
+                                n.data.imgPosX = n.data._rsImgPosX * scaleX;
+                                n.data.imgPosY = n.data._rsImgPosY * scaleY;
+                            }
+                        }
+                    }}
                  />
               ) : null}
             </div>
@@ -543,10 +601,10 @@ function FlowEditor() {
     <div style={{ width: '100vw', height: '100vh', display: 'flex', flexDirection: 'row', overflow: 'hidden' }}>
       <style>{`
         .markdown-content p { margin: 0; }
-        /* 接続の黒い点を12pxにしつつ、見えない判定エリアを広げてクリックしやすくする */
+        /* 🔴 接続の黒い点を極小(10px)にしつつ、見えない判定エリアを広げてクリックしやすくする */
         .react-flow__handle {
-            width: 12px !important;
-            height: 12px !important;
+            width: 10px !important;
+            height: 10px !important;
             background: #333 !important;
             border: 2px solid #fff !important;
             transition: all 0.2s cubic-bezier(0.34, 1.56, 0.64, 1) !important;
@@ -556,7 +614,7 @@ function FlowEditor() {
         .react-flow__handle::after {
             content: "";
             position: absolute;
-            top: -10px; left: -10px; right: -10px; bottom: -10px;
+            top: -12px; left: -12px; right: -12px; bottom: -12px;
             background: transparent;
         }
         .react-flow__handle:hover {
