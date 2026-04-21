@@ -1,7 +1,7 @@
 'use client';
 import React, { useState, useCallback, useMemo, useRef, useEffect } from 'react';
 import { 
-  ReactFlow, Background, Controls, applyNodeChanges, applyEdgeChanges, 
+  ReactFlow, Background, Controls, applyNodeChanges, applyEdgeChanges, addEdge,
   NodeResizer, ReactFlowProvider, useReactFlow, MarkerType,
   getBezierPath, EdgeProps, BaseEdge, EdgeLabelRenderer, useStore
 } from '@xyflow/react';
@@ -69,7 +69,6 @@ function FlowEditor() {
   const [files, setFiles] = useState<Record<string, any>>({});
   const [activeFileId, setActiveFileId] = useState<string>('default');
   
-  // TSエラー回避のため any[] を指定
   const [nodes, setNodes] = useState<any[]>([]);
   const [edges, setEdges] = useState<any[]>([]);
   const [levelData, setLevelData] = useState<Record<string, { nodes: any[]; edges: any[]; bgColor?: string }>>({});
