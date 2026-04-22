@@ -91,11 +91,21 @@ function FlowEditor() {
   const [selectedEdge, setSelectedEdge] = useState<any | null>(null);
   const [guides, setGuides] = useState<{ lineX?: number, lineY?: number }>({});
   
+  // ★ 部分編集用の独立した文字サイズ状態（スライダー連動用）
+  const [partialFontSize, setPartialFontSize] = useState<number>(24);
+  
   const previewDragRef = useRef<{ id: string, startX: number, startY: number, initX: number, initY: number, moved: boolean } | null>(null);
   const imageCropDragRef = useRef<{ id: string, startX: number, startY: number, initX: number, initY: number } | null>(null);
   const editorRef = useRef<HTMLDivElement>(null);
 
   const selectedNode = useMemo(() => nodes.find(n => n.id === selectedNodeId) || null, [nodes, selectedNodeId]);
+
+  // ノード選択時に部分編集のフォントサイズをリセット
+  useEffect(() => {
+    if (selectedNode) {
+        setPartialFontSize(parseInt(String(selectedNode.style?.fontSize || 24)));
+    }
+  }, [selectedNodeId, selectedNode?.style?.fontSize]);
 
   useEffect(() => {
     const saved = localStorage.getItem('my-logic-files');
@@ -131,7 +141,6 @@ function FlowEditor() {
     }
   }, [files, activeFileId]);
 
-  // ★ ノード選択時にWYSIWYGエディタの中身を同期する
   useEffect(() => {
     if (editorRef.current) {
         if (selectedNode) {
@@ -196,10 +205,9 @@ function FlowEditor() {
     setNodes(nds => nds.map(n => n.id === selectedNodeId ? { ...n, data: { ...(n.data || {}), ...newData }, style: { ...(n.style || {}), ...newStyle } } : n));
   }, [selectedNodeId]);
 
-  // ★ 完璧なWord風 WYSIWYGフォーマットロジック ★
   const applyFormat = (command: string, value: string = '') => {
     if (!editorRef.current) return;
-    editorRef.current.focus(); // エディタにフォーカスを戻す
+    editorRef.current.focus();
 
     if (command === 'fontSize') {
         const selection = window.getSelection();
@@ -207,39 +215,33 @@ function FlowEditor() {
         const range = selection.getRangeAt(0);
 
         if (range.collapsed) {
-            // 文字が選択されていない場合：次に打つ文字のサイズを予約するための透明な箱を作る
             const span = document.createElement('span');
             span.style.fontSize = value;
-            span.innerHTML = '&#8203;'; // ゼロ幅スペース（カーソルを留めるため）
+            span.innerHTML = '&#8203;';
             range.insertNode(span);
             range.setStart(span, 1);
             range.collapse(true);
             selection.removeAllRanges();
             selection.addRange(range);
         } else {
-            // 文字が選択されている場合：ブラウザ標準の機能をハックしてサイズをピクセル指定する
             document.execCommand('fontSize', false, '7');
             const fonts = editorRef.current.querySelectorAll('font[size="7"]');
             fonts.forEach((f) => {
-                const el = f as HTMLElement; // ★ここでTypeScriptに型を教える（エラー解消！）
+                const el = f as HTMLElement;
                 el.removeAttribute('size');
                 el.style.fontSize = value;
             });
         }
     } else {
-        // 太字・色・フォントなどはブラウザのネイティブ機能に完全にお任せ
         document.execCommand(command, false, value);
     }
     
-    // 編集結果をReactに同期
     updateNode({ content: editorRef.current.innerHTML });
   };
 
-  // ★ 全体編集（部分編集の特定のスタイルだけを剥がして上書き） ★
   const applyGlobalStyle = (key: string, value: any) => {
     if (!selectedNode || !editorRef.current) return;
     
-    // エディタ内のすべての要素から該当のスタイルだけを剥ぎ取る
     const elements = editorRef.current.querySelectorAll('*');
     elements.forEach((el) => {
         const e = el as HTMLElement;
@@ -258,13 +260,13 @@ function FlowEditor() {
         if (key === 'fontWeight') {
             if (e.style.fontWeight) e.style.fontWeight = '';
             if (e.tagName === 'B' || e.tagName === 'STRONG') {
-                e.style.fontWeight = 'normal'; // Bタグの太字を打ち消す
+                e.style.fontWeight = 'normal';
             }
         }
         if (key === 'textDecoration') {
             if (e.style.textDecoration) e.style.textDecoration = '';
             if (e.tagName === 'STRIKE') {
-                e.style.textDecoration = 'none'; // STRIKEタグの線を打ち消す
+                e.style.textDecoration = 'none';
             }
         }
     });
@@ -302,7 +304,7 @@ function FlowEditor() {
   const addNode = useCallback((type: 'text' | 'image' | 'shape') => {
     const id = `node-${Date.now()}`;
     let data: any = { content: '項目', previewVisible: false, previewStyle: { opacity: 0.7, offsetX: 0, offsetY: -150, width: 180, height: 120 } };
-    let style: any = { backgroundColor: '#ffffff', color: '#000', borderRadius: '12px', fontSize: '18px', width: 200, height: 100, display: 'flex', alignItems: 'center', justifyContent: 'center', textAlign: 'center' };
+    let style: any = { backgroundColor: '#ffffff', color: '#000', borderRadius: '12px', fontSize: '24px', width: 200, height: 100, display: 'flex', alignItems: 'center', justifyContent: 'center', textAlign: 'center' };
     if (type === 'image') { fileInputRef.current?.click(); return; }
     if (type === 'shape') {
       data = { content: '', isShape: true, shapeType: 'rect', keepRatio: false };
@@ -318,7 +320,6 @@ function FlowEditor() {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Enter') {
         const activeTag = document.activeElement?.tagName;
-        // WYSIWYGエディタの中でのEnterは改行にするため無視
         if (activeTag !== 'INPUT' && activeTag !== 'TEXTAREA' && activeTag !== 'DIV') { e.preventDefault(); addNode('text'); }
       }
     };
@@ -550,11 +551,8 @@ function FlowEditor() {
     <div style={{ width: '100vw', height: '100vh', display: 'flex', flexDirection: 'row', overflow: 'hidden' }}>
       <style>{`
         .html-content p { margin: 0; }
-        /* WYSIWYGエディタで取り消し線を二重線に変換する魔法 */
         .html-content strike, #node-editor strike { text-decoration: line-through double !important; }
-        
         #node-editor:empty:before { content: "テキストを入力..."; color: #aaa; pointer-events: none; }
-        
         .react-flow__handle {
             width: 10px !important;
             height: 10px !important;
@@ -666,7 +664,6 @@ function FlowEditor() {
               )}
 
               <label style={{fontSize: '11px', fontWeight: 'bold'}}>文字内容</label>
-              {/* ★ ここが魔法のネイティブWYSIWYGエディタ ★ */}
               <div 
                 id="node-editor" 
                 ref={editorRef}
@@ -681,8 +678,8 @@ function FlowEditor() {
               <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'5px', marginBottom:'5px', marginTop: '5px' }}>
                 <button onMouseDown={(e) => e.preventDefault()} onClick={() => applyFormat('fontName', 'serif')} style={{cursor:'pointer', border:'1px solid #ccc', padding: '5px', borderRadius: '4px'}}>明朝</button>
                 <button onMouseDown={(e) => e.preventDefault()} onClick={() => applyFormat('fontName', 'sans-serif')} style={{cursor:'pointer', border:'1px solid #ccc', padding: '5px', borderRadius: '4px'}}>ゴシック</button>
-                <button onMouseDown={(e) => e.preventDefault()} onClick={() => applyFormat('bold')} style={{ cursor:'pointer', border:'1px solid #ccc', padding: '5px', borderRadius: '4px' }}>太字</button>
-                <button onMouseDown={(e) => e.preventDefault()} onClick={() => applyFormat('strikeThrough')} style={{ cursor:'pointer', border:'1px solid #ccc', padding: '5px', borderRadius: '4px' }}>二重線</button>
+                <button onMouseDown={(e) => e.preventDefault()} onClick={() => applyFormat('bold')} style={{ cursor:'pointer', border:'1px solid #ccc', padding: '5px', borderRadius: '4px', background: '#fff' }}>太字</button>
+                <button onMouseDown={(e) => e.preventDefault()} onClick={() => applyFormat('strikeThrough')} style={{ cursor:'pointer', border:'1px solid #ccc', padding: '5px', borderRadius: '4px', background: '#fff' }}>二重線</button>
               </div>
 
               <div style={{ display: 'flex', gap: '5px', marginTop: '5px', marginBottom: '10px' }}>
@@ -691,8 +688,17 @@ function FlowEditor() {
 
               <label style={{fontSize:'11px', fontWeight: 'bold'}}>文字サイズ (px)</label>
               <div style={{display:'flex', alignItems:'center', gap:'10px', marginBottom: '15px'}}>
-                <input type="range" min="10" max="250" value={parseInt(String(selectedNode.style?.fontSize || 18))} onChange={(e) => applyFormat('fontSize', `${e.target.value}px`)} style={{flex:1}} />
-                <input type="number" min="10" max="250" value={parseInt(String(selectedNode.style?.fontSize || 18))} onChange={(e) => applyFormat('fontSize', `${e.target.value}px`)} style={{width:'60px', padding:'4px', border:'1px solid #ccc', borderRadius:'4px'}} />
+                {/* ★ 1〜100に拡張した部分編集の文字サイズ設定 */}
+                <input type="range" min="1" max="100" value={partialFontSize} onChange={(e) => {
+                    const val = Number(e.target.value);
+                    setPartialFontSize(val);
+                    applyFormat('fontSize', `${val}px`);
+                }} style={{flex:1}} />
+                <input type="number" min="1" max="100" value={partialFontSize} onChange={(e) => {
+                    const val = Number(e.target.value);
+                    setPartialFontSize(val);
+                    applyFormat('fontSize', `${val}px`);
+                }} style={{width:'60px', padding:'4px', border:'1px solid #ccc', borderRadius:'4px'}} />
               </div>
 
               <hr style={{margin: '15px 0', border: 'none', borderTop: '1px solid #eee'}} />
@@ -700,8 +706,9 @@ function FlowEditor() {
 
               <div style={{display:'flex', alignItems:'center', gap:'10px', marginBottom: '10px', marginTop: '5px'}}>
                 <span style={{fontSize:'10px', width: '40px'}}>サイズ</span>
-                <input type="range" min="10" max="250" value={parseInt(String(selectedNode.style?.fontSize || 18))} onChange={(e) => applyGlobalStyle('fontSize', `${e.target.value}px`)} style={{flex:1}} />
-                <input type="number" min="10" max="250" value={parseInt(String(selectedNode.style?.fontSize || 18))} onChange={(e) => applyGlobalStyle('fontSize', `${e.target.value}px`)} style={{width:'50px', padding:'4px', border:'1px solid #ccc', borderRadius:'4px'}} />
+                {/* ★ 1〜100に拡張した全体編集の文字サイズ設定 */}
+                <input type="range" min="1" max="100" value={parseInt(String(selectedNode.style?.fontSize || 24))} onChange={(e) => applyGlobalStyle('fontSize', `${e.target.value}px`)} style={{flex:1}} />
+                <input type="number" min="1" max="100" value={parseInt(String(selectedNode.style?.fontSize || 24))} onChange={(e) => applyGlobalStyle('fontSize', `${e.target.value}px`)} style={{width:'50px', padding:'4px', border:'1px solid #ccc', borderRadius:'4px'}} />
               </div>
               
               <div style={{ display: 'flex', alignItems:'center', gap: '10px', marginBottom: '15px' }}>
