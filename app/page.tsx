@@ -77,6 +77,8 @@ function FlowEditor() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  const [isExpandedEditor, setIsExpandedEditor] = useState(false); // ★ 巨大エディタの開閉状態
+  
   const [files, setFiles] = useState<Record<string, any>>({});
   const [activeFileId, setActiveFileId] = useState<string>('default');
   
@@ -91,7 +93,6 @@ function FlowEditor() {
   const [selectedEdge, setSelectedEdge] = useState<any | null>(null);
   const [guides, setGuides] = useState<{ lineX?: number, lineY?: number }>({});
   
-  // ★ 部分編集用の独立した文字サイズ状態（スライダー連動用）
   const [partialFontSize, setPartialFontSize] = useState<number>(24);
   
   const previewDragRef = useRef<{ id: string, startX: number, startY: number, initX: number, initY: number, moved: boolean } | null>(null);
@@ -100,7 +101,6 @@ function FlowEditor() {
 
   const selectedNode = useMemo(() => nodes.find(n => n.id === selectedNodeId) || null, [nodes, selectedNodeId]);
 
-  // ノード選択時に部分編集のフォントサイズをリセット
   useEffect(() => {
     if (selectedNode) {
         setPartialFontSize(parseInt(String(selectedNode.style?.fontSize || 24)));
@@ -205,33 +205,22 @@ function FlowEditor() {
     setNodes(nds => nds.map(n => n.id === selectedNodeId ? { ...n, data: { ...(n.data || {}), ...newData }, style: { ...(n.style || {}), ...newStyle } } : n));
   }, [selectedNodeId]);
 
+  // ★ 改良版 WYSIWYGフォーマットロジック（ゴミタグを防止して行間バグを修正）
   const applyFormat = (command: string, value: string = '') => {
     if (!editorRef.current) return;
     editorRef.current.focus();
 
     if (command === 'fontSize') {
-        const selection = window.getSelection();
-        if (!selection || !selection.rangeCount) return;
-        const range = selection.getRangeAt(0);
-
-        if (range.collapsed) {
-            const span = document.createElement('span');
-            span.style.fontSize = value;
-            span.innerHTML = '&#8203;';
-            range.insertNode(span);
-            range.setStart(span, 1);
-            range.collapse(true);
-            selection.removeAllRanges();
-            selection.addRange(range);
-        } else {
-            document.execCommand('fontSize', false, '7');
-            const fonts = editorRef.current.querySelectorAll('font[size="7"]');
-            fonts.forEach((f) => {
-                const el = f as HTMLElement;
-                el.removeAttribute('size');
-                el.style.fontSize = value;
-            });
-        }
+        // execCommandを使いつつ、無限ネストと行間バグを防ぐ特殊な処理
+        document.execCommand('fontSize', false, '7');
+        const fonts = editorRef.current.querySelectorAll('font[size="7"]');
+        fonts.forEach((f) => {
+            const el = f as HTMLElement;
+            // 🔴 size属性を残すことでブラウザの暴走（無限ネスト）を防ぐ
+            el.style.fontSize = value;
+            // 🔴 line-heightを1.2に強制し、文字を小さく戻した時に行間が広がるバグを防ぐ
+            el.style.lineHeight = '1.2'; 
+        });
     } else {
         document.execCommand(command, false, value);
     }
@@ -259,15 +248,11 @@ function FlowEditor() {
         }
         if (key === 'fontWeight') {
             if (e.style.fontWeight) e.style.fontWeight = '';
-            if (e.tagName === 'B' || e.tagName === 'STRONG') {
-                e.style.fontWeight = 'normal';
-            }
+            if (e.tagName === 'B' || e.tagName === 'STRONG') e.style.fontWeight = 'normal';
         }
         if (key === 'textDecoration') {
             if (e.style.textDecoration) e.style.textDecoration = '';
-            if (e.tagName === 'STRIKE') {
-                e.style.textDecoration = 'none';
-            }
+            if (e.tagName === 'STRIKE') e.style.textDecoration = 'none';
         }
     });
 
@@ -446,7 +431,7 @@ function FlowEditor() {
                 <div style={{ transform: 'scale(0.15)', transformOrigin: 'top left', width: '1200px', height: '800px', position: 'relative', pointerEvents: 'none' }}>
                   {levelData[n.id].nodes.map((cn: any) => cn.id !== 'center-mark' ? (
                     <div key={cn.id} style={{ position: 'absolute', left: cn.position.x, top: cn.position.y, width: cn.style?.width || 200, height: cn.style?.height || 100, backgroundColor: cn.style?.backgroundColor || '#fff', border: cn.style?.border || '4px solid #333', borderRadius: cn.style?.borderRadius || '12px', display: 'flex', alignItems: cn.style?.alignItems || 'center', justifyContent: cn.style?.justifyContent || 'center', fontSize: '32px', color: cn.style?.color || '#000', overflow: 'hidden' }}>
-                      {cn.data?.isImage ? <img src={cn.data.imageUrl as string} style={{width:'100%', height:'100%', objectFit:'cover'}} alt="mini" /> : cn.data?.isShape ? null : <div style={{padding:'15px', fontWeight: cn.style?.fontWeight || 'normal', textAlign: cn.style?.textAlign || 'center'}} dangerouslySetInnerHTML={{ __html: renderHTMLWithMath(cn.data?.content) }} />}
+                      {cn.data?.isImage ? <img src={cn.data.imageUrl as string} style={{width:'100%', height:'100%', objectFit:'cover'}} alt="mini" /> : cn.data?.isShape ? null : <div className="html-content" style={{padding:'15px', width:'100%', fontWeight: cn.style?.fontWeight || 'normal', textAlign: cn.style?.textAlign || 'center'}} dangerouslySetInnerHTML={{ __html: renderHTMLWithMath(cn.data?.content) }} />}
                     </div>
                   ) : null)}
                 </div>
@@ -547,12 +532,34 @@ function FlowEditor() {
   const actionBtnStyle = { padding: '10px 16px', borderRadius: '8px', border: '1px solid #ccc', backgroundColor: '#fff', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '5px', boxShadow: '0 2px 4px rgba(0,0,0,0.05)', fontWeight: 'bold', fontSize: '14px', transition: 'all 0.2s' };
   const primaryBtnStyle = { ...actionBtnStyle, backgroundColor: '#3b82f6', color: '#fff', border: 'none', boxShadow: '0 4px 6px rgba(59, 130, 246, 0.3)' };
 
+  // ★ 拡大パネル用のスタイル
+  const editorPanelStyle = isExpandedEditor ? {
+      position: 'fixed' as const,
+      top: '20px',
+      right: '20px',
+      width: '450px',
+      maxHeight: '90vh',
+      backgroundColor: '#fff',
+      zIndex: 10000,
+      padding: '20px',
+      borderRadius: '12px',
+      boxShadow: '0 15px 40px rgba(0,0,0,0.3)',
+      overflowY: 'auto' as const,
+      border: '2px solid #3b82f6'
+  } : {
+      marginTop: '10px'
+  };
+
   return (
     <div style={{ width: '100vw', height: '100vh', display: 'flex', flexDirection: 'row', overflow: 'hidden' }}>
       <style>{`
+        /* 🔴 どんなにサイズを変えても行間がピシッと揃う魔法のCSS */
         .html-content p { margin: 0; }
         .html-content strike, #node-editor strike { text-decoration: line-through double !important; }
+        .html-content *, #node-editor * { line-height: 1.2 !important; vertical-align: baseline !important; }
+        
         #node-editor:empty:before { content: "テキストを入力..."; color: #aaa; pointer-events: none; }
+        
         .react-flow__handle {
             width: 10px !important;
             height: 10px !important;
@@ -574,6 +581,11 @@ function FlowEditor() {
       `}</style>
       <input type="file" ref={fileInputRef} style={{ display: 'none' }} onChange={handleFileChange} accept="image/*" />
       
+      {/* 拡大エディタ起動時の背景の黒い影（クリックで閉じます） */}
+      {isExpandedEditor && (
+          <div onClick={() => setIsExpandedEditor(false)} style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.3)', zIndex: 9999, cursor: 'pointer' }} />
+      )}
+
       <div style={{ width: isSidebarOpen ? '220px' : '0px', transition: 'width 0.3s ease', backgroundColor: '#f8f9fa', borderRight: isSidebarOpen ? '1px solid #ddd' : 'none', display: 'flex', flexDirection: 'column', overflow: 'hidden', zIndex: 10 }}>
         <div style={{ width: '220px', display: 'flex', flexDirection: 'column', height: '100%', padding: '15px' }}>
           <h2>ファイル一覧</h2>
@@ -663,50 +675,58 @@ function FlowEditor() {
                 </div>
               )}
 
-              <label style={{fontSize: '11px', fontWeight: 'bold'}}>文字内容</label>
-              <div 
-                id="node-editor" 
-                ref={editorRef}
-                contentEditable 
-                onInput={(e) => updateNode({ content: e.currentTarget.innerHTML })}
-                onBlur={(e) => updateNode({ content: e.currentTarget.innerHTML })}
-                style={{ width:'100%', minHeight:'80px', marginBottom: '5px', padding: '8px', border: '1px solid #ddd', borderRadius: '4px', outline: 'none', backgroundColor: '#fff', cursor: 'text', overflowY: 'auto' }}
-              />
-              
-              <label style={{fontSize: '10px', color: '#666', fontWeight: 'bold'}}>部分編集 (※選択部分、または次に打つ文字に適用)</label>
-              
-              <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'5px', marginBottom:'5px', marginTop: '5px' }}>
-                <button onMouseDown={(e) => e.preventDefault()} onClick={() => applyFormat('fontName', 'serif')} style={{cursor:'pointer', border:'1px solid #ccc', padding: '5px', borderRadius: '4px'}}>明朝</button>
-                <button onMouseDown={(e) => e.preventDefault()} onClick={() => applyFormat('fontName', 'sans-serif')} style={{cursor:'pointer', border:'1px solid #ccc', padding: '5px', borderRadius: '4px'}}>ゴシック</button>
-                <button onMouseDown={(e) => e.preventDefault()} onClick={() => applyFormat('bold')} style={{ cursor:'pointer', border:'1px solid #ccc', padding: '5px', borderRadius: '4px', background: '#fff' }}>太字</button>
-                <button onMouseDown={(e) => e.preventDefault()} onClick={() => applyFormat('strikeThrough')} style={{ cursor:'pointer', border:'1px solid #ccc', padding: '5px', borderRadius: '4px', background: '#fff' }}>二重線</button>
-              </div>
+              {/* ★ ここから下が「拡大エディタ」になった時に飛び出るパネル部分 ★ */}
+              <div style={editorPanelStyle}>
+                  <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'5px' }}>
+                      <label style={{fontSize: '11px', fontWeight: 'bold'}}>文字内容</label>
+                      <button onClick={() => setIsExpandedEditor(!isExpandedEditor)} style={{ fontSize: '10px', padding: '4px 8px', borderRadius: '4px', border: '1px solid #3b82f6', background: isExpandedEditor ? '#3b82f6' : '#eff6ff', color: isExpandedEditor ? '#fff' : '#3b82f6', fontWeight: 'bold', cursor: 'pointer', transition: '0.2s' }}>
+                          {isExpandedEditor ? '↙️ パネルを戻す' : '↗️ 大きく開く'}
+                      </button>
+                  </div>
 
-              <div style={{ display: 'flex', gap: '5px', marginTop: '5px', marginBottom: '10px' }}>
-                {QUICK_TEXT_COLORS.map(c => <button key={c} onMouseDown={(e) => e.preventDefault()} onClick={() => applyFormat('foreColor', c)} style={{ width:'30px', height:'30px', backgroundColor:c, border: '1px solid #ddd', borderRadius: '4px', cursor: 'pointer' }} />)}
-              </div>
+                  <div 
+                    id="node-editor" 
+                    ref={editorRef}
+                    contentEditable 
+                    onInput={(e) => updateNode({ content: e.currentTarget.innerHTML })}
+                    onBlur={(e) => updateNode({ content: e.currentTarget.innerHTML })}
+                    style={{ width:'100%', minHeight: isExpandedEditor ? '200px' : '80px', marginBottom: '10px', padding: '12px', border: '1px solid #ddd', borderRadius: '4px', outline: 'none', backgroundColor: '#fff', cursor: 'text', overflowY: 'auto', fontSize: isExpandedEditor ? '18px' : 'inherit' }}
+                  />
+                  
+                  <label style={{fontSize: '10px', color: '#666', fontWeight: 'bold'}}>部分編集 (※選択部分、または次に打つ文字に適用)</label>
+                  
+                  <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'5px', marginBottom:'5px', marginTop: '5px' }}>
+                    <button onMouseDown={(e) => e.preventDefault()} onClick={() => applyFormat('fontName', 'serif')} style={{cursor:'pointer', border:'1px solid #ccc', padding: '8px', borderRadius: '4px'}}>明朝</button>
+                    <button onMouseDown={(e) => e.preventDefault()} onClick={() => applyFormat('fontName', 'sans-serif')} style={{cursor:'pointer', border:'1px solid #ccc', padding: '8px', borderRadius: '4px'}}>ゴシック</button>
+                    <button onMouseDown={(e) => e.preventDefault()} onClick={() => applyFormat('bold')} style={{ cursor:'pointer', border:'1px solid #ccc', padding: '8px', borderRadius: '4px', background: '#fff' }}>太字</button>
+                    <button onMouseDown={(e) => e.preventDefault()} onClick={() => applyFormat('strikeThrough')} style={{ cursor:'pointer', border:'1px solid #ccc', padding: '8px', borderRadius: '4px', background: '#fff' }}>二重線</button>
+                  </div>
 
-              <label style={{fontSize:'11px', fontWeight: 'bold'}}>文字サイズ (px)</label>
-              <div style={{display:'flex', alignItems:'center', gap:'10px', marginBottom: '15px'}}>
-                {/* ★ 1〜100に拡張した部分編集の文字サイズ設定 */}
-                <input type="range" min="1" max="100" value={partialFontSize} onChange={(e) => {
-                    const val = Number(e.target.value);
-                    setPartialFontSize(val);
-                    applyFormat('fontSize', `${val}px`);
-                }} style={{flex:1}} />
-                <input type="number" min="1" max="100" value={partialFontSize} onChange={(e) => {
-                    const val = Number(e.target.value);
-                    setPartialFontSize(val);
-                    applyFormat('fontSize', `${val}px`);
-                }} style={{width:'60px', padding:'4px', border:'1px solid #ccc', borderRadius:'4px'}} />
+                  <div style={{ display: 'flex', gap: '5px', marginTop: '5px', marginBottom: '15px' }}>
+                    {QUICK_TEXT_COLORS.map(c => <button key={c} onMouseDown={(e) => e.preventDefault()} onClick={() => applyFormat('foreColor', c)} style={{ width:'30px', height:'30px', backgroundColor:c, border: '1px solid #ddd', borderRadius: '4px', cursor: 'pointer' }} />)}
+                  </div>
+
+                  <label style={{fontSize:'11px', fontWeight: 'bold'}}>文字サイズ (px)</label>
+                  <div style={{display:'flex', alignItems:'center', gap:'10px', marginBottom: '15px'}}>
+                    <input type="range" min="1" max="100" value={partialFontSize} onChange={(e) => {
+                        const val = Number(e.target.value);
+                        setPartialFontSize(val);
+                        applyFormat('fontSize', `${val}px`);
+                    }} style={{flex:1}} />
+                    <input type="number" min="1" max="100" value={partialFontSize} onChange={(e) => {
+                        const val = Number(e.target.value);
+                        setPartialFontSize(val);
+                        applyFormat('fontSize', `${val}px`);
+                    }} style={{width:'60px', padding:'4px', border:'1px solid #ccc', borderRadius:'4px'}} />
+                  </div>
               </div>
+              {/* 拡大パネルエリア ここまで */}
 
               <hr style={{margin: '15px 0', border: 'none', borderTop: '1px solid #eee'}} />
               <label style={{fontSize: '10px', color: '#666', fontWeight: 'bold'}}>全体編集 (※部分編集のスタイルを剥がして上書き)</label>
 
               <div style={{display:'flex', alignItems:'center', gap:'10px', marginBottom: '10px', marginTop: '5px'}}>
                 <span style={{fontSize:'10px', width: '40px'}}>サイズ</span>
-                {/* ★ 1〜100に拡張した全体編集の文字サイズ設定 */}
                 <input type="range" min="1" max="100" value={parseInt(String(selectedNode.style?.fontSize || 24))} onChange={(e) => applyGlobalStyle('fontSize', `${e.target.value}px`)} style={{flex:1}} />
                 <input type="number" min="1" max="100" value={parseInt(String(selectedNode.style?.fontSize || 24))} onChange={(e) => applyGlobalStyle('fontSize', `${e.target.value}px`)} style={{width:'50px', padding:'4px', border:'1px solid #ccc', borderRadius:'4px'}} />
               </div>
