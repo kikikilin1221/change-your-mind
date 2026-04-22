@@ -6,9 +6,7 @@ import {
   getBezierPath, EdgeProps, BaseEdge, EdgeLabelRenderer, useStore
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-import ReactMarkdown from 'react-markdown';
-import remarkMath from 'remark-math';
-import rehypeKatex from 'rehype-katex';
+import katex from 'katex';
 import 'katex/dist/katex.min.css';
 
 // --- 計算関数 ---
@@ -58,65 +56,16 @@ function SmartGuides({ guides }: { guides: { lineX?: number, lineY?: number } })
   );
 }
 
-// --- カスタムMarkdownレンダラー（部分編集用） ---
-const MarkdownComponents: any = {
-  a: ({node, href, children, ...props}: any) => {
-    if (href?.startsWith('#style:')) {
-      const styles = href.replace('#style:', '').split(';');
-      let styleObj: any = {};
-      styles.forEach((s: string) => {
-        const [k, v] = s.split('=');
-        if (k==='color') styleObj.color = v;
-        if (k==='size') styleObj.fontSize = v;
-        if (k==='bold') styleObj.fontWeight = v === 'true' ? 'bold' : 'normal';
-        if (k==='font') styleObj.fontFamily = v;
-        if (k==='double') styleObj.textDecoration = v === 'true' ? 'line-through double' : 'none';
-      });
-      return <span style={styleObj}>{children}</span>;
+// --- HTMLとLaTeXの統合レンダラー ---
+const renderHTMLWithMath = (html: string) => {
+    if (!html) return '';
+    try {
+        let parsed = html.replace(/\$\$(.*?)\$\$/g, (_, math) => katex.renderToString(math, {displayMode: true, throwOnError: false}));
+        parsed = parsed.replace(/\$(.*?)\$/g, (_, math) => katex.renderToString(math, {displayMode: false, throwOnError: false}));
+        return parsed;
+    } catch(e) {
+        return html;
     }
-    return <a href={href} {...props}>{children}</a>;
-  }
-};
-
-const applyStyleToText = (text: string, newStyleKey: string, newStyleValue: string) => {
-  const regex = /\[(.*?)\]\(#style:([^)]+)\)/g;
-  let lastIndex = 0;
-  let result = '';
-  let match;
-  if (!text.includes('](#style:')) {
-      if (newStyleValue === 'false') return text;
-      return `[${text}](#style:${newStyleKey}=${newStyleValue})`;
-  }
-  while ((match = regex.exec(text)) !== null) {
-      if (match.index > lastIndex) {
-          let unstyled = text.substring(lastIndex, match.index);
-          result += newStyleValue === 'false' ? unstyled : `[${unstyled}](#style:${newStyleKey}=${newStyleValue})`;
-      }
-      let innerText = match[1];
-      let existingStyles = match[2];
-      let styleMap = new Map();
-      existingStyles.split(';').forEach((s: string) => {
-          let [k,v] = s.split('=');
-          if (k && v) styleMap.set(k,v);
-      });
-      if (newStyleValue === 'false') {
-          styleMap.delete(newStyleKey);
-      } else {
-          styleMap.set(newStyleKey, newStyleValue);
-      }
-      if (styleMap.size === 0) {
-          result += innerText;
-      } else {
-          let merged = Array.from(styleMap.entries()).map(([k,v]) => `${k}=${v}`).join(';');
-          result += `[${innerText}](#style:${merged})`;
-      }
-      lastIndex = regex.lastIndex;
-  }
-  if (lastIndex < text.length) {
-      let unstyled = text.substring(lastIndex);
-      result += newStyleValue === 'false' ? unstyled : `[${unstyled}](#style:${newStyleKey}=${newStyleValue})`;
-  }
-  return result;
 };
 
 const edgeTypes = { default: DoubleEdge };
@@ -144,8 +93,7 @@ function FlowEditor() {
   
   const previewDragRef = useRef<{ id: string, startX: number, startY: number, initX: number, initY: number, moved: boolean } | null>(null);
   const imageCropDragRef = useRef<{ id: string, startX: number, startY: number, initX: number, initY: number } | null>(null);
-  
-  const [selection, setSelection] = useState({start: 0, end: 0});
+  const editorRef = useRef<HTMLDivElement>(null);
 
   const selectedNode = useMemo(() => nodes.find(n => n.id === selectedNodeId) || null, [nodes, selectedNodeId]);
 
@@ -183,6 +131,17 @@ function FlowEditor() {
     }
   }, [files, activeFileId]);
 
+  // ★ ノード選択時にWYSIWYGエディタの中身を同期する（カーソル飛び防止）
+  useEffect(() => {
+    if (editorRef.current && selectedNode) {
+        if (editorRef.current.innerHTML !== (selectedNode.data.content || '')) {
+            editorRef.current.innerHTML = selectedNode.data.content || '';
+        }
+    } else if (editorRef.current) {
+        editorRef.current.innerHTML = '';
+    }
+  }, [selectedNodeId]);
+
   const loadFileInitial = (id: string, allFiles = files) => {
     const target = allFiles[id]; if (!target) return;
     const loadedLevelData = target.levelData || { root: { nodes: [], edges: [], bgColor: '#ffffff' } };
@@ -209,7 +168,7 @@ function FlowEditor() {
           const nextLevel = target.currentLevel || 'root';
           setLevelData(nextLevelData); setCurrentLevel(nextLevel); setCurrentLabel(target.currentLabel || 'TOP層');
           setNodes(nextLevelData[nextLevel]?.nodes || []); setEdges(nextLevelData[nextLevel]?.edges || []);
-          setSelectedNodeId(null); setSelectedEdge(null); setSelection({start:0, end:0});
+          setSelectedNodeId(null); setSelectedEdge(null);
         }
         return currentFiles;
       });
@@ -235,76 +194,69 @@ function FlowEditor() {
     setNodes(nds => nds.map(n => n.id === selectedNodeId ? { ...n, data: { ...(n.data || {}), ...newData }, style: { ...(n.style || {}), ...newStyle } } : n));
   }, [selectedNodeId]);
 
-  // ★ Word風テキスト編集ロジック ★
-  const applyPartialFormat = (styleKey: string, styleValue: string, isToggle: boolean = false) => {
-    if (!selectedNode) return;
-    const ta = document.getElementById('node-textarea') as HTMLTextAreaElement;
-    const text = String(selectedNode.data?.content || '');
+  // ★ Word風ネイティブ・部分編集（次に打つ文字も予約される） ★
+  const togglePartialStyle = (command: string, value: string = '') => {
+    if (!editorRef.current) return;
+    editorRef.current.focus();
     
-    // UIボタンを押した時はReact Stateから選択範囲を取得（フォーカスが外れても記憶しているため）
-    const start = selection.start;
-    const end = selection.end;
-
-    if (start !== end) {
-        // 文字が選択されている場合：選択範囲だけを装飾する
-        const selectedText = text.substring(start, end);
-        let finalValue = styleValue;
-        if (isToggle) finalValue = selectedText.includes(`${styleKey}=true`) ? 'false' : 'true';
-
-        const newSelectedText = applyStyleToText(selectedText, styleKey, finalValue);
-        const newContent = text.substring(0, start) + newSelectedText + text.substring(end);
-        updateNode({ content: newContent });
-        
-        setTimeout(() => { if(ta) { ta.focus(); ta.setSelectionRange(start, start + newSelectedText.length); }}, 10);
-    } else {
-        // 文字が選択されていない場合：次に打つ文字のために空のフォーマット枠を挿入する（予約）
-        let finalValue = styleValue;
-        if (isToggle) finalValue = 'true';
-        
-        const emptyBlock = `[](#style:${styleKey}=${finalValue})`;
-        const newContent = text.substring(0, start) + emptyBlock + text.substring(end);
-        updateNode({ content: newContent });
-        
-        // 枠の中央（ [ と ] の間 ）にカーソルを移動
-        setTimeout(() => { 
-            if(ta) { 
-                ta.focus(); 
-                ta.setSelectionRange(start + 1, start + 1); 
-                setSelection({start: start + 1, end: start + 1});
-            }
-        }, 10);
+    if (command === 'bold') {
+        document.execCommand('bold');
+    } else if (command === 'color') {
+        document.execCommand('foreColor', false, value);
+    } else if (command === 'fontFamily') {
+        document.execCommand('fontName', false, value);
+    } else if (command === 'strikeThrough') {
+        document.execCommand('strikeThrough'); // CSSで二重線に変換
+    } else if (command === 'large') {
+        // 大きくするボタン：execCommandのハックでSpanを挿入
+        document.execCommand('fontSize', false, '7');
+        const fonts = editorRef.current.querySelectorAll('font[size="7"]');
+        fonts.forEach(f => {
+            f.removeAttribute('size');
+            f.style.fontSize = '1.5em'; // 親の1.5倍の大きさに
+        });
     }
+    
+    // 状態をReact Flowに同期
+    updateNode({ content: editorRef.current.innerHTML });
   };
 
-  // ★ フォントサイズ（全体上書き）の特別ロジック ★
-  const handleFontSize = (val: string) => {
-    if (!selectedNode) return;
-    const ta = document.getElementById('node-textarea') as HTMLTextAreaElement;
-    const start = selection.start;
-    const end = selection.end;
-    const text = String(selectedNode.data?.content || '');
+  // ★ 全体編集（部分編集の特定のスタイルだけを剥がして上書き） ★
+  const applyGlobalStyle = (key: string, value: any) => {
+    if (!selectedNode || !editorRef.current) return;
+    
+    // エディタ内のすべての要素から該当のスタイルだけを剥ぎ取る
+    const elements = editorRef.current.querySelectorAll('*');
+    elements.forEach(el => {
+        const e = el as HTMLElement;
+        if (key === 'fontSize') {
+            if (e.style.fontSize) e.style.fontSize = '';
+            if (e.tagName === 'FONT') e.removeAttribute('size');
+        }
+        if (key === 'color') {
+            if (e.style.color) e.style.color = '';
+            if (e.tagName === 'FONT') e.removeAttribute('color');
+        }
+        if (key === 'fontFamily') {
+            if (e.style.fontFamily) e.style.fontFamily = '';
+            if (e.tagName === 'FONT') e.removeAttribute('face');
+        }
+        if (key === 'fontWeight') {
+            if (e.style.fontWeight) e.style.fontWeight = '';
+            if (e.tagName === 'B' || e.tagName === 'STRONG') {
+                e.style.fontWeight = 'normal'; // Bタグの太字を打ち消す
+            }
+        }
+        if (key === 'textDecoration') {
+            if (e.style.textDecoration) e.style.textDecoration = '';
+            if (e.tagName === 'STRIKE') {
+                e.style.textDecoration = 'none'; // STRIKEタグの線を打ち消す
+            }
+        }
+    });
 
-    if (start !== end) {
-        // 文字が選択されている場合は部分編集
-        const selectedText = text.substring(start, end);
-        const newSelectedText = applyStyleToText(selectedText, 'size', val);
-        const newContent = text.substring(0, start) + newSelectedText + text.substring(end);
-        updateNode({ content: newContent });
-        setTimeout(() => { if(ta) { ta.focus(); ta.setSelectionRange(start, start + newSelectedText.length); }}, 10);
-    } else {
-        // 何も選択されていない場合は「全体のサイズ」を変更し、かつ部分編集のサイズ指定だけをリセットする
-        let newContent = text.replace(/\[(.*?)\]\(#style:([^)]+)\)/g, (match, innerText, stylesStr) => {
-            let styleMap = new Map();
-            stylesStr.split(';').forEach((s: string) => {
-                let [k,v] = s.split('=');
-                if (k && v && k !== 'size') styleMap.set(k,v); // size設定だけを剥がす
-            });
-            if (styleMap.size === 0) return innerText;
-            let merged = Array.from(styleMap.entries()).map(([k,v]) => `${k}=${v}`).join(';');
-            return `[${innerText}](#style:${merged})`;
-        });
-        updateNode({ content: newContent }, { fontSize: val });
-    }
+    const cleanHtml = editorRef.current.innerHTML;
+    updateNode({ content: cleanHtml }, { [key]: value });
   };
 
   const enterLevel = useCallback((id: string, label: string) => {
@@ -312,7 +264,7 @@ function FlowEditor() {
       const target = nds.find(n => n.id === id);
       if (target?.data?.isShape || target?.data?.isImage) return nds;
       setHistory(prev => [...prev, currentLevel]);
-      setCurrentLevel(id); setCurrentLabel(label || '階層中'); setSelectedNodeId(null); setSelection({start:0,end:0});
+      setCurrentLevel(id); setCurrentLabel(label || '階層中'); setSelectedNodeId(null);
       const nextData = levelData[id] || { nodes: [], edges: [] };
       setEdges(nextData.edges || []); return nextData.nodes || [];
     });
@@ -321,14 +273,14 @@ function FlowEditor() {
   const goBack = () => {
     if (history.length === 0) return;
     const newHist = [...history]; const prevLevel = newHist.pop()!;
-    setCurrentLevel(prevLevel); setHistory(newHist); setCurrentLabel(prevLevel === 'root' ? 'TOP層' : '階層中'); setSelectedNodeId(null); setSelection({start:0,end:0});
+    setCurrentLevel(prevLevel); setHistory(newHist); setCurrentLabel(prevLevel === 'root' ? 'TOP層' : '階層中'); setSelectedNodeId(null);
     const prevData = levelData[prevLevel] || { nodes: [], edges: [] };
     setNodes(prevData.nodes || []); setEdges(prevData.edges || []);
   };
 
   const goTop = () => {
     if (history.length === 0) return;
-    setCurrentLevel('root'); setHistory([]); setCurrentLabel('TOP層'); setSelectedNodeId(null); setSelection({start:0,end:0});
+    setCurrentLevel('root'); setHistory([]); setCurrentLabel('TOP層'); setSelectedNodeId(null);
     const rootData = levelData['root'] || { nodes: [], edges: [] };
     setNodes(rootData.nodes || []); setEdges(rootData.edges || []);
   };
@@ -352,7 +304,7 @@ function FlowEditor() {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Enter') {
         const activeTag = document.activeElement?.tagName;
-        if (activeTag !== 'INPUT' && activeTag !== 'TEXTAREA') { e.preventDefault(); addNode('text'); }
+        if (activeTag !== 'INPUT' && activeTag !== 'TEXTAREA' && activeTag !== 'DIV') { e.preventDefault(); addNode('text'); }
       }
     };
     window.addEventListener('keydown', handleKeyDown);
@@ -373,7 +325,6 @@ function FlowEditor() {
         } : n));
       }
 
-      // 画像のパン移動
       const imgDrag = imageCropDragRef.current;
       if (imgDrag) {
         const dx = (e.clientX - imgDrag.startX) / zoom;
@@ -479,7 +430,7 @@ function FlowEditor() {
                 <div style={{ transform: 'scale(0.15)', transformOrigin: 'top left', width: '1200px', height: '800px', position: 'relative', pointerEvents: 'none' }}>
                   {levelData[n.id].nodes.map((cn: any) => cn.id !== 'center-mark' ? (
                     <div key={cn.id} style={{ position: 'absolute', left: cn.position.x, top: cn.position.y, width: cn.style?.width || 200, height: cn.style?.height || 100, backgroundColor: cn.style?.backgroundColor || '#fff', border: cn.style?.border || '4px solid #333', borderRadius: cn.style?.borderRadius || '12px', display: 'flex', alignItems: cn.style?.alignItems || 'center', justifyContent: cn.style?.justifyContent || 'center', fontSize: '32px', color: cn.style?.color || '#000', overflow: 'hidden' }}>
-                      {cn.data?.isImage ? <img src={cn.data.imageUrl as string} style={{width:'100%', height:'100%', objectFit:'cover'}} alt="mini" /> : cn.data?.isShape ? null : <div style={{padding:'15px', fontWeight: cn.style?.fontWeight || 'normal', textAlign: cn.style?.textAlign || 'center'}}>{String(cn.data?.content || '')}</div>}
+                      {cn.data?.isImage ? <img src={cn.data.imageUrl as string} style={{width:'100%', height:'100%', objectFit:'cover'}} alt="mini" /> : cn.data?.isShape ? null : <div style={{padding:'15px', fontWeight: cn.style?.fontWeight || 'normal', textAlign: cn.style?.textAlign || 'center'}} dangerouslySetInnerHTML={{ __html: renderHTMLWithMath(cn.data?.content) }} />}
                     </div>
                   ) : null)}
                 </div>
@@ -489,7 +440,6 @@ function FlowEditor() {
         );
       }
 
-      // ★ パワポ風 画像トリミングのコア部分 ★
       const baseW = n.data?.cropBaseW ?? (Number(n.style?.width) || 300);
       const baseH = n.data?.cropBaseH ?? (Number(n.style?.height) || 200);
       const offX = n.data?.cropOffsetX || 0;
@@ -517,9 +467,9 @@ function FlowEditor() {
                 >
                   <img src={n.data.imageUrl as string} style={{ 
                       position: 'absolute', 
-                      width: n.data?.isCropping ? `${baseW}px` : '100%', // トリミング中は絶対値固定、通常時は枠に追従
+                      width: n.data?.isCropping ? `${baseW}px` : '100%', 
                       height: n.data?.isCropping ? `${baseH}px` : '100%', 
-                      maxWidth: 'none', maxHeight: 'none', // これが勝手な縮小を防ぐ魔法
+                      maxWidth: 'none', maxHeight: 'none', 
                       left: n.data?.isCropping ? `${offX}px` : 0,
                       top: n.data?.isCropping ? `${offY}px` : 0,
                       transform: `translate(${n.data.imgPosX || 0}px, ${n.data.imgPosY || 0}px) scale(${n.data.imgZoom || 1})`, 
@@ -527,14 +477,10 @@ function FlowEditor() {
                       pointerEvents: 'none' 
                   }} alt="img" />
                   
-                  <div className="markdown-content" style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: n.style?.alignItems || 'center', justifyContent: n.style?.justifyContent || 'center', pointerEvents: 'none', color: n.style?.color || '#000', fontWeight: n.style?.fontWeight || 'normal', textDecoration: n.style?.textDecoration || 'none', fontFamily: n.style?.fontFamily || 'sans-serif', whiteSpace: 'pre-wrap', lineHeight: '1.2' }}>
-                    <ReactMarkdown components={MarkdownComponents} remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>{String(n.data?.content || '').replace(/\n/g, '  \n')}</ReactMarkdown>
-                  </div>
+                  <div className="markdown-content" style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: n.style?.alignItems || 'center', justifyContent: n.style?.justifyContent || 'center', pointerEvents: 'none', color: n.style?.color || '#000', fontWeight: n.style?.fontWeight || 'normal', textDecoration: n.style?.textDecoration || 'none', fontFamily: n.style?.fontFamily || 'sans-serif', whiteSpace: 'pre-wrap', lineHeight: '1.2' }} dangerouslySetInnerHTML={{ __html: renderHTMLWithMath(n.data?.content) }} />
                 </div>
               ) : n.id !== 'center-mark' ? (
-                <div className="markdown-content" style={{ pointerEvents: 'none', width: '100%', color: n.style?.color || '#000', fontWeight: n.style?.fontWeight || 'normal', textDecoration: n.style?.textDecoration || 'none', fontFamily: n.style?.fontFamily || 'sans-serif', whiteSpace: 'pre-wrap', lineHeight: '1.2', textAlign: n.style?.textAlign || 'center' }}>
-                  <ReactMarkdown components={MarkdownComponents} remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>{String(n.data?.content || '').replace(/\n/g, '  \n')}</ReactMarkdown>
-                </div>
+                <div className="markdown-content" style={{ pointerEvents: 'none', width: '100%', color: n.style?.color || '#000', fontWeight: n.style?.fontWeight || 'normal', textDecoration: n.style?.textDecoration || 'none', fontFamily: n.style?.fontFamily || 'sans-serif', whiteSpace: 'pre-wrap', lineHeight: '1.2', textAlign: n.style?.textAlign || 'center' }} dangerouslySetInnerHTML={{ __html: renderHTMLWithMath(n.data?.content) }} />
               ) : null}
 
               {n.id !== 'center-mark' ? (
@@ -555,7 +501,6 @@ function FlowEditor() {
                     }}
                     onResize={(_, params) => {
                         if (n.data?.isImage && n.data?.isCropping) {
-                            // 枠が動いた分だけ、画像を逆方向に動かして「固定」させる
                             const dx = params.x - n.data._rsX;
                             const dy = params.y - n.data._rsY;
                             updateNode({
@@ -590,7 +535,11 @@ function FlowEditor() {
     <div style={{ width: '100vw', height: '100vh', display: 'flex', flexDirection: 'row', overflow: 'hidden' }}>
       <style>{`
         .markdown-content p { margin: 0; }
-        /* 🔴 接続の黒い点を極小(10px)にしつつ、見えない判定エリアを広げてクリックしやすくする魔法 */
+        /* WYSIWYGエディタで取り消し線を二重線に変換する魔法 */
+        .markdown-content strike, #node-editor strike { text-decoration: line-through double !important; }
+        
+        #node-editor:empty:before { content: "テキストを入力..."; color: #aaa; pointer-events: none; }
+        
         .react-flow__handle {
             width: 10px !important;
             height: 10px !important;
@@ -641,7 +590,7 @@ function FlowEditor() {
              onConnect={p => setEdges(eds => addEdge({...p, type:'default', style: {strokeWidth: 2}}, eds))} 
              onNodeClick={(_, n) => { setSelectedNodeId(n.id !== 'center-mark' ? n.id : null); setSelectedEdge(null); }} 
              onEdgeClick={(_, e) => { setSelectedEdge(e); setSelectedNodeId(null); }} 
-             onPaneClick={() => { setSelectedNodeId(null); setSelectedEdge(null); setSelection({start:0, end:0}); }} 
+             onPaneClick={() => { setSelectedNodeId(null); setSelectedEdge(null); }} 
              onNodeDoubleClick={(_, n) => enterLevel(n.id, String(n.data?.content || ''))} 
              onNodeDrag={onNodeDrag} onNodeDragStop={onNodeDragStop} fitView
           >
@@ -702,39 +651,44 @@ function FlowEditor() {
               )}
 
               <label style={{fontSize: '11px', fontWeight: 'bold'}}>文字内容</label>
-              <textarea 
-                id="node-textarea" 
-                value={String(selectedNode.data?.content || '')} 
-                onChange={(e) => updateNode({ content: e.target.value })} 
-                onSelect={(e) => setSelection({start: e.currentTarget.selectionStart, end: e.currentTarget.selectionEnd})}
-                onClick={(e) => setSelection({start: e.currentTarget.selectionStart, end: e.currentTarget.selectionEnd})}
-                onKeyUp={(e) => setSelection({start: e.currentTarget.selectionStart, end: e.currentTarget.selectionEnd})}
-                style={{ width:'100%', height:'80px', marginBottom: '5px', padding: '8px', border: '1px solid #ddd', borderRadius: '4px' }} 
+              {/* WYSIWYGエディタ（旧textarea） */}
+              <div 
+                id="node-editor" 
+                ref={editorRef}
+                contentEditable 
+                onInput={(e) => updateNode({ content: e.currentTarget.innerHTML })}
+                style={{ width:'100%', minHeight:'80px', marginBottom: '5px', padding: '8px', border: '1px solid #ddd', borderRadius: '4px', outline: 'none', backgroundColor: '#fff', cursor: 'text' }}
               />
               
-              <label style={{fontSize: '10px', color: '#666', fontWeight: 'bold'}}>テキスト編集 (※文字選択で部分編集、未選択で予約)</label>
+              <label style={{fontSize: '10px', color: '#666', fontWeight: 'bold'}}>部分編集 (※文字選択、または次に打つ文字に適用)</label>
               
               <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'5px', marginBottom:'5px', marginTop: '5px' }}>
-                <button onMouseDown={(e) => e.preventDefault()} onClick={() => applyPartialFormat('font', 'serif')} style={{cursor:'pointer', border:'1px solid #ccc', padding: '5px', borderRadius: '4px'}}>明朝</button>
-                <button onMouseDown={(e) => e.preventDefault()} onClick={() => applyPartialFormat('font', 'sans-serif')} style={{cursor:'pointer', border:'1px solid #ccc', padding: '5px', borderRadius: '4px'}}>ゴシック</button>
-                <button onMouseDown={(e) => e.preventDefault()} onClick={() => applyPartialFormat('bold', 'true', true)} style={{ cursor:'pointer', border:'1px solid #ccc', padding: '5px', borderRadius: '4px', background: '#fff' }}>太字</button>
-                <button onMouseDown={(e) => e.preventDefault()} onClick={() => applyPartialFormat('double', 'true', true)} style={{ cursor:'pointer', border:'1px solid #ccc', padding: '5px', borderRadius: '4px', background: '#fff' }}>二重線</button>
+                <button onMouseDown={(e) => e.preventDefault()} onClick={() => togglePartialStyle('fontFamily', 'serif')} style={{cursor:'pointer', border:'1px solid #ccc', padding: '5px', borderRadius: '4px'}}>明朝</button>
+                <button onMouseDown={(e) => e.preventDefault()} onClick={() => togglePartialStyle('fontFamily', 'sans-serif')} style={{cursor:'pointer', border:'1px solid #ccc', padding: '5px', borderRadius: '4px'}}>ゴシック</button>
+                <button onMouseDown={(e) => e.preventDefault()} onClick={() => togglePartialStyle('bold')} style={{ cursor:'pointer', border:'1px solid #ccc', padding: '5px', borderRadius: '4px' }}>太字</button>
+                <button onMouseDown={(e) => e.preventDefault()} onClick={() => togglePartialStyle('strikeThrough')} style={{ cursor:'pointer', border:'1px solid #ccc', padding: '5px', borderRadius: '4px' }}>二重線</button>
               </div>
 
-              <div style={{ display: 'flex', gap: '5px', marginTop: '5px', marginBottom: '15px' }}>
-                {QUICK_TEXT_COLORS.map(c => <button key={c} onMouseDown={(e) => e.preventDefault()} onClick={() => applyPartialFormat('color', c)} style={{ width:'30px', height:'30px', backgroundColor:c, border: '1px solid #ddd', borderRadius: '4px', cursor: 'pointer' }} />)}
+              <div style={{ display: 'flex', gap: '5px', marginTop: '5px', marginBottom: '5px' }}>
+                {QUICK_TEXT_COLORS.map(c => <button key={c} onMouseDown={(e) => e.preventDefault()} onClick={() => togglePartialStyle('color', c)} style={{ width:'30px', height:'30px', backgroundColor:c, border: '1px solid #ddd', borderRadius: '4px', cursor: 'pointer' }} />)}
               </div>
-
-              <label style={{fontSize:'11px', fontWeight: 'bold'}}>文字サイズ (px)</label>
-              <div style={{display:'flex', alignItems:'center', gap:'10px', marginBottom: '10px'}}>
-                <input type="range" min="10" max="250" value={parseInt(String(selectedNode.style?.fontSize || 18))} onChange={(e) => handleFontSize(`${e.target.value}px`)} style={{flex:1}} />
-                <input type="number" min="10" max="250" value={parseInt(String(selectedNode.style?.fontSize || 18))} onChange={(e) => handleFontSize(`${e.target.value}px`)} style={{width:'60px', padding:'4px', border:'1px solid #ccc', borderRadius:'4px'}} />
-              </div>
+              <button onMouseDown={(e) => e.preventDefault()} onClick={() => togglePartialStyle('large')} style={{ width: '100%', cursor:'pointer', border:'1px solid #ccc', padding: '5px', borderRadius: '4px', marginBottom: '15px' }}>文字を大きく</button>
 
               <hr style={{margin: '15px 0', border: 'none', borderTop: '1px solid #eee'}} />
-              <label style={{fontSize: '10px', color: '#666', fontWeight: 'bold'}}>レイアウト (全体のみ)</label>
+              <label style={{fontSize: '10px', color: '#666', fontWeight: 'bold'}}>全体編集 (※部分編集を賢く上書きします)</label>
 
-              <div style={{ display:'flex', gap:'5px', marginBottom:'5px', marginTop: '5px' }}>
+              <div style={{display:'flex', alignItems:'center', gap:'10px', marginBottom: '10px', marginTop: '5px'}}>
+                <span style={{fontSize:'10px', width: '40px'}}>サイズ</span>
+                <input type="range" min="10" max="250" value={parseInt(String(selectedNode.style?.fontSize || 18))} onChange={(e) => applyGlobalStyle('fontSize', `${e.target.value}px`)} style={{flex:1}} />
+                <input type="number" min="10" max="250" value={parseInt(String(selectedNode.style?.fontSize || 18))} onChange={(e) => applyGlobalStyle('fontSize', `${e.target.value}px`)} style={{width:'50px', padding:'4px', border:'1px solid #ccc', borderRadius:'4px'}} />
+              </div>
+              
+              <div style={{ display: 'flex', alignItems:'center', gap: '10px', marginBottom: '15px' }}>
+                <span style={{fontSize:'10px', width: '40px'}}>文字色</span>
+                <input type="color" value={String(selectedNode.style?.color || '#000000')} onChange={(e) => applyGlobalStyle('color', e.target.value)} style={{width:'30px', height:'30px', cursor: 'pointer', border: 'none', padding: 0}} />
+              </div>
+
+              <div style={{ display:'flex', gap:'5px', marginBottom:'5px' }}>
                 <button onClick={() => updateNode({}, { justifyContent: 'flex-start', textAlign: 'left' })} style={{flex:1, cursor:'pointer', border:'1px solid #ccc', padding: '5px', borderRadius: '4px'}}>左</button>
                 <button onClick={() => updateNode({}, { justifyContent: 'center', textAlign: 'center' })} style={{flex:1, cursor:'pointer', border:'1px solid #ccc', padding: '5px', borderRadius: '4px'}}>中央</button>
                 <button onClick={() => updateNode({}, { justifyContent: 'flex-end', textAlign: 'right' })} style={{flex:1, cursor:'pointer', border:'1px solid #ccc', padding: '5px', borderRadius: '4px'}}>右</button>
