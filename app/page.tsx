@@ -93,7 +93,8 @@ function FlowEditor() {
   const [selectedEdge, setSelectedEdge] = useState<any | null>(null);
   const [guides, setGuides] = useState<{ lineX?: number, lineY?: number }>({});
   
-  const [partialFontSize, setPartialFontSize] = useState<number>(24);
+  // ★ 初期値を標準の14px (Webにおける10.5pt相当) に設定
+  const [partialFontSize, setPartialFontSize] = useState<number>(14);
   
   const previewDragRef = useRef<{ id: string, startX: number, startY: number, initX: number, initY: number, moved: boolean } | null>(null);
   const imageCropDragRef = useRef<{ id: string, startX: number, startY: number, initX: number, initY: number } | null>(null);
@@ -105,7 +106,7 @@ function FlowEditor() {
 
   useEffect(() => {
     if (selectedNode) {
-        setPartialFontSize(parseInt(String(selectedNode.style?.fontSize || 24)));
+        setPartialFontSize(parseInt(String(selectedNode.style?.fontSize || 14)));
     }
   }, [selectedNodeId, selectedNode?.style?.fontSize]);
 
@@ -214,13 +215,12 @@ function FlowEditor() {
     }
   };
 
-  // ★ TypeScriptエラー回避のため、selectionのnullチェックを徹底
   const applyFormat = (command: string, value: string = '') => {
     if (!editorRef.current) return;
     editorRef.current.focus();
     const selection = window.getSelection();
     
-    if (!selection) return; // ←【追加】TSエラー(18047)を消す魔法の1行
+    if (!selection) return;
 
     if (savedRangeRef.current) {
         selection.removeAllRanges();
@@ -235,13 +235,12 @@ function FlowEditor() {
     updateNode({ content: editorRef.current.innerHTML });
   };
 
-  // ★ TypeScriptエラー回避のため、selectionのnullチェックを徹底
   const changeFontSize = (val: string, isReset: boolean = false) => {
     if (!editorRef.current) return;
     editorRef.current.focus();
     const selection = window.getSelection();
     
-    if (!selection) return; // ←【追加】TSエラー(18047)を消す魔法の1行
+    if (!selection) return;
     
     if (savedRangeRef.current) {
         selection.removeAllRanges();
@@ -259,13 +258,13 @@ function FlowEditor() {
         
         if (currentNode && currentNode.nodeName === 'SPAN' && (currentNode.textContent === '\u200B' || currentNode.textContent === '')) {
             if (isReset) {
-                (currentNode as HTMLElement).style.fontSize = '';
+                (currentNode as HTMLElement).style.fontSize = '14px';
             } else {
                 (currentNode as HTMLElement).style.fontSize = val;
             }
         } else {
             const span = document.createElement('span');
-            if (!isReset) span.style.fontSize = val;
+            span.style.fontSize = isReset ? '14px' : val;
             span.style.lineHeight = '1.2';
             span.innerHTML = '\u200B'; 
             range.insertNode(span);
@@ -275,16 +274,13 @@ function FlowEditor() {
             selection.addRange(range);
         }
     } else {
+        if (isReset) document.execCommand('removeFormat'); // リセット時は既存フォーマットも剥がす
         document.execCommand('fontSize', false, '7');
         const fonts = editorRef.current.querySelectorAll('font[size="7"]');
         fonts.forEach((f) => {
             const el = f as HTMLElement;
             el.removeAttribute('size');
-            if (isReset) {
-                el.style.fontSize = '';
-            } else {
-                el.style.fontSize = val;
-            }
+            el.style.fontSize = isReset ? '14px' : val;
             el.style.lineHeight = '1.2';
         });
     }
@@ -295,37 +291,61 @@ function FlowEditor() {
     updateNode({ content: editorRef.current.innerHTML });
   };
 
-  const handleResetFontSize = () => {
-    setPartialFontSize(24);
-    changeFontSize('', true);
-  };
+  // ★ 究極の「標準リセット」機能
+  const handleResetFormat = () => {
+      setPartialFontSize(14); // スライダーを標準(14px)に戻す
+      if (!editorRef.current) return;
+      editorRef.current.focus();
+      const selection = window.getSelection();
+      if (!selection) return;
 
-  const applyGlobalStyle = (key: string, value: any) => {
-    if (!selectedNode || !editorRef.current) return;
-    
-    const elements = editorRef.current.querySelectorAll('*');
-    elements.forEach((el) => {
-        const e = el as HTMLElement;
-        if (key === 'color') {
-            if (e.style.color) e.style.color = '';
-            if (e.tagName === 'FONT') e.removeAttribute('color');
-        }
-        if (key === 'fontFamily') {
-            if (e.style.fontFamily) e.style.fontFamily = '';
-            if (e.tagName === 'FONT') e.removeAttribute('face');
-        }
-        if (key === 'fontWeight') {
-            if (e.style.fontWeight) e.style.fontWeight = '';
-            if (e.tagName === 'B' || e.tagName === 'STRONG') e.style.fontWeight = 'normal';
-        }
-        if (key === 'textDecoration') {
-            if (e.style.textDecoration) e.style.textDecoration = '';
-            if (e.tagName === 'STRIKE') e.style.textDecoration = 'none';
-        }
-    });
+      if (savedRangeRef.current) {
+          selection.removeAllRanges();
+          selection.addRange(savedRangeRef.current);
+      }
 
-    const cleanHtml = editorRef.current.innerHTML;
-    updateNode({ content: cleanHtml }, { [key]: value });
+      if (selection.rangeCount > 0) {
+          const range = selection.getRangeAt(0);
+          if (range.collapsed) {
+              // 選択していない場合：進行中の太字や色をすべて解除
+              if (document.queryCommandState('bold')) document.execCommand('bold');
+              if (document.queryCommandState('strikeThrough')) document.execCommand('strikeThrough');
+              document.execCommand('foreColor', false, '#000000');
+              document.execCommand('fontName', false, 'sans-serif');
+              
+              // 14pxのクリーンな箱を設置
+              const span = document.createElement('span');
+              span.style.fontSize = '14px';
+              span.style.color = '#000000';
+              span.style.fontWeight = 'normal';
+              span.style.textDecoration = 'none';
+              span.style.fontFamily = 'sans-serif';
+              span.innerHTML = '&#8203;'; 
+              range.insertNode(span);
+              range.setStart(span.firstChild!, 1);
+              range.collapse(true);
+              selection.removeAllRanges();
+              selection.addRange(range);
+          } else {
+              // 選択している場合：全ての装飾を剥がして標準設定を上書き
+              document.execCommand('removeFormat');
+              document.execCommand('fontSize', false, '7');
+              const fonts = editorRef.current.querySelectorAll('font[size="7"]');
+              fonts.forEach((f) => {
+                  const el = f as HTMLElement;
+                  el.removeAttribute('size');
+                  el.style.fontSize = '14px';
+                  el.style.color = '#000000';
+                  el.style.fontWeight = 'normal';
+                  el.style.textDecoration = 'none';
+                  el.style.fontFamily = 'sans-serif';
+                  el.style.lineHeight = '1.2';
+              });
+          }
+          savedRangeRef.current = selection.getRangeAt(0).cloneRange();
+      }
+      
+      updateNode({ content: editorRef.current.innerHTML });
   };
 
   const enterLevel = useCallback((id: string, label: string) => {
@@ -357,7 +377,7 @@ function FlowEditor() {
   const addNode = useCallback((type: 'text' | 'image' | 'shape') => {
     const id = `node-${Date.now()}`;
     let data: any = { content: '項目', previewVisible: false, previewStyle: { opacity: 0.7, offsetX: 0, offsetY: -150, width: 180, height: 120 } };
-    let style: any = { backgroundColor: '#ffffff', color: '#000', borderRadius: '12px', fontSize: '24px', width: 200, height: 100, display: 'flex', alignItems: 'center', justifyContent: 'center', textAlign: 'center' };
+    let style: any = { backgroundColor: '#ffffff', color: '#000', borderRadius: '12px', fontSize: '14px', width: 200, height: 100, display: 'flex', alignItems: 'center', justifyContent: 'center', textAlign: 'center' };
     if (type === 'image') { fileInputRef.current?.click(); return; }
     if (type === 'shape') {
       data = { content: '', isShape: true, shapeType: 'rect', keepRatio: false };
@@ -647,8 +667,9 @@ function FlowEditor() {
       `}</style>
       <input type="file" ref={fileInputRef} style={{ display: 'none' }} onChange={handleFileChange} accept="image/*" />
       
+      {/* ★ 拡大エディタ用のオーバーレイのZIndexを1000より低く設定 */}
       {isExpandedEditor && (
-          <div onClick={() => setIsExpandedEditor(false)} style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.3)', zIndex: 9999, cursor: 'pointer' }} />
+          <div onClick={() => setIsExpandedEditor(false)} style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.3)', zIndex: 990, cursor: 'pointer' }} />
       )}
 
       <div style={{ width: isSidebarOpen ? '220px' : '0px', transition: 'width 0.3s ease', backgroundColor: '#f8f9fa', borderRight: isSidebarOpen ? '1px solid #ddd' : 'none', display: 'flex', flexDirection: 'column', overflow: 'hidden', zIndex: 10 }}>
@@ -775,6 +796,7 @@ function FlowEditor() {
 
                   <label style={{fontSize:'11px', fontWeight: 'bold'}}>文字サイズ (px)</label>
                   <div style={{display:'flex', alignItems:'center', gap:'8px', marginBottom: '15px'}}>
+                    {/* ★ 1〜100に拡張した部分編集の文字サイズ設定 */}
                     <input type="range" min="1" max="100" value={partialFontSize} onChange={(e) => {
                         const val = Number(e.target.value);
                         setPartialFontSize(val);
@@ -785,10 +807,10 @@ function FlowEditor() {
                         setPartialFontSize(val);
                         changeFontSize(`${val}px`);
                     }} style={{width:'50px', padding:'4px', border:'1px solid #ccc', borderRadius:'4px'}} />
-                    <button onMouseDown={(e) => e.preventDefault()} onClick={handleResetFontSize} style={{fontSize:'11px', padding:'4px 8px', border:'1px solid #ccc', borderRadius:'4px', cursor:'pointer', background:'#fff'}}>リセット</button>
+                    {/* ★ 標準リセットボタン（サイズ14px・装飾全解除） */}
+                    <button onMouseDown={(e) => e.preventDefault()} onClick={handleResetFormat} style={{fontSize:'11px', padding:'4px 8px', border:'1px solid #ccc', borderRadius:'4px', cursor:'pointer', background:'#fff', fontWeight:'bold'}}>標準リセット (14px)</button>
                   </div>
               </div>
-              {/* 拡大パネルエリア ここまで */}
 
               <hr style={{margin: '15px 0', border: 'none', borderTop: '1px solid #eee'}} />
               <label style={{fontSize: '10px', color: '#666', fontWeight: 'bold'}}>レイアウト (枠全体にのみ適用)</label>
