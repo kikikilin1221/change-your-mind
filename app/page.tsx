@@ -77,7 +77,7 @@ function FlowEditor() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
-  const [isExpandedEditor, setIsExpandedEditor] = useState(false); // ★ 巨大エディタの開閉状態
+  const [isExpandedEditor, setIsExpandedEditor] = useState(false);
   
   const [files, setFiles] = useState<Record<string, any>>({});
   const [activeFileId, setActiveFileId] = useState<string>('default');
@@ -97,7 +97,9 @@ function FlowEditor() {
   
   const previewDragRef = useRef<{ id: string, startX: number, startY: number, initX: number, initY: number, moved: boolean } | null>(null);
   const imageCropDragRef = useRef<{ id: string, startX: number, startY: number, initX: number, initY: number } | null>(null);
+  
   const editorRef = useRef<HTMLDivElement>(null);
+  const savedRangeRef = useRef<Range | null>(null);
 
   const selectedNode = useMemo(() => nodes.find(n => n.id === selectedNodeId) || null, [nodes, selectedNodeId]);
 
@@ -179,7 +181,7 @@ function FlowEditor() {
           const nextLevel = target.currentLevel || 'root';
           setLevelData(nextLevelData); setCurrentLevel(nextLevel); setCurrentLabel(target.currentLabel || 'TOP層');
           setNodes(nextLevelData[nextLevel]?.nodes || []); setEdges(nextLevelData[nextLevel]?.edges || []);
-          setSelectedNodeId(null); setSelectedEdge(null);
+          setSelectedNodeId(null); setSelectedEdge(null); savedRangeRef.current = null;
         }
         return currentFiles;
       });
@@ -205,27 +207,97 @@ function FlowEditor() {
     setNodes(nds => nds.map(n => n.id === selectedNodeId ? { ...n, data: { ...(n.data || {}), ...newData }, style: { ...(n.style || {}), ...newStyle } } : n));
   }, [selectedNodeId]);
 
-  // ★ 改良版 WYSIWYGフォーマットロジック（ゴミタグを防止して行間バグを修正）
+  const saveSelection = () => {
+    const sel = window.getSelection();
+    if (sel && sel.rangeCount > 0) {
+        savedRangeRef.current = sel.getRangeAt(0).cloneRange();
+    }
+  };
+
+  // ★ TypeScriptエラー回避のため、selectionのnullチェックを徹底
   const applyFormat = (command: string, value: string = '') => {
     if (!editorRef.current) return;
     editorRef.current.focus();
+    const selection = window.getSelection();
+    
+    if (!selection) return; // ←【追加】TSエラー(18047)を消す魔法の1行
 
-    if (command === 'fontSize') {
-        // execCommandを使いつつ、無限ネストと行間バグを防ぐ特殊な処理
+    if (savedRangeRef.current) {
+        selection.removeAllRanges();
+        selection.addRange(savedRangeRef.current);
+    }
+
+    document.execCommand(command, false, value);
+    
+    if (selection.rangeCount > 0) {
+        savedRangeRef.current = selection.getRangeAt(0).cloneRange();
+    }
+    updateNode({ content: editorRef.current.innerHTML });
+  };
+
+  // ★ TypeScriptエラー回避のため、selectionのnullチェックを徹底
+  const changeFontSize = (val: string, isReset: boolean = false) => {
+    if (!editorRef.current) return;
+    editorRef.current.focus();
+    const selection = window.getSelection();
+    
+    if (!selection) return; // ←【追加】TSエラー(18047)を消す魔法の1行
+    
+    if (savedRangeRef.current) {
+        selection.removeAllRanges();
+        selection.addRange(savedRangeRef.current);
+    }
+    
+    if (selection.rangeCount === 0) return;
+    const range = selection.getRangeAt(0);
+
+    if (range.collapsed) {
+        let currentNode = range.startContainer as Node | null;
+        if (currentNode && currentNode.nodeType === Node.TEXT_NODE) {
+            currentNode = currentNode.parentNode;
+        }
+        
+        if (currentNode && currentNode.nodeName === 'SPAN' && (currentNode.textContent === '\u200B' || currentNode.textContent === '')) {
+            if (isReset) {
+                (currentNode as HTMLElement).style.fontSize = '';
+            } else {
+                (currentNode as HTMLElement).style.fontSize = val;
+            }
+        } else {
+            const span = document.createElement('span');
+            if (!isReset) span.style.fontSize = val;
+            span.style.lineHeight = '1.2';
+            span.innerHTML = '\u200B'; 
+            range.insertNode(span);
+            range.setStart(span.firstChild!, 1);
+            range.collapse(true);
+            selection.removeAllRanges();
+            selection.addRange(range);
+        }
+    } else {
         document.execCommand('fontSize', false, '7');
         const fonts = editorRef.current.querySelectorAll('font[size="7"]');
         fonts.forEach((f) => {
             const el = f as HTMLElement;
-            // 🔴 size属性を残すことでブラウザの暴走（無限ネスト）を防ぐ
-            el.style.fontSize = value;
-            // 🔴 line-heightを1.2に強制し、文字を小さく戻した時に行間が広がるバグを防ぐ
-            el.style.lineHeight = '1.2'; 
+            el.removeAttribute('size');
+            if (isReset) {
+                el.style.fontSize = '';
+            } else {
+                el.style.fontSize = val;
+            }
+            el.style.lineHeight = '1.2';
         });
-    } else {
-        document.execCommand(command, false, value);
     }
     
+    if (selection.rangeCount > 0) {
+        savedRangeRef.current = selection.getRangeAt(0).cloneRange();
+    }
     updateNode({ content: editorRef.current.innerHTML });
+  };
+
+  const handleResetFontSize = () => {
+    setPartialFontSize(24);
+    changeFontSize('', true);
   };
 
   const applyGlobalStyle = (key: string, value: any) => {
@@ -234,10 +306,6 @@ function FlowEditor() {
     const elements = editorRef.current.querySelectorAll('*');
     elements.forEach((el) => {
         const e = el as HTMLElement;
-        if (key === 'fontSize') {
-            if (e.style.fontSize) e.style.fontSize = '';
-            if (e.tagName === 'FONT') e.removeAttribute('size');
-        }
         if (key === 'color') {
             if (e.style.color) e.style.color = '';
             if (e.tagName === 'FONT') e.removeAttribute('color');
@@ -265,7 +333,7 @@ function FlowEditor() {
       const target = nds.find(n => n.id === id);
       if (target?.data?.isShape || target?.data?.isImage) return nds;
       setHistory(prev => [...prev, currentLevel]);
-      setCurrentLevel(id); setCurrentLabel(label || '階層中'); setSelectedNodeId(null);
+      setCurrentLevel(id); setCurrentLabel(label || '階層中'); setSelectedNodeId(null); savedRangeRef.current = null;
       const nextData = levelData[id] || { nodes: [], edges: [] };
       setEdges(nextData.edges || []); return nextData.nodes || [];
     });
@@ -274,14 +342,14 @@ function FlowEditor() {
   const goBack = () => {
     if (history.length === 0) return;
     const newHist = [...history]; const prevLevel = newHist.pop()!;
-    setCurrentLevel(prevLevel); setHistory(newHist); setCurrentLabel(prevLevel === 'root' ? 'TOP層' : '階層中'); setSelectedNodeId(null);
+    setCurrentLevel(prevLevel); setHistory(newHist); setCurrentLabel(prevLevel === 'root' ? 'TOP層' : '階層中'); setSelectedNodeId(null); savedRangeRef.current = null;
     const prevData = levelData[prevLevel] || { nodes: [], edges: [] };
     setNodes(prevData.nodes || []); setEdges(prevData.edges || []);
   };
 
   const goTop = () => {
     if (history.length === 0) return;
-    setCurrentLevel('root'); setHistory([]); setCurrentLabel('TOP層'); setSelectedNodeId(null);
+    setCurrentLevel('root'); setHistory([]); setCurrentLabel('TOP層'); setSelectedNodeId(null); savedRangeRef.current = null;
     const rootData = levelData['root'] || { nodes: [], edges: [] };
     setNodes(rootData.nodes || []); setEdges(rootData.edges || []);
   };
@@ -532,7 +600,6 @@ function FlowEditor() {
   const actionBtnStyle = { padding: '10px 16px', borderRadius: '8px', border: '1px solid #ccc', backgroundColor: '#fff', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '5px', boxShadow: '0 2px 4px rgba(0,0,0,0.05)', fontWeight: 'bold', fontSize: '14px', transition: 'all 0.2s' };
   const primaryBtnStyle = { ...actionBtnStyle, backgroundColor: '#3b82f6', color: '#fff', border: 'none', boxShadow: '0 4px 6px rgba(59, 130, 246, 0.3)' };
 
-  // ★ 拡大パネル用のスタイル
   const editorPanelStyle = isExpandedEditor ? {
       position: 'fixed' as const,
       top: '20px',
@@ -553,7 +620,6 @@ function FlowEditor() {
   return (
     <div style={{ width: '100vw', height: '100vh', display: 'flex', flexDirection: 'row', overflow: 'hidden' }}>
       <style>{`
-        /* 🔴 どんなにサイズを変えても行間がピシッと揃う魔法のCSS */
         .html-content p { margin: 0; }
         .html-content strike, #node-editor strike { text-decoration: line-through double !important; }
         .html-content *, #node-editor * { line-height: 1.2 !important; vertical-align: baseline !important; }
@@ -581,7 +647,6 @@ function FlowEditor() {
       `}</style>
       <input type="file" ref={fileInputRef} style={{ display: 'none' }} onChange={handleFileChange} accept="image/*" />
       
-      {/* 拡大エディタ起動時の背景の黒い影（クリックで閉じます） */}
       {isExpandedEditor && (
           <div onClick={() => setIsExpandedEditor(false)} style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.3)', zIndex: 9999, cursor: 'pointer' }} />
       )}
@@ -675,7 +740,7 @@ function FlowEditor() {
                 </div>
               )}
 
-              {/* ★ ここから下が「拡大エディタ」になった時に飛び出るパネル部分 ★ */}
+              {/* ★ 拡大エディタパネル ★ */}
               <div style={editorPanelStyle}>
                   <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'5px' }}>
                       <label style={{fontSize: '11px', fontWeight: 'bold'}}>文字内容</label>
@@ -688,8 +753,10 @@ function FlowEditor() {
                     id="node-editor" 
                     ref={editorRef}
                     contentEditable 
-                    onInput={(e) => updateNode({ content: e.currentTarget.innerHTML })}
-                    onBlur={(e) => updateNode({ content: e.currentTarget.innerHTML })}
+                    onInput={(e) => { updateNode({ content: e.currentTarget.innerHTML }); saveSelection(); }}
+                    onBlur={(e) => { updateNode({ content: e.currentTarget.innerHTML }); saveSelection(); }}
+                    onKeyUp={saveSelection}
+                    onMouseUp={saveSelection}
                     style={{ width:'100%', minHeight: isExpandedEditor ? '200px' : '80px', marginBottom: '10px', padding: '12px', border: '1px solid #ddd', borderRadius: '4px', outline: 'none', backgroundColor: '#fff', cursor: 'text', overflowY: 'auto', fontSize: isExpandedEditor ? '18px' : 'inherit' }}
                   />
                   
@@ -707,36 +774,26 @@ function FlowEditor() {
                   </div>
 
                   <label style={{fontSize:'11px', fontWeight: 'bold'}}>文字サイズ (px)</label>
-                  <div style={{display:'flex', alignItems:'center', gap:'10px', marginBottom: '15px'}}>
+                  <div style={{display:'flex', alignItems:'center', gap:'8px', marginBottom: '15px'}}>
                     <input type="range" min="1" max="100" value={partialFontSize} onChange={(e) => {
                         const val = Number(e.target.value);
                         setPartialFontSize(val);
-                        applyFormat('fontSize', `${val}px`);
+                        changeFontSize(`${val}px`);
                     }} style={{flex:1}} />
                     <input type="number" min="1" max="100" value={partialFontSize} onChange={(e) => {
                         const val = Number(e.target.value);
                         setPartialFontSize(val);
-                        applyFormat('fontSize', `${val}px`);
-                    }} style={{width:'60px', padding:'4px', border:'1px solid #ccc', borderRadius:'4px'}} />
+                        changeFontSize(`${val}px`);
+                    }} style={{width:'50px', padding:'4px', border:'1px solid #ccc', borderRadius:'4px'}} />
+                    <button onMouseDown={(e) => e.preventDefault()} onClick={handleResetFontSize} style={{fontSize:'11px', padding:'4px 8px', border:'1px solid #ccc', borderRadius:'4px', cursor:'pointer', background:'#fff'}}>リセット</button>
                   </div>
               </div>
               {/* 拡大パネルエリア ここまで */}
 
               <hr style={{margin: '15px 0', border: 'none', borderTop: '1px solid #eee'}} />
-              <label style={{fontSize: '10px', color: '#666', fontWeight: 'bold'}}>全体編集 (※部分編集のスタイルを剥がして上書き)</label>
+              <label style={{fontSize: '10px', color: '#666', fontWeight: 'bold'}}>レイアウト (枠全体にのみ適用)</label>
 
-              <div style={{display:'flex', alignItems:'center', gap:'10px', marginBottom: '10px', marginTop: '5px'}}>
-                <span style={{fontSize:'10px', width: '40px'}}>サイズ</span>
-                <input type="range" min="1" max="100" value={parseInt(String(selectedNode.style?.fontSize || 24))} onChange={(e) => applyGlobalStyle('fontSize', `${e.target.value}px`)} style={{flex:1}} />
-                <input type="number" min="1" max="100" value={parseInt(String(selectedNode.style?.fontSize || 24))} onChange={(e) => applyGlobalStyle('fontSize', `${e.target.value}px`)} style={{width:'50px', padding:'4px', border:'1px solid #ccc', borderRadius:'4px'}} />
-              </div>
-              
-              <div style={{ display: 'flex', alignItems:'center', gap: '10px', marginBottom: '15px' }}>
-                <span style={{fontSize:'10px', width: '40px'}}>文字色</span>
-                <input type="color" value={String(selectedNode.style?.color || '#000000')} onChange={(e) => applyGlobalStyle('color', e.target.value)} style={{width:'30px', height:'30px', cursor: 'pointer', border: 'none', padding: 0}} />
-              </div>
-
-              <div style={{ display:'flex', gap:'5px', marginBottom:'5px' }}>
+              <div style={{ display:'flex', gap:'5px', marginBottom:'5px', marginTop: '5px' }}>
                 <button onClick={() => updateNode({}, { justifyContent: 'flex-start', textAlign: 'left' })} style={{flex:1, cursor:'pointer', border:'1px solid #ccc', padding: '5px', borderRadius: '4px'}}>左</button>
                 <button onClick={() => updateNode({}, { justifyContent: 'center', textAlign: 'center' })} style={{flex:1, cursor:'pointer', border:'1px solid #ccc', padding: '5px', borderRadius: '4px'}}>中央</button>
                 <button onClick={() => updateNode({}, { justifyContent: 'flex-end', textAlign: 'right' })} style={{flex:1, cursor:'pointer', border:'1px solid #ccc', padding: '5px', borderRadius: '4px'}}>右</button>
