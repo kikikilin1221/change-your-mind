@@ -209,7 +209,7 @@ function FlowEditor() {
           const nextLevel = target.currentLevel || 'root';
           setLevelData(nextLevelData); setCurrentLevel(nextLevel); setCurrentLabel(target.currentLabel || 'TOP層');
           setNodes(nextLevelData[nextLevel]?.nodes || []); setEdges(nextLevelData[nextLevel]?.edges || []);
-          setSelectedNodeId(null); setSelectedEdge(null);
+          setSelectedNodeId(null); setSelectedEdge(null); setSelection({start:0, end:0});
         }
         return currentFiles;
       });
@@ -235,68 +235,75 @@ function FlowEditor() {
     setNodes(nds => nds.map(n => n.id === selectedNodeId ? { ...n, data: { ...(n.data || {}), ...newData }, style: { ...(n.style || {}), ...newStyle } } : n));
   }, [selectedNodeId]);
 
+  // ★ Word風テキスト編集ロジック ★
   const applyPartialFormat = (styleKey: string, styleValue: string, isToggle: boolean = false) => {
     if (!selectedNode) return;
+    const ta = document.getElementById('node-textarea') as HTMLTextAreaElement;
     const text = String(selectedNode.data?.content || '');
+    
+    // UIボタンを押した時はReact Stateから選択範囲を取得（フォーカスが外れても記憶しているため）
     const start = selection.start;
     const end = selection.end;
-    if (start === end) return;
 
-    const selectedText = text.substring(start, end);
-    let finalValue = styleValue;
-    if (isToggle) {
-        if (selectedText.includes(`${styleKey}=true`)) finalValue = 'false';
-        else finalValue = 'true';
+    if (start !== end) {
+        // 文字が選択されている場合：選択範囲だけを装飾する
+        const selectedText = text.substring(start, end);
+        let finalValue = styleValue;
+        if (isToggle) finalValue = selectedText.includes(`${styleKey}=true`) ? 'false' : 'true';
+
+        const newSelectedText = applyStyleToText(selectedText, styleKey, finalValue);
+        const newContent = text.substring(0, start) + newSelectedText + text.substring(end);
+        updateNode({ content: newContent });
+        
+        setTimeout(() => { if(ta) { ta.focus(); ta.setSelectionRange(start, start + newSelectedText.length); }}, 10);
+    } else {
+        // 文字が選択されていない場合：次に打つ文字のために空のフォーマット枠を挿入する（予約）
+        let finalValue = styleValue;
+        if (isToggle) finalValue = 'true';
+        
+        const emptyBlock = `[](#style:${styleKey}=${finalValue})`;
+        const newContent = text.substring(0, start) + emptyBlock + text.substring(end);
+        updateNode({ content: newContent });
+        
+        // 枠の中央（ [ と ] の間 ）にカーソルを移動
+        setTimeout(() => { 
+            if(ta) { 
+                ta.focus(); 
+                ta.setSelectionRange(start + 1, start + 1); 
+                setSelection({start: start + 1, end: start + 1});
+            }
+        }, 10);
     }
-
-    const newSelectedText = applyStyleToText(selectedText, styleKey, finalValue);
-    const newContent = text.substring(0, start) + newSelectedText + text.substring(end);
-
-    updateNode({ content: newContent });
-    
-    setTimeout(() => {
-        const ta = document.getElementById('node-textarea') as HTMLTextAreaElement;
-        if (ta) {
-            ta.focus();
-            ta.setSelectionRange(start, start + newSelectedText.length);
-            setSelection({start, end: start + newSelectedText.length});
-        }
-    }, 10);
   };
 
-  const updateGlobalStyle = (globalKey: string, globalValue: any, partialKey: string) => {
+  // ★ フォントサイズ（全体上書き）の特別ロジック ★
+  const handleFontSize = (val: string) => {
     if (!selectedNode) return;
-    let newStyle = { [globalKey]: globalValue };
-    let currentContent = String(selectedNode.data?.content || '');
-    
-    if (partialKey) {
-        let newContent = currentContent.replace(/\[(.*?)\]\(#style:([^)]+)\)/g, (match, innerText, stylesStr) => {
+    const ta = document.getElementById('node-textarea') as HTMLTextAreaElement;
+    const start = selection.start;
+    const end = selection.end;
+    const text = String(selectedNode.data?.content || '');
+
+    if (start !== end) {
+        // 文字が選択されている場合は部分編集
+        const selectedText = text.substring(start, end);
+        const newSelectedText = applyStyleToText(selectedText, 'size', val);
+        const newContent = text.substring(0, start) + newSelectedText + text.substring(end);
+        updateNode({ content: newContent });
+        setTimeout(() => { if(ta) { ta.focus(); ta.setSelectionRange(start, start + newSelectedText.length); }}, 10);
+    } else {
+        // 何も選択されていない場合は「全体のサイズ」を変更し、かつ部分編集のサイズ指定だけをリセットする
+        let newContent = text.replace(/\[(.*?)\]\(#style:([^)]+)\)/g, (match, innerText, stylesStr) => {
             let styleMap = new Map();
             stylesStr.split(';').forEach((s: string) => {
                 let [k,v] = s.split('=');
-                if (k && v && k !== partialKey) styleMap.set(k,v);
+                if (k && v && k !== 'size') styleMap.set(k,v); // size設定だけを剥がす
             });
             if (styleMap.size === 0) return innerText;
             let merged = Array.from(styleMap.entries()).map(([k,v]) => `${k}=${v}`).join(';');
             return `[${innerText}](#style:${merged})`;
         });
-        updateNode({ content: newContent }, newStyle);
-    } else {
-        updateNode({}, newStyle);
-    }
-  };
-
-  const handleFormat = (globalKey: string, partialKey: string, val1: any, isToggle: boolean = false) => {
-    const hasSelection = selection.start !== selection.end;
-    if (hasSelection) {
-        applyPartialFormat(partialKey, val1, isToggle);
-    } else {
-        let finalVal = val1;
-        if (isToggle) {
-            if (globalKey === 'fontWeight') finalVal = selectedNode?.style?.fontWeight === 'bold' ? 'normal' : 'bold';
-            if (globalKey === 'textDecoration') finalVal = selectedNode?.style?.textDecoration?.includes('double') ? 'none' : 'line-through double';
-        }
-        updateGlobalStyle(globalKey, finalVal, partialKey);
+        updateNode({ content: newContent }, { fontSize: val });
     }
   };
 
@@ -305,7 +312,7 @@ function FlowEditor() {
       const target = nds.find(n => n.id === id);
       if (target?.data?.isShape || target?.data?.isImage) return nds;
       setHistory(prev => [...prev, currentLevel]);
-      setCurrentLevel(id); setCurrentLabel(label || '階層中'); setSelectedNodeId(null);
+      setCurrentLevel(id); setCurrentLabel(label || '階層中'); setSelectedNodeId(null); setSelection({start:0,end:0});
       const nextData = levelData[id] || { nodes: [], edges: [] };
       setEdges(nextData.edges || []); return nextData.nodes || [];
     });
@@ -314,14 +321,14 @@ function FlowEditor() {
   const goBack = () => {
     if (history.length === 0) return;
     const newHist = [...history]; const prevLevel = newHist.pop()!;
-    setCurrentLevel(prevLevel); setHistory(newHist); setCurrentLabel(prevLevel === 'root' ? 'TOP層' : '階層中'); setSelectedNodeId(null);
+    setCurrentLevel(prevLevel); setHistory(newHist); setCurrentLabel(prevLevel === 'root' ? 'TOP層' : '階層中'); setSelectedNodeId(null); setSelection({start:0,end:0});
     const prevData = levelData[prevLevel] || { nodes: [], edges: [] };
     setNodes(prevData.nodes || []); setEdges(prevData.edges || []);
   };
 
   const goTop = () => {
     if (history.length === 0) return;
-    setCurrentLevel('root'); setHistory([]); setCurrentLabel('TOP層'); setSelectedNodeId(null);
+    setCurrentLevel('root'); setHistory([]); setCurrentLabel('TOP層'); setSelectedNodeId(null); setSelection({start:0,end:0});
     const rootData = levelData['root'] || { nodes: [], edges: [] };
     setNodes(rootData.nodes || []); setEdges(rootData.edges || []);
   };
@@ -366,6 +373,7 @@ function FlowEditor() {
         } : n));
       }
 
+      // 画像のパン移動
       const imgDrag = imageCropDragRef.current;
       if (imgDrag) {
         const dx = (e.clientX - imgDrag.startX) / zoom;
@@ -481,6 +489,7 @@ function FlowEditor() {
         );
       }
 
+      // ★ パワポ風 画像トリミングのコア部分 ★
       const baseW = n.data?.cropBaseW ?? (Number(n.style?.width) || 300);
       const baseH = n.data?.cropBaseH ?? (Number(n.style?.height) || 200);
       const offX = n.data?.cropOffsetX || 0;
@@ -508,12 +517,11 @@ function FlowEditor() {
                 >
                   <img src={n.data.imageUrl as string} style={{ 
                       position: 'absolute', 
-                      width: `${baseW}px`,
-                      height: `${baseH}px`, 
-                      maxWidth: 'none',   // 🔴 ここが超重要！Tailwindの自動縮小(おせっかい)を無効化
-                      maxHeight: 'none',  // 🔴 ここが超重要！
-                      left: `${offX}px`,
-                      top: `${offY}px`,
+                      width: n.data?.isCropping ? `${baseW}px` : '100%', // トリミング中は絶対値固定、通常時は枠に追従
+                      height: n.data?.isCropping ? `${baseH}px` : '100%', 
+                      maxWidth: 'none', maxHeight: 'none', // これが勝手な縮小を防ぐ魔法
+                      left: n.data?.isCropping ? `${offX}px` : 0,
+                      top: n.data?.isCropping ? `${offY}px` : 0,
                       transform: `translate(${n.data.imgPosX || 0}px, ${n.data.imgPosY || 0}px) scale(${n.data.imgZoom || 1})`, 
                       transformOrigin: 'center center', 
                       pointerEvents: 'none' 
@@ -538,36 +546,22 @@ function FlowEditor() {
                     lineStyle={{ border: n.data?.isCropping ? '3px dashed #ef4444' : '3px solid #3b82f6', zIndex: 100 }} 
                     handleStyle={{ background: n.data?.isCropping ? '#ef4444' : '#3b82f6', zIndex: 100, borderRadius: '50%' }} 
                     onResizeStart={(_, params) => {
-                        if (n.data?.isImage) {
+                        if (n.data?.isImage && n.data?.isCropping) {
                             n.data._rsX = params.x;
                             n.data._rsY = params.y;
-                            n.data._rsW = params.width;
-                            n.data._rsH = params.height;
-                            n.data._rsCropW = n.data.cropBaseW ?? (Number(n.style?.width) || 300);
-                            n.data._rsCropH = n.data.cropBaseH ?? (Number(n.style?.height) || 200);
                             n.data._rsCropOffX = n.data.cropOffsetX || 0;
                             n.data._rsCropOffY = n.data.cropOffsetY || 0;
-                            n.data._rsImgPosX = n.data.imgPosX || 0;
-                            n.data._rsImgPosY = n.data.imgPosY || 0;
                         }
                     }}
                     onResize={(_, params) => {
-                        if (n.data?.isImage) {
-                            if (n.data?.isCropping) {
-                                const dx = params.x - n.data._rsX;
-                                const dy = params.y - n.data._rsY;
-                                n.data.cropOffsetX = n.data._rsCropOffX - dx;
-                                n.data.cropOffsetY = n.data._rsCropOffY - dy;
-                            } else {
-                                const scaleX = params.width / n.data._rsW;
-                                const scaleY = params.height / n.data._rsH;
-                                n.data.cropBaseW = n.data._rsCropW * scaleX;
-                                n.data.cropBaseH = n.data._rsCropH * scaleY;
-                                n.data.cropOffsetX = n.data._rsCropOffX * scaleX;
-                                n.data.cropOffsetY = n.data._rsCropOffY * scaleY;
-                                n.data.imgPosX = n.data._rsImgPosX * scaleX;
-                                n.data.imgPosY = n.data._rsImgPosY * scaleY;
-                            }
+                        if (n.data?.isImage && n.data?.isCropping) {
+                            // 枠が動いた分だけ、画像を逆方向に動かして「固定」させる
+                            const dx = params.x - n.data._rsX;
+                            const dy = params.y - n.data._rsY;
+                            updateNode({
+                                cropOffsetX: n.data._rsCropOffX - dx,
+                                cropOffsetY: n.data._rsCropOffY - dy
+                            });
                         }
                     }}
                  />
@@ -589,7 +583,6 @@ function FlowEditor() {
   };
 
   const isRoot = history.length === 0;
-
   const actionBtnStyle = { padding: '10px 16px', borderRadius: '8px', border: '1px solid #ccc', backgroundColor: '#fff', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '5px', boxShadow: '0 2px 4px rgba(0,0,0,0.05)', fontWeight: 'bold', fontSize: '14px', transition: 'all 0.2s' };
   const primaryBtnStyle = { ...actionBtnStyle, backgroundColor: '#3b82f6', color: '#fff', border: 'none', boxShadow: '0 4px 6px rgba(59, 130, 246, 0.3)' };
 
@@ -597,7 +590,7 @@ function FlowEditor() {
     <div style={{ width: '100vw', height: '100vh', display: 'flex', flexDirection: 'row', overflow: 'hidden' }}>
       <style>{`
         .markdown-content p { margin: 0; }
-        /* 🔴 接続の黒い点を極小(10px)にしつつ、見えない判定エリアを広げてクリックしやすくする */
+        /* 🔴 接続の黒い点を極小(10px)にしつつ、見えない判定エリアを広げてクリックしやすくする魔法 */
         .react-flow__handle {
             width: 10px !important;
             height: 10px !important;
@@ -608,15 +601,13 @@ function FlowEditor() {
             cursor: crosshair !important;
         }
         .react-flow__handle::after {
-            content: "";
-            position: absolute;
+            content: ""; position: absolute;
             top: -12px; left: -12px; right: -12px; bottom: -12px;
             background: transparent;
         }
         .react-flow__handle:hover {
             transform: scale(2.2) !important;
-            background: #3b82f6 !important;
-            border-color: #fff !important;
+            background: #3b82f6 !important; border-color: #fff !important;
         }
       `}</style>
       <input type="file" ref={fileInputRef} style={{ display: 'none' }} onChange={handleFileChange} accept="image/*" />
@@ -643,7 +634,17 @@ function FlowEditor() {
         </div>
 
         <div style={{ flexGrow: 1, position: 'relative' }}>
-          <ReactFlow nodes={flowNodes} edges={edges} edgeTypes={edgeTypes} elevateNodesOnSelect={false} onNodesChange={u => setNodes(nds => applyNodeChanges(u, nds))} onEdgesChange={u => setEdges(eds => applyEdgeChanges(u, eds))} onConnect={p => setEdges(eds => addEdge({...p, type:'default', style: {strokeWidth: 2}}, eds))} onNodeClick={(_, n) => { setSelectedNodeId(n.id !== 'center-mark' ? n.id : null); setSelectedEdge(null); }} onEdgeClick={(_, e) => { setSelectedEdge(e); setSelectedNodeId(null); }} onPaneClick={() => { setSelectedNodeId(null); setSelectedEdge(null); }} onNodeDoubleClick={(_, n) => enterLevel(n.id, String(n.data?.content || ''))} onNodeDrag={onNodeDrag} onNodeDragStop={onNodeDragStop} fitView>
+          <ReactFlow 
+             nodes={flowNodes} edges={edges} edgeTypes={edgeTypes} elevateNodesOnSelect={false} 
+             onNodesChange={u => setNodes(nds => applyNodeChanges(u, nds))} 
+             onEdgesChange={u => setEdges(eds => applyEdgeChanges(u, eds))} 
+             onConnect={p => setEdges(eds => addEdge({...p, type:'default', style: {strokeWidth: 2}}, eds))} 
+             onNodeClick={(_, n) => { setSelectedNodeId(n.id !== 'center-mark' ? n.id : null); setSelectedEdge(null); }} 
+             onEdgeClick={(_, e) => { setSelectedEdge(e); setSelectedNodeId(null); }} 
+             onPaneClick={() => { setSelectedNodeId(null); setSelectedEdge(null); setSelection({start:0, end:0}); }} 
+             onNodeDoubleClick={(_, n) => enterLevel(n.id, String(n.data?.content || ''))} 
+             onNodeDrag={onNodeDrag} onNodeDragStop={onNodeDragStop} fitView
+          >
             <Background color="#f1f1f1" /><Controls /><SmartGuides guides={guides} />
           </ReactFlow>
           
@@ -661,13 +662,13 @@ function FlowEditor() {
                 <div style={{ marginBottom: '20px', padding: '10px', border: '1px solid #eee', borderRadius: '8px' }}>
                   <button 
                      onClick={() => {
-                        const currentW = Number(selectedNode.style?.width) || 300;
-                        const currentH = Number(selectedNode.style?.height) || 200;
-                        updateNode({ 
-                            isCropping: !selectedNode.data?.isCropping,
-                            cropBaseW: selectedNode.data?.cropBaseW ?? currentW,
-                            cropBaseH: selectedNode.data?.cropBaseH ?? currentH
-                        });
+                        const w = Number(selectedNode.style?.width) || 300;
+                        const h = Number(selectedNode.style?.height) || 200;
+                        if (!selectedNode.data?.isCropping) {
+                            updateNode({ isCropping: true, cropBaseW: w, cropBaseH: h, cropOffsetX: 0, cropOffsetY: 0 });
+                        } else {
+                            updateNode({ isCropping: false });
+                        }
                      }} 
                      style={{ width: '100%', padding: '10px', background: selectedNode.data?.isCropping ? '#ef4444' : '#fff', color: selectedNode.data?.isCropping ? '#fff' : '#333', border: selectedNode.data?.isCropping ? 'none' : '1px solid #ccc', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', transition: 'all 0.2s', marginBottom: '15px' }}
                   >
@@ -711,24 +712,23 @@ function FlowEditor() {
                 style={{ width:'100%', height:'80px', marginBottom: '5px', padding: '8px', border: '1px solid #ddd', borderRadius: '4px' }} 
               />
               
-              <label style={{fontSize: '10px', color: '#666', fontWeight: 'bold'}}>テキスト編集 (※文字選択で部分編集になります)</label>
+              <label style={{fontSize: '10px', color: '#666', fontWeight: 'bold'}}>テキスト編集 (※文字選択で部分編集、未選択で予約)</label>
               
               <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'5px', marginBottom:'5px', marginTop: '5px' }}>
-                <button onClick={() => handleFormat('fontFamily', 'font', 'serif')} style={{cursor:'pointer', border:'1px solid #ccc', padding: '5px', borderRadius: '4px'}}>明朝</button>
-                <button onClick={() => handleFormat('fontFamily', 'font', 'sans-serif')} style={{cursor:'pointer', border:'1px solid #ccc', padding: '5px', borderRadius: '4px'}}>ゴシック</button>
-                <button onClick={() => handleFormat('fontWeight', 'bold', 'true', true)} style={{ cursor:'pointer', border:'1px solid #ccc', padding: '5px', borderRadius: '4px', background: selectedNode.style?.fontWeight === 'bold' ? '#ddd' : '#f0f0f0' }}>太字</button>
-                <button onClick={() => handleFormat('textDecoration', 'double', 'true', true)} style={{ cursor:'pointer', border:'1px solid #ccc', padding: '5px', borderRadius: '4px', background: selectedNode.style?.textDecoration?.includes('double') ? '#ddd' : '#f0f0f0' }}>二重線</button>
+                <button onMouseDown={(e) => e.preventDefault()} onClick={() => applyPartialFormat('font', 'serif')} style={{cursor:'pointer', border:'1px solid #ccc', padding: '5px', borderRadius: '4px'}}>明朝</button>
+                <button onMouseDown={(e) => e.preventDefault()} onClick={() => applyPartialFormat('font', 'sans-serif')} style={{cursor:'pointer', border:'1px solid #ccc', padding: '5px', borderRadius: '4px'}}>ゴシック</button>
+                <button onMouseDown={(e) => e.preventDefault()} onClick={() => applyPartialFormat('bold', 'true', true)} style={{ cursor:'pointer', border:'1px solid #ccc', padding: '5px', borderRadius: '4px', background: '#fff' }}>太字</button>
+                <button onMouseDown={(e) => e.preventDefault()} onClick={() => applyPartialFormat('double', 'true', true)} style={{ cursor:'pointer', border:'1px solid #ccc', padding: '5px', borderRadius: '4px', background: '#fff' }}>二重線</button>
               </div>
 
               <div style={{ display: 'flex', gap: '5px', marginTop: '5px', marginBottom: '15px' }}>
-                {QUICK_TEXT_COLORS.map(c => <button key={c} onClick={() => handleFormat('color', 'color', c)} style={{ width:'30px', height:'30px', backgroundColor:c, border: '1px solid #ddd', borderRadius: '4px', cursor: 'pointer' }} />)}
-                <input type="color" value={String(selectedNode.style?.color || '#000000')} onChange={(e) => handleFormat('color', 'color', e.target.value)} style={{width:'30px', height:'30px', cursor: 'pointer', border: 'none', padding: 0}} />
+                {QUICK_TEXT_COLORS.map(c => <button key={c} onMouseDown={(e) => e.preventDefault()} onClick={() => applyPartialFormat('color', c)} style={{ width:'30px', height:'30px', backgroundColor:c, border: '1px solid #ddd', borderRadius: '4px', cursor: 'pointer' }} />)}
               </div>
 
               <label style={{fontSize:'11px', fontWeight: 'bold'}}>文字サイズ (px)</label>
               <div style={{display:'flex', alignItems:'center', gap:'10px', marginBottom: '10px'}}>
-                <input type="range" min="10" max="250" value={parseInt(String(selectedNode.style?.fontSize || 18))} onChange={(e) => handleFormat('fontSize', 'size', `${e.target.value}px`)} style={{flex:1}} />
-                <input type="number" min="10" max="250" value={parseInt(String(selectedNode.style?.fontSize || 18))} onChange={(e) => handleFormat('fontSize', 'size', `${e.target.value}px`)} style={{width:'60px', padding:'4px', border:'1px solid #ccc', borderRadius:'4px'}} />
+                <input type="range" min="10" max="250" value={parseInt(String(selectedNode.style?.fontSize || 18))} onChange={(e) => handleFontSize(`${e.target.value}px`)} style={{flex:1}} />
+                <input type="number" min="10" max="250" value={parseInt(String(selectedNode.style?.fontSize || 18))} onChange={(e) => handleFontSize(`${e.target.value}px`)} style={{width:'60px', padding:'4px', border:'1px solid #ccc', borderRadius:'4px'}} />
               </div>
 
               <hr style={{margin: '15px 0', border: 'none', borderTop: '1px solid #eee'}} />
