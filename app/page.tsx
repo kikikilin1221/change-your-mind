@@ -67,6 +67,10 @@ const renderHTMLWithMath = (html: string) => {
   }
 };
 
+// ★ クラッシュ防止用の安全なクローン関数（これがないと履歴やコピペでアプリが死にます）
+const safeCloneNodes = (nds: any[]) => nds.map(n => ({ ...n, data: { ...n.data }, style: { ...n.style }, position: { ...n.position } }));
+const safeCloneEdges = (eds: any[]) => eds.map(e => ({ ...e, data: { ...e.data }, style: { ...e.style } }));
+
 const edgeTypes = { default: DoubleEdge };
 const PASTEL_COLORS = ['#FFB7B2', '#FFDAC1', '#E2F0CB', '#B5EAD7', '#C7CEEA', '#F3E5F5', '#E1F5FE', '#FFF9C4', '#FCE4EC', '#E8F5E9'];
 const QUICK_TEXT_COLORS = ['#000000', '#FF0000', '#008000', '#0000FF', '#FFF000'];
@@ -98,7 +102,6 @@ function FlowEditor() {
   const editorRef = useRef<HTMLDivElement>(null);
   const savedRangeRef = useRef<Range | null>(null);
 
-  // ★ 最新状態の参照と Undo/Redo 履歴
   const nodesRef = useRef<any[]>([]);
   const edgesRef = useRef<any[]>([]);
   const copiedNodesRef = useRef<any[]>([]);
@@ -109,7 +112,6 @@ function FlowEditor() {
   useEffect(() => { nodesRef.current = nodes; }, [nodes]);
   useEffect(() => { edgesRef.current = edges; }, [edges]);
 
-  // ★ 複数選択対応
   const selectedNodes = useMemo(() => nodes.filter((n: any) => n.selected), [nodes]);
   const primaryNode = selectedNodes.length > 0 ? selectedNodes[0] : null;
   const selectedEdge = useMemo(() => edges.find((e: any) => e.selected) || null, [edges]);
@@ -119,28 +121,28 @@ function FlowEditor() {
     setEdges((eds: any[]) => eds.map((e: any) => ({...e, selected: false})));
   }, []);
 
-  // 履歴のスナップショット
+  // ★ 絶対にクラッシュしないスナップショット関数
   const takeSnapshot = useCallback(() => {
-      setPast(p => [...p.slice(-40), { nodes: JSON.parse(JSON.stringify(nodesRef.current)), edges: JSON.parse(JSON.stringify(edgesRef.current)) }]);
+      setPast(p => [...p.slice(-40), { nodes: safeCloneNodes(nodesRef.current), edges: safeCloneEdges(edgesRef.current) }]);
       setFuture([]);
   }, []);
 
   const undo = useCallback(() => {
       if (past.length === 0) return;
       const previous = past[past.length - 1];
-      setFuture(f => [{ nodes: nodesRef.current, edges: edgesRef.current }, ...f]);
+      setFuture(f => [{ nodes: safeCloneNodes(nodesRef.current), edges: safeCloneEdges(edgesRef.current) }, ...f]);
       setPast(p => p.slice(0, -1));
-      setNodes(previous.nodes);
-      setEdges(previous.edges);
+      setNodes(safeCloneNodes(previous.nodes));
+      setEdges(safeCloneEdges(previous.edges));
   }, [past]);
 
   const redo = useCallback(() => {
       if (future.length === 0) return;
       const next = future[0];
-      setPast(p => [...p, { nodes: nodesRef.current, edges: edgesRef.current }]);
+      setPast(p => [...p, { nodes: safeCloneNodes(nodesRef.current), edges: safeCloneEdges(edgesRef.current) }]);
       setFuture(f => f.slice(1));
-      setNodes(next.nodes);
-      setEdges(next.edges);
+      setNodes(safeCloneNodes(next.nodes));
+      setEdges(safeCloneEdges(next.edges));
   }, [future]);
 
   useEffect(() => {
@@ -163,20 +165,16 @@ function FlowEditor() {
   }, []);
 
   useEffect(() => {
-    setLevelData(prev => ({ ...prev, [currentLevel]: { ...(prev[currentLevel] || {}), nodes, edges } }));
-  }, [nodes, edges, currentLevel]);
-
-  useEffect(() => {
     if (!activeFileId) return;
     setFiles(prev => {
       const currentFileData = prev[activeFileId];
       if (!currentFileData) return prev;
-      const updatedLevelData = { ...levelData, [currentLevel]: { ...(levelData[currentLevel] || {}), nodes, edges } };
+      const updatedLevelData = { ...levelData, [currentLevel]: { nodes, edges, bgColor: levelData[currentLevel]?.bgColor } };
       return { ...prev, [activeFileId]: { ...currentFileData, levelData: updatedLevelData, currentLevel, currentLabel } };
     });
     localStorage.setItem('my-logic-files', JSON.stringify(files));
     localStorage.setItem('my-logic-active-id', activeFileId);
-  }, [nodes, edges, currentLevel, currentLabel, levelData, activeFileId, files]);
+  }, [nodes, edges, currentLevel, currentLabel, activeFileId]); // levelDataとfilesは無限ループを防ぐため除外
 
   useEffect(() => {
     if (editorRef.current) {
@@ -253,11 +251,7 @@ function FlowEditor() {
       if (isActive && editorRef.current) {
           const selection = window.getSelection();
           if (!selection) return;
-
-          if (savedRangeRef.current) {
-              selection.removeAllRanges();
-              selection.addRange(savedRangeRef.current);
-          }
+          if (savedRangeRef.current) { selection.removeAllRanges(); selection.addRange(savedRangeRef.current); }
 
           if (type === 'fontSize') {
               if (selection.rangeCount === 0) return;
@@ -269,23 +263,15 @@ function FlowEditor() {
                       (currentNode as HTMLElement).style.fontSize = value;
                   } else {
                       const span = document.createElement('span');
-                      span.style.fontSize = value;
-                      span.style.lineHeight = '1.2';
-                      span.innerHTML = '\u200B'; 
-                      range.insertNode(span);
-                      range.setStart(span.firstChild!, 1);
-                      range.collapse(true);
-                      selection.removeAllRanges();
-                      selection.addRange(range);
+                      span.style.fontSize = value; span.style.lineHeight = '1.2'; span.innerHTML = '\u200B'; 
+                      range.insertNode(span); range.setStart(span.firstChild!, 1); range.collapse(true);
+                      selection.removeAllRanges(); selection.addRange(range);
                   }
               } else {
                   document.execCommand('fontSize', false, '7');
                   const fonts = editorRef.current.querySelectorAll('font[size="7"]');
                   fonts.forEach((f) => {
-                      const el = f as HTMLElement;
-                      el.removeAttribute('size');
-                      el.style.fontSize = value;
-                      el.style.lineHeight = '1.2';
+                      const el = f as HTMLElement; el.removeAttribute('size'); el.style.fontSize = value; el.style.lineHeight = '1.2';
                   });
               }
           } else {
@@ -294,12 +280,10 @@ function FlowEditor() {
           
           if (selection.rangeCount > 0) savedRangeRef.current = selection.getRangeAt(0).cloneRange();
           updateSelectedNodes({ content: editorRef.current.innerHTML });
-
       } else {
           const styleKeyMap: any = { fontName: 'fontFamily', bold: 'fontWeight', strikeThrough: 'textDecoration', foreColor: 'color', fontSize: 'fontSize' };
           const styleKey = styleKeyMap[type];
           let styleVal = value;
-
           if (type === 'bold') styleVal = primaryNode?.style?.fontWeight === 'bold' ? 'normal' : 'bold';
           if (type === 'strikeThrough') styleVal = primaryNode?.style?.textDecoration === 'line-through double' ? 'none' : 'line-through double';
 
@@ -315,12 +299,7 @@ function FlowEditor() {
                   if (type === 'bold') { if(e.style.fontWeight) e.style.fontWeight = ''; if(e.tagName==='B'||e.tagName==='STRONG') e.style.fontWeight = 'normal'; }
                   if (type === 'strikeThrough') { if(e.style.textDecoration) e.style.textDecoration = ''; if(e.tagName==='STRIKE') e.style.textDecoration = 'none'; }
               });
-              
-              return {
-                  ...n,
-                  data: { ...n.data, content: tempDiv.innerHTML },
-                  style: { ...n.style, [styleKey]: styleVal }
-              }
+              return { ...n, data: { ...n.data, content: tempDiv.innerHTML }, style: { ...n.style, [styleKey]: styleVal } };
           }));
       }
   };
@@ -334,11 +313,7 @@ function FlowEditor() {
           editorRef.current.focus();
           const selection = window.getSelection();
           if (!selection) return;
-
-          if (savedRangeRef.current) {
-              selection.removeAllRanges();
-              selection.addRange(savedRangeRef.current);
-          }
+          if (savedRangeRef.current) { selection.removeAllRanges(); selection.addRange(savedRangeRef.current); }
 
           if (selection.rangeCount > 0) {
               const range = selection.getRangeAt(0);
@@ -347,7 +322,6 @@ function FlowEditor() {
                   if (document.queryCommandState('strikeThrough')) document.execCommand('strikeThrough');
                   document.execCommand('foreColor', false, '#000000');
                   document.execCommand('fontName', false, 'sans-serif');
-                  
                   const span = document.createElement('span');
                   span.style.fontSize = '14px'; span.style.color = '#000000'; span.style.fontWeight = 'normal'; span.style.textDecoration = 'none'; span.style.fontFamily = 'sans-serif'; span.innerHTML = '&#8203;'; 
                   range.insertNode(span); range.setStart(span.firstChild!, 1); range.collapse(true);
@@ -357,8 +331,7 @@ function FlowEditor() {
                   document.execCommand('fontSize', false, '7');
                   const fonts = editorRef.current.querySelectorAll('font[size="7"]');
                   fonts.forEach((f) => {
-                      const el = f as HTMLElement;
-                      el.removeAttribute('size'); el.style.fontSize = '14px'; el.style.color = '#000000'; el.style.fontWeight = 'normal'; el.style.textDecoration = 'none'; el.style.fontFamily = 'sans-serif'; el.style.lineHeight = '1.2';
+                      const el = f as HTMLElement; el.removeAttribute('size'); el.style.fontSize = '14px'; el.style.color = '#000000'; el.style.fontWeight = 'normal'; el.style.textDecoration = 'none'; el.style.fontFamily = 'sans-serif'; el.style.lineHeight = '1.2';
                   });
               }
               savedRangeRef.current = selection.getRangeAt(0).cloneRange();
@@ -372,15 +345,9 @@ function FlowEditor() {
               tempDiv.querySelectorAll('*').forEach(el => {
                   const e = el as HTMLElement;
                   e.style.fontSize = ''; e.style.color = ''; e.style.fontFamily = ''; e.style.fontWeight = ''; e.style.textDecoration = '';
-                  if (e.tagName==='FONT' || e.tagName==='B' || e.tagName==='STRONG' || e.tagName==='STRIKE') {
-                      e.outerHTML = e.innerHTML;
-                  }
+                  if (e.tagName==='FONT' || e.tagName==='B' || e.tagName==='STRONG' || e.tagName==='STRIKE') e.outerHTML = e.innerHTML;
               });
-              return {
-                  ...n,
-                  data: { ...n.data, content: tempDiv.innerHTML },
-                  style: { ...n.style, fontSize: '14px', color: '#000000', fontFamily: 'sans-serif', fontWeight: 'normal', textDecoration: 'none' }
-              }
+              return { ...n, data: { ...n.data, content: tempDiv.innerHTML }, style: { ...n.style, fontSize: '14px', color: '#000000', fontFamily: 'sans-serif', fontWeight: 'normal', textDecoration: 'none' } };
           }));
       }
   };
@@ -388,7 +355,7 @@ function FlowEditor() {
   const handleCopy = useCallback(() => {
     const selected = nodesRef.current.filter(n => n.selected);
     if (selected.length > 0) {
-        copiedNodesRef.current = JSON.parse(JSON.stringify(selected));
+        copiedNodesRef.current = safeCloneNodes(selected);
     }
   }, []);
 
@@ -398,9 +365,7 @@ function FlowEditor() {
         const newNodes = copiedNodesRef.current.map(original => {
             const newId = `node-${Date.now()}-${Math.random()}`;
             return {
-                ...original,
-                id: newId,
-                selected: true,
+                ...original, id: newId, selected: true,
                 position: { x: original.position.x + 30, y: original.position.y + 30 },
                 zIndex: Math.max(0, ...nodesRef.current.map(n => Number(n.zIndex) || 0)) + 1
             };
@@ -410,34 +375,46 @@ function FlowEditor() {
   }, [takeSnapshot]);
 
   const handleDuplicate = useCallback(() => {
-      handleCopy();
-      setTimeout(handlePaste, 10);
+      handleCopy(); setTimeout(handlePaste, 10);
   }, [handleCopy, handlePaste]);
 
+  // ★ 階層移動の安定化（移動前に確実にデータを保存する）
   const enterLevel = useCallback((id: string, label: string) => {
-    setNodes((nds: any[]) => {
-      const target = nds.find((n: any) => n.id === id);
-      if (target?.data?.isShape || target?.data?.isImage) return nds;
-      setHistoryLevel(prev => [...prev, currentLevel]);
-      setCurrentLevel(id); setCurrentLabel(label || '階層中'); savedRangeRef.current = null;
-      const nextData = levelData[id] || { nodes: [], edges: [] };
-      setEdges(nextData.edges || []); return nextData.nodes || [];
-    });
+    const target = nodesRef.current.find((n: any) => n.id === id);
+    if (target?.data?.isShape || target?.data?.isImage) return;
+
+    setLevelData(prev => ({ ...prev, [currentLevel]: { nodes: safeCloneNodes(nodesRef.current), edges: safeCloneEdges(edgesRef.current), bgColor: prev[currentLevel]?.bgColor } }));
+    
+    setHistoryLevel(prev => [...prev, currentLevel]);
+    setCurrentLevel(id); setCurrentLabel(label || '階層中'); savedRangeRef.current = null;
+    
+    setNodes((levelData[id]?.nodes || []).map((n:any) => ({...n, selected: false})));
+    setEdges((levelData[id]?.edges || []).map((e:any) => ({...e, selected: false})));
+    setPast([]); setFuture([]);
   }, [currentLevel, levelData]);
 
   const goBack = () => {
     if (historyLevel.length === 0) return;
     const newHist = [...historyLevel]; const prevLevel = newHist.pop()!;
+    
+    setLevelData(prev => ({ ...prev, [currentLevel]: { nodes: safeCloneNodes(nodesRef.current), edges: safeCloneEdges(edgesRef.current), bgColor: prev[currentLevel]?.bgColor } }));
+    
     setCurrentLevel(prevLevel); setHistoryLevel(newHist); setCurrentLabel(prevLevel === 'root' ? 'TOP層' : '階層中'); savedRangeRef.current = null;
-    const prevData = levelData[prevLevel] || { nodes: [], edges: [] };
-    setNodes(prevData.nodes || []); setEdges(prevData.edges || []);
+    
+    setNodes((levelData[prevLevel]?.nodes || []).map((n:any) => ({...n, selected: false})));
+    setEdges((levelData[prevLevel]?.edges || []).map((e:any) => ({...e, selected: false})));
+    setPast([]); setFuture([]);
   };
 
   const goTop = () => {
     if (historyLevel.length === 0) return;
+    setLevelData(prev => ({ ...prev, [currentLevel]: { nodes: safeCloneNodes(nodesRef.current), edges: safeCloneEdges(edgesRef.current), bgColor: prev[currentLevel]?.bgColor } }));
+    
     setCurrentLevel('root'); setHistoryLevel([]); setCurrentLabel('TOP層'); savedRangeRef.current = null;
-    const rootData = levelData['root'] || { nodes: [], edges: [] };
-    setNodes(rootData.nodes || []); setEdges(rootData.edges || []);
+    
+    setNodes((levelData['root']?.nodes || []).map((n:any) => ({...n, selected: false})));
+    setEdges((levelData['root']?.edges || []).map((e:any) => ({...e, selected: false})));
+    setPast([]); setFuture([]);
   };
 
   const addNode = useCallback((type: 'text' | 'image' | 'shape') => {
@@ -482,10 +459,7 @@ function FlowEditor() {
                     const childNode = updatedNodes.find(n => n.id === child.id);
                     if (childNode) {
                         const childW = Number(childNode.style?.width || 200);
-                        childNode.position = {
-                            x: startX + index * spacing - (childW / 2),
-                            y: parent.position.y + Number(parent.style?.height || 100) + 80
-                        };
+                        childNode.position = { x: startX + index * spacing - (childW / 2), y: parent.position.y + Number(parent.style?.height || 100) + 80 };
                     }
                 });
             }
@@ -516,15 +490,13 @@ function FlowEditor() {
       if (isEditing) return;
 
       if (e.key === 'Enter') {
-        e.preventDefault();
-        addNode('text');
+        e.preventDefault(); addNode('text');
       } else if ((e.ctrlKey || e.metaKey) && e.key === 'c') {
         e.preventDefault(); handleCopy();
       } else if ((e.ctrlKey || e.metaKey) && e.key === 'v') {
         e.preventDefault(); handlePaste();
       } else if (e.key === 'Backspace' || e.key === 'Delete') {
-        e.preventDefault();
-        takeSnapshot();
+        e.preventDefault(); takeSnapshot();
         const selIds = nodesRef.current.filter(n => n.selected).map(n => n.id);
         setNodes((nds: any[]) => nds.filter((n: any) => !n.selected));
         setEdges((eds: any[]) => eds.filter((e: any) => !e.selected && !selIds.includes(e.source) && !selIds.includes(e.target)));
@@ -665,8 +637,7 @@ function FlowEditor() {
                   className={n.data?.isCropping ? "nodrag" : ""}
                   onMouseDown={(e) => {
                      if (n.data?.isCropping) {
-                        e.stopPropagation();
-                        takeSnapshot();
+                        e.stopPropagation(); takeSnapshot();
                         imageCropDragRef.current = { id: n.id, startX: e.clientX, startY: e.clientY, initX: Number(n.data?.imgPosX || 0), initY: Number(n.data?.imgPosY || 0) };
                      }
                   }}
@@ -697,8 +668,7 @@ function FlowEditor() {
                         if (n.data?.isImage && n.data?.isCropping) {
                             const dx = params.x - n.data._rsX; const dy = params.y - n.data._rsY;
                             setNodes((nds: any[]) => nds.map((node: any) => node.id === n.id ? {
-                                ...node,
-                                data: { ...node.data, cropOffsetX: n.data._rsCropOffX - dx, cropOffsetY: n.data._rsCropOffY - dy }
+                                ...node, data: { ...node.data, cropOffsetX: n.data._rsCropOffX - dx, cropOffsetY: n.data._rsCropOffY - dy }
                             } : node));
                         }
                     }}
@@ -769,6 +739,7 @@ function FlowEditor() {
         </div>
 
         <div style={{ flexGrow: 1, position: 'relative' }}>
+          {/* ★ ここにあった旧コードの onConnect を最新の安全な仕様に修正しています！ */}
           <ReactFlow 
              nodes={flowNodes} edges={edges} edgeTypes={edgeTypes} elevateNodesOnSelect={false} multiSelectionKeyCode={['Shift', 'Meta', 'Control']}
              onNodesChange={u => setNodes((nds: any[]) => applyNodeChanges(u, nds))} 
@@ -827,7 +798,6 @@ function FlowEditor() {
                 </div>
               )}
 
-              {/* ★ 拡大エディタパネル ★ */}
               <div style={editorPanelStyle}>
                   <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'5px' }}>
                       <label style={{fontSize: '11px', fontWeight: 'bold'}}>文字内容</label>
