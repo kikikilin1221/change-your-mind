@@ -109,7 +109,7 @@ function FlowEditor() {
   useEffect(() => { nodesRef.current = nodes; }, [nodes]);
   useEffect(() => { edgesRef.current = edges; }, [edges]);
 
-  // ★ 選択状態の管理（React Flowのネイティブ仕様に完全同期）
+  // ★ 複数選択対応
   const selectedNodes = useMemo(() => nodes.filter(n => n.selected), [nodes]);
   const primaryNode = selectedNodes.length > 0 ? selectedNodes[0] : null;
   const selectedEdge = useMemo(() => edges.find(e => e.selected) || null, [edges]);
@@ -119,7 +119,7 @@ function FlowEditor() {
     setEdges(eds => eds.map(e => ({...e, selected: false})));
   }, []);
 
-  // 履歴のスナップショットを撮る
+  // 履歴のスナップショット
   const takeSnapshot = useCallback(() => {
       setPast(p => [...p.slice(-40), { nodes: JSON.parse(JSON.stringify(nodesRef.current)), edges: JSON.parse(JSON.stringify(edgesRef.current)) }]);
       setFuture([]);
@@ -231,6 +231,7 @@ function FlowEditor() {
     setFiles(updated); if (id === activeFileId) switchFile(Object.keys(updated)[0]);
   };
 
+  // ★ 複数選択されたノードを一括更新する関数
   const updateSelectedNodes = useCallback((newData: any, newStyle: any = {}) => {
     setNodes(nds => nds.map(n => n.selected ? {
         ...n,
@@ -246,7 +247,7 @@ function FlowEditor() {
     }
   };
 
-  // ★ 統合されたフォーマットロジック（フォーカス有無で自動切替・TSエラー完全回避）
+  // ★ 一括フォーマットロジック（フォーカス有無で自動切替）
   const applyUnifiedFormat = (type: 'fontName' | 'bold' | 'strikeThrough' | 'foreColor' | 'fontSize', value: any = '') => {
       takeSnapshot();
       const isActive = document.activeElement === editorRef.current;
@@ -297,22 +298,19 @@ function FlowEditor() {
           updateSelectedNodes({ content: editorRef.current.innerHTML });
 
       } else {
-          // 非フォーカス時：図形全体の設定を上書き
+          // 非フォーカス時：図形全体のスタイル（全体設定）を上書きする
           const styleKeyMap: any = { fontName: 'fontFamily', bold: 'fontWeight', strikeThrough: 'textDecoration', foreColor: 'color', fontSize: 'fontSize' };
           const styleKey = styleKeyMap[type];
           let styleVal = value;
 
-          if (type === 'bold') {
-              styleVal = primaryNode?.style?.fontWeight === 'bold' ? 'normal' : 'bold';
-          }
-          if (type === 'strikeThrough') {
-              styleVal = primaryNode?.style?.textDecoration === 'line-through double' ? 'none' : 'line-through double';
-          }
+          if (type === 'bold') styleVal = primaryNode?.style?.fontWeight === 'bold' ? 'normal' : 'bold';
+          if (type === 'strikeThrough') styleVal = primaryNode?.style?.textDecoration === 'line-through double' ? 'none' : 'line-through double';
 
           setNodes(nds => nds.map(n => {
               if (!n.selected) return n;
               const tempDiv = document.createElement('div');
               tempDiv.innerHTML = n.data?.content || '';
+              // 内側のタグの個別設定を剥がすことで、全体のスタイルが効くようにする
               tempDiv.querySelectorAll('*').forEach(el => {
                   const e = el as HTMLElement;
                   if (type === 'fontSize') { if(e.style.fontSize) e.style.fontSize = ''; if(e.tagName==='FONT') e.removeAttribute('size'); }
@@ -642,7 +640,7 @@ function FlowEditor() {
                 <div style={{ transform: 'scale(0.15)', transformOrigin: 'top left', width: '1200px', height: '800px', position: 'relative', pointerEvents: 'none' }}>
                   {levelData[n.id].nodes.map((cn: any) => cn.id !== 'center-mark' ? (
                     <div key={cn.id} style={{ position: 'absolute', left: cn.position.x, top: cn.position.y, width: cn.style?.width || 200, height: cn.style?.height || 100, backgroundColor: cn.style?.backgroundColor || '#fff', border: cn.style?.border || '4px solid #333', borderRadius: cn.style?.borderRadius || '12px', display: 'flex', alignItems: cn.style?.alignItems || 'center', justifyContent: cn.style?.justifyContent || 'center', fontSize: '32px', color: cn.style?.color || '#000', overflow: 'hidden' }}>
-                      {cn.data?.isImage ? <img src={cn.data.imageUrl as string} style={{width:'100%', height:'100%', objectFit:'cover'}} alt="mini" /> : cn.data?.isShape ? null : <div className="html-content" style={{padding:'15px', width:'100%', fontWeight: cn.style?.fontWeight || 'normal', textAlign: cn.style?.textAlign || 'center'}} dangerouslySetInnerHTML={{ __html: renderHTMLWithMath(cn.data?.content) }} />}
+                      {cn.data?.isImage ? <img src={cn.data.imageUrl as string} style={{width:'100%', height:'100%', objectFit:'cover'}} alt="mini" /> : cn.data?.isShape ? null : <div className="html-content" style={{padding:'15px', width:'100%', fontWeight: cn.style?.fontWeight || 'normal', textAlign: cn.style?.textAlign || 'center', color: cn.style?.color || '#000', fontFamily: cn.style?.fontFamily || 'sans-serif', fontSize: cn.style?.fontSize || '14px', textDecoration: cn.style?.textDecoration || 'none'}} dangerouslySetInnerHTML={{ __html: renderHTMLWithMath(cn.data?.content) }} />}
                     </div>
                   ) : null)}
                 </div>
@@ -683,10 +681,10 @@ function FlowEditor() {
                       maxWidth: 'none', maxHeight: 'none', left: n.data?.isCropping ? `${offX}px` : 0, top: n.data?.isCropping ? `${offY}px` : 0,
                       transform: `translate(${n.data.imgPosX || 0}px, ${n.data.imgPosY || 0}px) scale(${n.data.imgZoom || 1})`, transformOrigin: 'center center', pointerEvents: 'none' 
                   }} alt="img" />
-                  <div className="html-content" style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: n.style?.alignItems || 'center', justifyContent: n.style?.justifyContent || 'center', pointerEvents: 'none', color: n.style?.color || '#000', fontFamily: n.style?.fontFamily || 'sans-serif', whiteSpace: 'pre-wrap', lineHeight: '1.2' }} dangerouslySetInnerHTML={{ __html: renderHTMLWithMath(n.data?.content) }} />
+                  <div className="html-content" style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: n.style?.alignItems || 'center', justifyContent: n.style?.justifyContent || 'center', pointerEvents: 'none', color: n.style?.color || '#000', fontFamily: n.style?.fontFamily || 'sans-serif', fontSize: n.style?.fontSize || '14px', fontWeight: n.style?.fontWeight || 'normal', textDecoration: n.style?.textDecoration || 'none', whiteSpace: 'pre-wrap', lineHeight: '1.2' }} dangerouslySetInnerHTML={{ __html: renderHTMLWithMath(n.data?.content) }} />
                 </div>
               ) : n.id !== 'center-mark' ? (
-                <div className="html-content" style={{ pointerEvents: 'none', width: '100%', color: n.style?.color || '#000', fontFamily: n.style?.fontFamily || 'sans-serif', whiteSpace: 'pre-wrap', lineHeight: '1.2', textAlign: n.style?.textAlign || 'center' }} dangerouslySetInnerHTML={{ __html: renderHTMLWithMath(n.data?.content) }} />
+                <div className="html-content" style={{ pointerEvents: 'none', width: '100%', color: n.style?.color || '#000', fontFamily: n.style?.fontFamily || 'sans-serif', fontSize: n.style?.fontSize || '14px', fontWeight: n.style?.fontWeight || 'normal', textDecoration: n.style?.textDecoration || 'none', whiteSpace: 'pre-wrap', lineHeight: '1.2', textAlign: n.style?.textAlign || 'center' }} dangerouslySetInnerHTML={{ __html: renderHTMLWithMath(n.data?.content) }} />
               ) : null}
 
               {n.id !== 'center-mark' ? (
@@ -951,7 +949,7 @@ function FlowEditor() {
           )}
         </div>
 
-        <div style={{ padding: '15px', backgroundColor: 'rgba(255,255,255,0.95)', borderTop: '1px solid #eee', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '10px', zIndex: 1001, boxShadow: '0 -4px 10px rgba(0,0,0,0.03)' }}>
+        <div style={{ padding: '15px', backgroundColor: 'rgba(255,255,255,0.95)', borderTop: '1px solid #eee', display: 'flex', flexWrap: 'wrap', justifyContent: 'center', alignItems: 'center', gap: '10px', zIndex: 1001, boxShadow: '0 -4px 10px rgba(0,0,0,0.03)' }}>
           <button onClick={undo} disabled={past.length === 0} style={{ ...actionBtnStyle, opacity: past.length === 0 ? 0.4 : 1, cursor: past.length === 0 ? 'default' : 'pointer' }}>↩️ 戻る</button>
           <button onClick={redo} disabled={future.length === 0} style={{ ...actionBtnStyle, opacity: future.length === 0 ? 0.4 : 1, cursor: future.length === 0 ? 'default' : 'pointer' }}>↪️ やり直し</button>
           <div style={{ width: '1px', height: '30px', backgroundColor: '#ddd', margin: '0 5px' }} />
