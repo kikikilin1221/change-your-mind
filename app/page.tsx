@@ -2,8 +2,7 @@
 import React, { useState, useCallback, useMemo, useRef, useEffect } from 'react';
 import { 
   ReactFlow, Background, Controls, applyNodeChanges, applyEdgeChanges, addEdge,
-  NodeResizer, ReactFlowProvider, useReactFlow, MarkerType,
-  getBezierPath, EdgeProps, BaseEdge, EdgeLabelRenderer, useStore
+  NodeResizer, ReactFlowProvider, useStore, MarkerType, getBezierPath, EdgeProps, BaseEdge, EdgeLabelRenderer 
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import katex from 'katex';
@@ -110,10 +109,15 @@ function FlowEditor() {
   useEffect(() => { nodesRef.current = nodes; }, [nodes]);
   useEffect(() => { edgesRef.current = edges; }, [edges]);
 
-  // ★ マルチセレクト対応
+  // ★ 選択状態の管理（React Flowのネイティブ仕様に完全同期）
   const selectedNodes = useMemo(() => nodes.filter(n => n.selected), [nodes]);
   const primaryNode = selectedNodes.length > 0 ? selectedNodes[0] : null;
   const selectedEdge = useMemo(() => edges.find(e => e.selected) || null, [edges]);
+
+  const clearSelection = useCallback(() => {
+    setNodes(nds => nds.map(n => ({...n, selected: false})));
+    setEdges(eds => eds.map(e => ({...e, selected: false})));
+  }, []);
 
   // 履歴のスナップショットを撮る
   const takeSnapshot = useCallback(() => {
@@ -242,15 +246,15 @@ function FlowEditor() {
     }
   };
 
-  // ★ 統合されたフォーマットロジック（フォーカス有無で自動切替）
+  // ★ 統合されたフォーマットロジック（フォーカス有無で自動切替・TSエラー完全回避）
   const applyUnifiedFormat = (type: 'fontName' | 'bold' | 'strikeThrough' | 'foreColor' | 'fontSize', value: any = '') => {
       takeSnapshot();
       const isActive = document.activeElement === editorRef.current;
       
-      if (isActive) {
-          // エディタにフォーカスがある場合：部分編集（Word式）
+      if (isActive && editorRef.current) {
           const selection = window.getSelection();
           if (!selection) return;
+
           if (savedRangeRef.current) {
               selection.removeAllRanges();
               selection.addRange(savedRangeRef.current);
@@ -290,12 +294,10 @@ function FlowEditor() {
           }
           
           if (selection.rangeCount > 0) savedRangeRef.current = selection.getRangeAt(0).cloneRange();
-          
-          // エディタの内容をすべての選択されたノードに反映（一括入力）
           updateSelectedNodes({ content: editorRef.current.innerHTML });
 
       } else {
-          // エディタにフォーカスがない場合：全体編集として機能する
+          // 非フォーカス時：図形全体の設定を上書き
           const styleKeyMap: any = { fontName: 'fontFamily', bold: 'fontWeight', strikeThrough: 'textDecoration', foreColor: 'color', fontSize: 'fontSize' };
           const styleKey = styleKeyMap[type];
           let styleVal = value;
@@ -338,6 +340,7 @@ function FlowEditor() {
           editorRef.current.focus();
           const selection = window.getSelection();
           if (!selection) return;
+
           if (savedRangeRef.current) {
               selection.removeAllRanges();
               selection.addRange(savedRangeRef.current);
@@ -368,7 +371,6 @@ function FlowEditor() {
           }
           updateSelectedNodes({ content: editorRef.current.innerHTML });
       } else {
-          // 非フォーカス時：図形全体の設定をリセット
           setNodes(nds => nds.map(n => {
               if (!n.selected) return n;
               const tempDiv = document.createElement('div');
@@ -377,7 +379,7 @@ function FlowEditor() {
                   const e = el as HTMLElement;
                   e.style.fontSize = ''; e.style.color = ''; e.style.fontFamily = ''; e.style.fontWeight = ''; e.style.textDecoration = '';
                   if (e.tagName==='FONT' || e.tagName==='B' || e.tagName==='STRONG' || e.tagName==='STRIKE') {
-                      e.outerHTML = e.innerHTML; // タグごと剥がす
+                      e.outerHTML = e.innerHTML;
                   }
               });
               return {
@@ -700,7 +702,10 @@ function FlowEditor() {
                     onResize={(_, params) => {
                         if (n.data?.isImage && n.data?.isCropping) {
                             const dx = params.x - n.data._rsX; const dy = params.y - n.data._rsY;
-                            updateNode({ cropOffsetX: n.data._rsCropOffX - dx, cropOffsetY: n.data._rsCropOffY - dy });
+                            setNodes(nds => nds.map(node => node.id === n.id ? {
+                                ...node,
+                                data: { ...node.data, cropOffsetX: n.data._rsCropOffX - dx, cropOffsetY: n.data._rsCropOffY - dy }
+                            } : node));
                         }
                     }}
                  />
@@ -710,7 +715,7 @@ function FlowEditor() {
         }
       };
     })];
-  }, [nodes, enterLevel, levelData, takeSnapshot, updateNode]);
+  }, [nodes, enterLevel, levelData, takeSnapshot]);
 
   const updateEdgeDesign = (config: any) => {
     takeSnapshot();
@@ -784,7 +789,10 @@ function FlowEditor() {
           
           {selectedNodes.length > 0 && primaryNode && (
             <div style={{ position:'absolute', right:0, top:0, bottom:0, width:'340px', borderLeft:'1px solid #ddd', padding:'20px', backgroundColor:'#fff', zIndex:1000, overflowY: 'auto', boxShadow: '-4px 0 10px rgba(0,0,0,0.05)' }}>
-              <h3 style={{fontSize:'16px'}}>{selectedNodes.length > 1 ? `${selectedNodes.length}個の要素を一括編集` : primaryNode.data?.isImage ? '画像編集' : primaryNode.data?.isShape ? '図形設定' : 'テキスト設定'}</h3>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+                <h3 style={{fontSize:'16px', margin: 0}}>{selectedNodes.length > 1 ? `${selectedNodes.length}個の要素を一括編集` : primaryNode.data?.isImage ? '画像編集' : primaryNode.data?.isShape ? '図形設定' : 'テキスト設定'}</h3>
+                <button onClick={clearSelection} style={{ border: 'none', background: 'none', fontSize: '20px', cursor: 'pointer', padding: '0 5px' }}>×</button>
+              </div>
               
               <div style={{ display:'flex', gap:'5px', marginBottom:'15px', marginTop:'10px' }}>
                 <button onClick={() => { takeSnapshot(); setNodes(nds => { const maxZ = Math.max(0, ...nds.map(n => Number(n.zIndex) || 0)); return nds.map(n => n.selected ? {...n, zIndex: maxZ + 1} : n); })}} style={{flex:1, padding:'8px', fontSize:'12px', fontWeight: 'bold', background: '#f0f0f0', border: '1px solid #ccc', cursor: 'pointer', borderRadius: '4px'}}>↑ 最前面へ</button>
@@ -892,7 +900,7 @@ function FlowEditor() {
 
               {!primaryNode.data?.isShape && !primaryNode.data?.isImage && (
                 <>
-                  <button onClick={() => { takeSnapshot(); updateSelectedNodes(n => ({ previewVisible: !n.previewVisible }))}} style={{ width:'100%', marginTop:'10px', padding:'10px', background: primaryNode.data?.previewVisible ? '#3b82f6' : '#fff', color: primaryNode.data?.previewVisible ? '#fff' : '#333', border: '1px solid #ccc', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', transition: 'all 0.2s' }}>
+                  <button onClick={() => { takeSnapshot(); updateSelectedNodes((n: any) => ({ previewVisible: !n.previewVisible }))}} style={{ width:'100%', marginTop:'10px', padding:'10px', background: primaryNode.data?.previewVisible ? '#3b82f6' : '#fff', color: primaryNode.data?.previewVisible ? '#fff' : '#333', border: '1px solid #ccc', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', transition: 'all 0.2s' }}>
                     {primaryNode.data?.previewVisible ? '💬 吹き出しを消す' : '💬 吹き出しを追加'}
                   </button>
                   {primaryNode.data?.previewVisible && (
@@ -910,7 +918,6 @@ function FlowEditor() {
                   )}
                 </>
               )}
-              {/* ★ 複製ボタンの追加 */}
               <div style={{ display: 'flex', gap: '5px', marginTop: '20px' }}>
                 <button onClick={handleDuplicate} style={{ flex:1, color: '#333', border: '1px solid #ccc', padding: '10px', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold', background: '#f8f9fa' }}>📄 複製</button>
                 <button onClick={() => { 
@@ -925,7 +932,10 @@ function FlowEditor() {
 
           {selectedEdge && (
             <div style={{ position:'absolute', right:0, top:0, bottom:0, width:'320px', borderLeft:'1px solid #ddd', padding:'20px', backgroundColor:'#fff', zIndex:1000 }}>
-              <h3 style={{fontSize:'16px'}}>線のデザイン</h3>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+                <h3 style={{fontSize:'16px', margin: 0}}>線のデザイン</h3>
+                <button onClick={clearSelection} style={{ border: 'none', background: 'none', fontSize: '20px', cursor: 'pointer', padding: '0 5px' }}>×</button>
+              </div>
               <label style={{fontSize:'11px', fontWeight: 'bold'}}>太さ</label>
               <div style={{ display:'flex', gap:'5px', marginBottom:'20px', marginTop: '5px' }}>
                 {[2, 6, 12].map(w => <button key={w} onClick={() => { takeSnapshot(); setEdges(eds => eds.map(e => e.selected ? { ...e, style: { ...e.style, strokeWidth: w } } : e)); }} style={{flex:1, padding:'10px', cursor: 'pointer', border: '1px solid #ccc', borderRadius: '4px', background: selectedEdge.style?.strokeWidth === w ? '#ddd' : '#fff'}}>{w === 2 ? '細' : w === 6 ? '中' : '太'}</button>)}
@@ -942,7 +952,6 @@ function FlowEditor() {
         </div>
 
         <div style={{ padding: '15px', backgroundColor: 'rgba(255,255,255,0.95)', borderTop: '1px solid #eee', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '10px', zIndex: 1001, boxShadow: '0 -4px 10px rgba(0,0,0,0.03)' }}>
-          {/* ★ 戻る・やり直しボタン */}
           <button onClick={undo} disabled={past.length === 0} style={{ ...actionBtnStyle, opacity: past.length === 0 ? 0.4 : 1, cursor: past.length === 0 ? 'default' : 'pointer' }}>↩️ 戻る</button>
           <button onClick={redo} disabled={future.length === 0} style={{ ...actionBtnStyle, opacity: future.length === 0 ? 0.4 : 1, cursor: future.length === 0 ? 'default' : 'pointer' }}>↪️ やり直し</button>
           <div style={{ width: '1px', height: '30px', backgroundColor: '#ddd', margin: '0 5px' }} />
