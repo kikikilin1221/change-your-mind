@@ -73,7 +73,7 @@ const PASTEL_COLORS = ['#FFB7B2', '#FFDAC1', '#E2F0CB', '#B5EAD7', '#C7CEEA', '#
 const QUICK_TEXT_COLORS = ['#000000', '#FF0000', '#008000', '#0000FF', '#FFF000'];
 
 function FlowEditor() {
-  const { setViewport, getZoom, getViewport } = useReactFlow();
+  const { setViewport, getZoom } = useReactFlow();
   const fileInputRef = useRef<HTMLInputElement>(null);
   
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
@@ -86,11 +86,9 @@ function FlowEditor() {
   const [edges, setEdges] = useState<any[]>([]);
   const [levelData, setLevelData] = useState<Record<string, { nodes: any[]; edges: any[]; bgColor?: string }>>({});
   
-  const [history, setHistory] = useState<string[]>([]);
+  const [historyLevel, setHistoryLevel] = useState<string[]>([]);
   const [currentLevel, setCurrentLevel] = useState('root');
   const [currentLabel, setCurrentLabel] = useState('TOP層');
-  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
-  const [selectedEdge, setSelectedEdge] = useState<any | null>(null);
   const [guides, setGuides] = useState<{ lineX?: number, lineY?: number }>({});
   
   const [partialFontSize, setPartialFontSize] = useState<number>(14);
@@ -101,23 +99,51 @@ function FlowEditor() {
   const editorRef = useRef<HTMLDivElement>(null);
   const savedRangeRef = useRef<Range | null>(null);
 
-  // ★ コピー＆ペーストやレイアウト計算用の最新状態参照Ref
+  // ★ 最新状態の参照と Undo/Redo 履歴
   const nodesRef = useRef<any[]>([]);
   const edgesRef = useRef<any[]>([]);
-  const selectedNodeIdRef = useRef<string | null>(null);
-  const copiedNodeRef = useRef<any | null>(null);
+  const copiedNodesRef = useRef<any[]>([]);
+  
+  const [past, setPast] = useState<{nodes: any[], edges: any[]}[]>([]);
+  const [future, setFuture] = useState<{nodes: any[], edges: any[]}[]>([]);
 
   useEffect(() => { nodesRef.current = nodes; }, [nodes]);
   useEffect(() => { edgesRef.current = edges; }, [edges]);
-  useEffect(() => { selectedNodeIdRef.current = selectedNodeId; }, [selectedNodeId]);
 
-  const selectedNode = useMemo(() => nodes.find(n => n.id === selectedNodeId) || null, [nodes, selectedNodeId]);
+  // ★ マルチセレクト対応
+  const selectedNodes = useMemo(() => nodes.filter(n => n.selected), [nodes]);
+  const primaryNode = selectedNodes.length > 0 ? selectedNodes[0] : null;
+  const selectedEdge = useMemo(() => edges.find(e => e.selected) || null, [edges]);
+
+  // 履歴のスナップショットを撮る
+  const takeSnapshot = useCallback(() => {
+      setPast(p => [...p.slice(-40), { nodes: JSON.parse(JSON.stringify(nodesRef.current)), edges: JSON.parse(JSON.stringify(edgesRef.current)) }]);
+      setFuture([]);
+  }, []);
+
+  const undo = useCallback(() => {
+      if (past.length === 0) return;
+      const previous = past[past.length - 1];
+      setFuture(f => [{ nodes: nodesRef.current, edges: edgesRef.current }, ...f]);
+      setPast(p => p.slice(0, -1));
+      setNodes(previous.nodes);
+      setEdges(previous.edges);
+  }, [past]);
+
+  const redo = useCallback(() => {
+      if (future.length === 0) return;
+      const next = future[0];
+      setPast(p => [...p, { nodes: nodesRef.current, edges: edgesRef.current }]);
+      setFuture(f => f.slice(1));
+      setNodes(next.nodes);
+      setEdges(next.edges);
+  }, [future]);
 
   useEffect(() => {
-    if (selectedNode) {
-        setPartialFontSize(parseInt(String(selectedNode.style?.fontSize || 14)));
+    if (primaryNode) {
+        setPartialFontSize(parseInt(String(primaryNode.style?.fontSize || 14)));
     }
-  }, [selectedNodeId, selectedNode?.style?.fontSize]);
+  }, [primaryNode?.id, primaryNode?.style?.fontSize]);
 
   useEffect(() => {
     const saved = localStorage.getItem('my-logic-files');
@@ -144,26 +170,21 @@ function FlowEditor() {
       const updatedLevelData = { ...levelData, [currentLevel]: { ...(levelData[currentLevel] || {}), nodes, edges } };
       return { ...prev, [activeFileId]: { ...currentFileData, levelData: updatedLevelData, currentLevel, currentLabel } };
     });
-  }, [nodes, edges, currentLevel, currentLabel, levelData, activeFileId]);
-
-  useEffect(() => {
-    if (Object.keys(files).length > 0) {
-      localStorage.setItem('my-logic-files', JSON.stringify(files));
-      localStorage.setItem('my-logic-active-id', activeFileId);
-    }
-  }, [files, activeFileId]);
+    localStorage.setItem('my-logic-files', JSON.stringify(files));
+    localStorage.setItem('my-logic-active-id', activeFileId);
+  }, [nodes, edges, currentLevel, currentLabel, levelData, activeFileId, files]);
 
   useEffect(() => {
     if (editorRef.current) {
-        if (selectedNode) {
-            if (editorRef.current.innerHTML !== (selectedNode.data.content || '')) {
-                editorRef.current.innerHTML = selectedNode.data.content || '';
+        if (primaryNode) {
+            if (editorRef.current.innerHTML !== (primaryNode.data.content || '')) {
+                editorRef.current.innerHTML = primaryNode.data.content || '';
             }
         } else {
             editorRef.current.innerHTML = '';
         }
     }
-  }, [selectedNodeId]);
+  }, [primaryNode?.id]);
 
   const loadFileInitial = (id: string, allFiles = files) => {
     const target = allFiles[id]; if (!target) return;
@@ -171,17 +192,10 @@ function FlowEditor() {
     const initialLevel = target.currentLevel || 'root';
     setActiveFileId(id); setLevelData(loadedLevelData); setCurrentLevel(initialLevel); setCurrentLabel(target.currentLabel || 'TOP層');
     setNodes(loadedLevelData[initialLevel]?.nodes || []); setEdges(loadedLevelData[initialLevel]?.edges || []);
-    setHistory([]); setSelectedNodeId(null);
+    setHistoryLevel([]); setPast([]); setFuture([]);
   };
 
   const switchFile = (newId: string) => {
-    setFiles(prev => {
-      const updated = { ...prev };
-      if (activeFileId && updated[activeFileId]) {
-        updated[activeFileId] = { ...updated[activeFileId], levelData: { ...levelData, [currentLevel]: { ...(levelData[currentLevel] || {}), nodes, edges } }, currentLevel, currentLabel };
-      }
-      return updated;
-    });
     setTimeout(() => {
       setFiles(currentFiles => {
         const target = currentFiles[newId];
@@ -191,7 +205,7 @@ function FlowEditor() {
           const nextLevel = target.currentLevel || 'root';
           setLevelData(nextLevelData); setCurrentLevel(nextLevel); setCurrentLabel(target.currentLabel || 'TOP層');
           setNodes(nextLevelData[nextLevel]?.nodes || []); setEdges(nextLevelData[nextLevel]?.edges || []);
-          setSelectedNodeId(null); setSelectedEdge(null); savedRangeRef.current = null;
+          setPast([]); setFuture([]); savedRangeRef.current = null;
         }
         return currentFiles;
       });
@@ -213,9 +227,13 @@ function FlowEditor() {
     setFiles(updated); if (id === activeFileId) switchFile(Object.keys(updated)[0]);
   };
 
-  const updateNode = useCallback((newData: any, newStyle: any = {}) => {
-    setNodes(nds => nds.map(n => n.id === selectedNodeId ? { ...n, data: { ...(n.data || {}), ...newData }, style: { ...(n.style || {}), ...newStyle } } : n));
-  }, [selectedNodeId]);
+  const updateSelectedNodes = useCallback((newData: any, newStyle: any = {}) => {
+    setNodes(nds => nds.map(n => n.selected ? {
+        ...n,
+        data: { ...(n.data || {}), ...(typeof newData === 'function' ? newData(n.data) : newData) },
+        style: { ...(n.style || {}), ...newStyle }
+    } : n));
+  }, []);
 
   const saveSelection = () => {
     const sel = window.getSelection();
@@ -224,164 +242,177 @@ function FlowEditor() {
     }
   };
 
-  const applyFormat = (command: string, value: string = '') => {
-    if (!editorRef.current) return;
-    editorRef.current.focus();
-    const selection = window.getSelection();
-    
-    if (!selection) return;
+  // ★ 統合されたフォーマットロジック（フォーカス有無で自動切替）
+  const applyUnifiedFormat = (type: 'fontName' | 'bold' | 'strikeThrough' | 'foreColor' | 'fontSize', value: any = '') => {
+      takeSnapshot();
+      const isActive = document.activeElement === editorRef.current;
+      
+      if (isActive) {
+          // エディタにフォーカスがある場合：部分編集（Word式）
+          const selection = window.getSelection();
+          if (!selection) return;
+          if (savedRangeRef.current) {
+              selection.removeAllRanges();
+              selection.addRange(savedRangeRef.current);
+          }
 
-    if (savedRangeRef.current) {
-        selection.removeAllRanges();
-        selection.addRange(savedRangeRef.current);
-    }
+          if (type === 'fontSize') {
+              if (selection.rangeCount === 0) return;
+              const range = selection.getRangeAt(0);
+              if (range.collapsed) {
+                  let currentNode = range.startContainer as Node | null;
+                  if (currentNode && currentNode.nodeType === Node.TEXT_NODE) currentNode = currentNode.parentNode;
+                  if (currentNode && currentNode.nodeName === 'SPAN' && (currentNode.textContent === '\u200B' || currentNode.textContent === '')) {
+                      (currentNode as HTMLElement).style.fontSize = value;
+                  } else {
+                      const span = document.createElement('span');
+                      span.style.fontSize = value;
+                      span.style.lineHeight = '1.2';
+                      span.innerHTML = '\u200B'; 
+                      range.insertNode(span);
+                      range.setStart(span.firstChild!, 1);
+                      range.collapse(true);
+                      selection.removeAllRanges();
+                      selection.addRange(range);
+                  }
+              } else {
+                  document.execCommand('fontSize', false, '7');
+                  const fonts = editorRef.current.querySelectorAll('font[size="7"]');
+                  fonts.forEach((f) => {
+                      const el = f as HTMLElement;
+                      el.removeAttribute('size');
+                      el.style.fontSize = value;
+                      el.style.lineHeight = '1.2';
+                  });
+              }
+          } else {
+              document.execCommand(type, false, value);
+          }
+          
+          if (selection.rangeCount > 0) savedRangeRef.current = selection.getRangeAt(0).cloneRange();
+          
+          // エディタの内容をすべての選択されたノードに反映（一括入力）
+          updateSelectedNodes({ content: editorRef.current.innerHTML });
 
-    document.execCommand(command, false, value);
-    
-    if (selection.rangeCount > 0) {
-        savedRangeRef.current = selection.getRangeAt(0).cloneRange();
-    }
-    updateNode({ content: editorRef.current.innerHTML });
-  };
+      } else {
+          // エディタにフォーカスがない場合：全体編集として機能する
+          const styleKeyMap: any = { fontName: 'fontFamily', bold: 'fontWeight', strikeThrough: 'textDecoration', foreColor: 'color', fontSize: 'fontSize' };
+          const styleKey = styleKeyMap[type];
+          let styleVal = value;
 
-  const changeFontSize = (val: string, isReset: boolean = false) => {
-    if (!editorRef.current) return;
-    editorRef.current.focus();
-    const selection = window.getSelection();
-    
-    if (!selection) return;
-    
-    if (savedRangeRef.current) {
-        selection.removeAllRanges();
-        selection.addRange(savedRangeRef.current);
-    }
-    
-    if (selection.rangeCount === 0) return;
-    const range = selection.getRangeAt(0);
+          if (type === 'bold') {
+              styleVal = primaryNode?.style?.fontWeight === 'bold' ? 'normal' : 'bold';
+          }
+          if (type === 'strikeThrough') {
+              styleVal = primaryNode?.style?.textDecoration === 'line-through double' ? 'none' : 'line-through double';
+          }
 
-    if (range.collapsed) {
-        let currentNode = range.startContainer as Node | null;
-        if (currentNode && currentNode.nodeType === Node.TEXT_NODE) {
-            currentNode = currentNode.parentNode;
-        }
-        
-        if (currentNode && currentNode.nodeName === 'SPAN' && (currentNode.textContent === '\u200B' || currentNode.textContent === '')) {
-            if (isReset) {
-                (currentNode as HTMLElement).style.fontSize = '14px';
-            } else {
-                (currentNode as HTMLElement).style.fontSize = val;
-            }
-        } else {
-            const span = document.createElement('span');
-            span.style.fontSize = isReset ? '14px' : val;
-            span.style.lineHeight = '1.2';
-            span.innerHTML = '\u200B'; 
-            range.insertNode(span);
-            range.setStart(span.firstChild!, 1);
-            range.collapse(true);
-            selection.removeAllRanges();
-            selection.addRange(range);
-        }
-    } else {
-        if (isReset) document.execCommand('removeFormat');
-        document.execCommand('fontSize', false, '7');
-        const fonts = editorRef.current.querySelectorAll('font[size="7"]');
-        fonts.forEach((f) => {
-            const el = f as HTMLElement;
-            el.removeAttribute('size');
-            el.style.fontSize = isReset ? '14px' : val;
-            el.style.lineHeight = '1.2';
-        });
-    }
-    
-    if (selection.rangeCount > 0) {
-        savedRangeRef.current = selection.getRangeAt(0).cloneRange();
-    }
-    updateNode({ content: editorRef.current.innerHTML });
+          setNodes(nds => nds.map(n => {
+              if (!n.selected) return n;
+              const tempDiv = document.createElement('div');
+              tempDiv.innerHTML = n.data?.content || '';
+              tempDiv.querySelectorAll('*').forEach(el => {
+                  const e = el as HTMLElement;
+                  if (type === 'fontSize') { if(e.style.fontSize) e.style.fontSize = ''; if(e.tagName==='FONT') e.removeAttribute('size'); }
+                  if (type === 'foreColor') { if(e.style.color) e.style.color = ''; if(e.tagName==='FONT') e.removeAttribute('color'); }
+                  if (type === 'fontName') { if(e.style.fontFamily) e.style.fontFamily = ''; if(e.tagName==='FONT') e.removeAttribute('face'); }
+                  if (type === 'bold') { if(e.style.fontWeight) e.style.fontWeight = ''; if(e.tagName==='B'||e.tagName==='STRONG') e.style.fontWeight = 'normal'; }
+                  if (type === 'strikeThrough') { if(e.style.textDecoration) e.style.textDecoration = ''; if(e.tagName==='STRIKE') e.style.textDecoration = 'none'; }
+              });
+              
+              return {
+                  ...n,
+                  data: { ...n.data, content: tempDiv.innerHTML },
+                  style: { ...n.style, [styleKey]: styleVal }
+              }
+          }));
+      }
   };
 
   const handleResetFormat = () => {
+      takeSnapshot();
       setPartialFontSize(14);
-      if (!editorRef.current) return;
-      editorRef.current.focus();
-      const selection = window.getSelection();
-      if (!selection) return;
-
-      if (savedRangeRef.current) {
-          selection.removeAllRanges();
-          selection.addRange(savedRangeRef.current);
-      }
-
-      if (selection.rangeCount > 0) {
-          const range = selection.getRangeAt(0);
-          if (range.collapsed) {
-              if (document.queryCommandState('bold')) document.execCommand('bold');
-              if (document.queryCommandState('strikeThrough')) document.execCommand('strikeThrough');
-              document.execCommand('foreColor', false, '#000000');
-              document.execCommand('fontName', false, 'sans-serif');
-              
-              const span = document.createElement('span');
-              span.style.fontSize = '14px';
-              span.style.color = '#000000';
-              span.style.fontWeight = 'normal';
-              span.style.textDecoration = 'none';
-              span.style.fontFamily = 'sans-serif';
-              span.innerHTML = '&#8203;'; 
-              range.insertNode(span);
-              range.setStart(span.firstChild!, 1);
-              range.collapse(true);
-              selection.removeAllRanges();
-              selection.addRange(range);
-          } else {
-              document.execCommand('removeFormat');
-              document.execCommand('fontSize', false, '7');
-              const fonts = editorRef.current.querySelectorAll('font[size="7"]');
-              fonts.forEach((f) => {
-                  const el = f as HTMLElement;
-                  el.removeAttribute('size');
-                  el.style.fontSize = '14px';
-                  el.style.color = '#000000';
-                  el.style.fontWeight = 'normal';
-                  el.style.textDecoration = 'none';
-                  el.style.fontFamily = 'sans-serif';
-                  el.style.lineHeight = '1.2';
-              });
-          }
-          savedRangeRef.current = selection.getRangeAt(0).cloneRange();
-      }
+      const isActive = document.activeElement === editorRef.current;
       
-      updateNode({ content: editorRef.current.innerHTML });
+      if (isActive && editorRef.current) {
+          editorRef.current.focus();
+          const selection = window.getSelection();
+          if (!selection) return;
+          if (savedRangeRef.current) {
+              selection.removeAllRanges();
+              selection.addRange(savedRangeRef.current);
+          }
+
+          if (selection.rangeCount > 0) {
+              const range = selection.getRangeAt(0);
+              if (range.collapsed) {
+                  if (document.queryCommandState('bold')) document.execCommand('bold');
+                  if (document.queryCommandState('strikeThrough')) document.execCommand('strikeThrough');
+                  document.execCommand('foreColor', false, '#000000');
+                  document.execCommand('fontName', false, 'sans-serif');
+                  
+                  const span = document.createElement('span');
+                  span.style.fontSize = '14px'; span.style.color = '#000000'; span.style.fontWeight = 'normal'; span.style.textDecoration = 'none'; span.style.fontFamily = 'sans-serif'; span.innerHTML = '&#8203;'; 
+                  range.insertNode(span); range.setStart(span.firstChild!, 1); range.collapse(true);
+                  selection.removeAllRanges(); selection.addRange(range);
+              } else {
+                  document.execCommand('removeFormat');
+                  document.execCommand('fontSize', false, '7');
+                  const fonts = editorRef.current.querySelectorAll('font[size="7"]');
+                  fonts.forEach((f) => {
+                      const el = f as HTMLElement;
+                      el.removeAttribute('size'); el.style.fontSize = '14px'; el.style.color = '#000000'; el.style.fontWeight = 'normal'; el.style.textDecoration = 'none'; el.style.fontFamily = 'sans-serif'; el.style.lineHeight = '1.2';
+                  });
+              }
+              savedRangeRef.current = selection.getRangeAt(0).cloneRange();
+          }
+          updateSelectedNodes({ content: editorRef.current.innerHTML });
+      } else {
+          // 非フォーカス時：図形全体の設定をリセット
+          setNodes(nds => nds.map(n => {
+              if (!n.selected) return n;
+              const tempDiv = document.createElement('div');
+              tempDiv.innerHTML = n.data?.content || '';
+              tempDiv.querySelectorAll('*').forEach(el => {
+                  const e = el as HTMLElement;
+                  e.style.fontSize = ''; e.style.color = ''; e.style.fontFamily = ''; e.style.fontWeight = ''; e.style.textDecoration = '';
+                  if (e.tagName==='FONT' || e.tagName==='B' || e.tagName==='STRONG' || e.tagName==='STRIKE') {
+                      e.outerHTML = e.innerHTML; // タグごと剥がす
+                  }
+              });
+              return {
+                  ...n,
+                  data: { ...n.data, content: tempDiv.innerHTML },
+                  style: { ...n.style, fontSize: '14px', color: '#000000', fontFamily: 'sans-serif', fontWeight: 'normal', textDecoration: 'none' }
+              }
+          }));
+      }
   };
 
-  // ★ コピー機能
   const handleCopy = useCallback(() => {
-    const id = selectedNodeIdRef.current;
-    if (id) {
-        const nodeToCopy = nodesRef.current.find(n => n.id === id);
-        if (nodeToCopy) {
-            copiedNodeRef.current = JSON.parse(JSON.stringify(nodeToCopy));
-        }
+    const selected = nodesRef.current.filter(n => n.selected);
+    if (selected.length > 0) {
+        copiedNodesRef.current = JSON.parse(JSON.stringify(selected));
     }
   }, []);
 
-  // ★ ペースト機能
   const handlePaste = useCallback(() => {
-    if (copiedNodeRef.current) {
-        const original = copiedNodeRef.current;
-        const newId = `node-${Date.now()}`;
-        const maxZ = Math.max(0, ...nodesRef.current.map(n => Number(n.zIndex) || 0));
-        const newNode = {
-            ...original,
-            id: newId,
-            position: { x: original.position.x + 30, y: original.position.y + 30 },
-            zIndex: maxZ + 1
-        };
-        setNodes(nds => [...nds, newNode]);
-        setSelectedNodeId(newId);
+    if (copiedNodesRef.current && copiedNodesRef.current.length > 0) {
+        takeSnapshot();
+        const newNodes = copiedNodesRef.current.map(original => {
+            const newId = `node-${Date.now()}-${Math.random()}`;
+            return {
+                ...original,
+                id: newId,
+                selected: true,
+                position: { x: original.position.x + 30, y: original.position.y + 30 },
+                zIndex: Math.max(0, ...nodesRef.current.map(n => Number(n.zIndex) || 0)) + 1
+            };
+        });
+        setNodes(nds => [...nds.map(n => ({...n, selected: false})), ...newNodes]);
     }
-  }, []);
+  }, [takeSnapshot]);
 
-  // ★ 複製機能（コピーしてすぐペースト）
   const handleDuplicate = useCallback(() => {
       handleCopy();
       setTimeout(handlePaste, 10);
@@ -391,30 +422,30 @@ function FlowEditor() {
     setNodes(nds => {
       const target = nds.find(n => n.id === id);
       if (target?.data?.isShape || target?.data?.isImage) return nds;
-      setHistory(prev => [...prev, currentLevel]);
-      setCurrentLevel(id); setCurrentLabel(label || '階層中'); setSelectedNodeId(null); savedRangeRef.current = null;
+      setHistoryLevel(prev => [...prev, currentLevel]);
+      setCurrentLevel(id); setCurrentLabel(label || '階層中'); savedRangeRef.current = null;
       const nextData = levelData[id] || { nodes: [], edges: [] };
       setEdges(nextData.edges || []); return nextData.nodes || [];
     });
   }, [currentLevel, levelData]);
 
   const goBack = () => {
-    if (history.length === 0) return;
-    const newHist = [...history]; const prevLevel = newHist.pop()!;
-    setCurrentLevel(prevLevel); setHistory(newHist); setCurrentLabel(prevLevel === 'root' ? 'TOP層' : '階層中'); setSelectedNodeId(null); savedRangeRef.current = null;
+    if (historyLevel.length === 0) return;
+    const newHist = [...historyLevel]; const prevLevel = newHist.pop()!;
+    setCurrentLevel(prevLevel); setHistoryLevel(newHist); setCurrentLabel(prevLevel === 'root' ? 'TOP層' : '階層中'); savedRangeRef.current = null;
     const prevData = levelData[prevLevel] || { nodes: [], edges: [] };
     setNodes(prevData.nodes || []); setEdges(prevData.edges || []);
   };
 
   const goTop = () => {
-    if (history.length === 0) return;
-    setCurrentLevel('root'); setHistory([]); setCurrentLabel('TOP層'); setSelectedNodeId(null); savedRangeRef.current = null;
+    if (historyLevel.length === 0) return;
+    setCurrentLevel('root'); setHistoryLevel([]); setCurrentLabel('TOP層'); savedRangeRef.current = null;
     const rootData = levelData['root'] || { nodes: [], edges: [] };
     setNodes(rootData.nodes || []); setEdges(rootData.edges || []);
   };
 
-  // ★ マインドマップ型 AddNode機能（Enter一発で繋ぐ）
   const addNode = useCallback((type: 'text' | 'image' | 'shape') => {
+    takeSnapshot();
     const id = `node-${Date.now()}`;
     let data: any = { content: '項目', previewVisible: false, previewStyle: { opacity: 0.7, offsetX: 0, offsetY: -150, width: 180, height: 120 } };
     let style: any = { backgroundColor: '#ffffff', color: '#000', borderRadius: '12px', fontSize: '14px', width: 200, height: 100, display: 'flex', alignItems: 'center', justifyContent: 'center', textAlign: 'center' };
@@ -425,33 +456,29 @@ function FlowEditor() {
       style = { ...style, backgroundColor: '#eee', borderRadius: '4px', border: '3px solid #333' };
     }
 
-    const selId = selectedNodeIdRef.current;
-    
-    // 何か選択されていれば、そこからツリー構造を伸ばす（マインドマップ形式）
-    if (selId && type === 'text') {
-        // 先に線を引く
-        setEdges(eds => [...eds, { id: `e-${selId}-${id}`, source: selId, target: id, type: 'default', style: { strokeWidth: 2 } }]);
+    const selNodes = nodesRef.current.filter(n => n.selected);
+    const parent = selNodes.length === 1 ? selNodes[0] : null;
+
+    if (parent && type === 'text') {
+        const edgeId = `e-${parent.id}-${id}`;
+        setEdges(eds => [...eds.map(e=>({...e, selected:false})), { id: edgeId, source: parent.id, target: id, type: 'default', style: { strokeWidth: 2 } }]);
         
         setNodes(nds => {
-            const parent = nds.find(n => n.id === selId);
-            if (!parent) return [...nds, { id, position: { x: 100, y: 100 }, data, style, zIndex: 1 }];
-            
             const maxZ = Math.max(0, ...nds.map(n => Number(n.zIndex) || 0));
             const newNode = { 
-                id, 
+                id, selected: true,
                 position: { x: parent.position.x, y: parent.position.y + Number(parent.style?.height || 100) + 80 }, 
                 data, style, zIndex: maxZ + 1 
             };
             
-            let updatedNodes = [...nds, newNode];
+            let updatedNodes = [...nds.map(n => ({...n, selected: false})), newNode];
 
-            // ピラミッド型自動レイアウト計算
-            const childIds = edgesRef.current.filter(e => e.source === selId).map(e => e.target).concat(id);
+            const childIds = edgesRef.current.filter(e => e.source === parent.id).map(e => e.target).concat(id);
             const children = updatedNodes.filter(n => childIds.includes(n.id));
             
             if (children.length > 0) {
                 const Px = parent.position.x + (Number(parent.style?.width || 200) / 2);
-                const spacing = 240; // 要素間の間隔
+                const spacing = 240; 
                 const totalWidth = (children.length - 1) * spacing;
                 const startX = Px - totalWidth / 2;
                 
@@ -468,72 +495,67 @@ function FlowEditor() {
             }
             return updatedNodes;
         });
-        setSelectedNodeId(id);
     } else {
-        // 何も選択されていない場合は普通に追加
         setNodes(nds => {
             const maxZ = Math.max(0, ...nds.map(n => Number(n.zIndex) || 0));
-            return [...nds, { id, position: { x: 100, y: 100 }, data, style, zIndex: maxZ + 1 }];
+            return [...nds.map(n => ({...n, selected: false})), { id, selected: true, position: { x: 100, y: 100 }, data, style, zIndex: maxZ + 1 }];
         });
-        setSelectedNodeId(id);
     }
-  }, []);
+  }, [takeSnapshot]);
 
-  // ★ キーボードショートカットの監視
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       const activeEl = document.activeElement as HTMLElement;
-      const isEditing = activeEl?.tagName === 'INPUT' || 
-                        activeEl?.tagName === 'TEXTAREA' || 
-                        activeEl?.isContentEditable;
+      const isEditing = activeEl?.tagName === 'INPUT' || activeEl?.tagName === 'TEXTAREA' || activeEl?.isContentEditable;
       
-      // 文字入力中は誤動作防止のためショートカットを無効化
+      if ((e.ctrlKey || e.metaKey) && e.key === 'z') {
+          if (e.shiftKey) { e.preventDefault(); redo(); } 
+          else { e.preventDefault(); undo(); }
+          return;
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key === 'y') {
+          e.preventDefault(); redo(); return;
+      }
+
       if (isEditing) return;
 
       if (e.key === 'Enter') {
         e.preventDefault();
         addNode('text');
       } else if ((e.ctrlKey || e.metaKey) && e.key === 'c') {
-        e.preventDefault();
-        handleCopy();
+        e.preventDefault(); handleCopy();
       } else if ((e.ctrlKey || e.metaKey) && e.key === 'v') {
+        e.preventDefault(); handlePaste();
+      } else if (e.key === 'Backspace' || e.key === 'Delete') {
         e.preventDefault();
-        handlePaste();
+        takeSnapshot();
+        const selIds = nodesRef.current.filter(n => n.selected).map(n => n.id);
+        setNodes(nds => nds.filter(n => !n.selected));
+        setEdges(eds => eds.filter(e => !e.selected && !selIds.includes(e.source) && !selIds.includes(e.target)));
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [addNode, handleCopy, handlePaste]);
+  }, [addNode, handleCopy, handlePaste, undo, redo, takeSnapshot]);
 
   useEffect(() => {
     const onMouseMove = (e: MouseEvent) => {
       const zoom = getZoom();
-      
       const drag = previewDragRef.current;
       if (drag) {
         const dx = (e.clientX - drag.startX) / zoom;
         const dy = (e.clientY - drag.startY) / zoom;
         if (Math.abs(dx) > 3 || Math.abs(dy) > 3) drag.moved = true;
-        setNodes(nds => nds.map(n => n.id === drag.id ? {
-          ...n, data: { ...(n.data || {}), previewStyle: { ...(n.data?.previewStyle || {}), offsetX: drag.initX + dx, offsetY: drag.initY + dy } }
-        } : n));
+        setNodes(nds => nds.map(n => n.id === drag.id ? { ...n, data: { ...(n.data || {}), previewStyle: { ...(n.data?.previewStyle || {}), offsetX: drag.initX + dx, offsetY: drag.initY + dy } } } : n));
       }
-
       const imgDrag = imageCropDragRef.current;
       if (imgDrag) {
         const dx = (e.clientX - imgDrag.startX) / zoom;
         const dy = (e.clientY - imgDrag.startY) / zoom;
-        setNodes(nds => nds.map(n => n.id === imgDrag.id ? {
-          ...n, data: { ...(n.data || {}), imgPosX: imgDrag.initX + dx, imgPosY: imgDrag.initY + dy }
-        } : n));
+        setNodes(nds => nds.map(n => n.id === imgDrag.id ? { ...n, data: { ...(n.data || {}), imgPosX: imgDrag.initX + dx, imgPosY: imgDrag.initY + dy } } : n));
       }
     };
-    
-    const onMouseUp = () => { 
-      setTimeout(() => { previewDragRef.current = null; }, 50); 
-      imageCropDragRef.current = null;
-    };
-    
+    const onMouseUp = () => { setTimeout(() => { previewDragRef.current = null; }, 50); imageCropDragRef.current = null; };
     window.addEventListener('mousemove', onMouseMove);
     window.addEventListener('mouseup', onMouseUp);
     return () => { window.removeEventListener('mousemove', onMouseMove); window.removeEventListener('mouseup', onMouseUp); };
@@ -544,14 +566,12 @@ function FlowEditor() {
     if (file) {
       const reader = new FileReader();
       reader.onload = (ev) => {
+        takeSnapshot();
         setNodes(nds => {
           const maxZ = Math.max(0, ...nds.map(n => Number(n.zIndex) || 0));
-          return [...nds, { 
-            id: `img-${Date.now()}`, position: { x: 50, y: 50 }, zIndex: maxZ + 1,
-            data: { 
-                isImage: true, imageUrl: ev.target?.result, imgPosX: 0, imgPosY: 0, imgZoom: 1, isCropping: false,
-                cropBaseW: 300, cropBaseH: 200, cropOffsetX: 0, cropOffsetY: 0
-            }, 
+          return [...nds.map(n=>({...n, selected: false})), { 
+            id: `img-${Date.now()}`, position: { x: 50, y: 50 }, zIndex: maxZ + 1, selected: true,
+            data: { isImage: true, imageUrl: ev.target?.result, imgPosX: 0, imgPosY: 0, imgZoom: 1, isCropping: false, cropBaseW: 300, cropBaseH: 200, cropOffsetX: 0, cropOffsetY: 0 }, 
             style: { width: 300, height: 200, background: '#fff', padding: 0, border: '1px solid #ccc' } 
           }];
         });
@@ -568,7 +588,7 @@ function FlowEditor() {
     const nLeft = node.position.x, nCenter = node.position.x + nW / 2, nRight = node.position.x + nW;
     const nTop = node.position.y, nMiddle = node.position.y + nH / 2, nBottom = node.position.y + nH;
     nodes.forEach(t => {
-      if (t.id === node.id || t.id === 'center-mark') return;
+      if (t.id === node.id || t.id === 'center-mark' || t.selected) return;
       const tW = Number(t.style?.width) || 200; const tH = Number(t.style?.height) || 100;
       const tLeft = t.position.x, tCenter = t.position.x + tW / 2, tRight = t.position.x + tW;
       const tTop = t.position.y, tMiddle = t.position.y + tH / 2, tBottom = t.position.y + tH;
@@ -599,16 +619,12 @@ function FlowEditor() {
       let previewElement: React.ReactNode = null;
 
       if (isPreview) {
-        const w1 = Number(n.style?.width) || 200; 
-        const h1 = Number(n.style?.height) || 100;
+        const w1 = Number(n.style?.width) || 200; const h1 = Number(n.style?.height) || 100;
         const cx1 = w1 / 2; const cy1 = h1 / 2;
-        const offsetX = Number(n.data?.previewStyle?.offsetX) || 0; 
-        const offsetY = Number(n.data?.previewStyle?.offsetY) || -180;
-        const w2 = Number(n.data?.previewStyle?.width) || 180; 
-        const h2 = Number(n.data?.previewStyle?.height) || 120;
+        const offsetX = Number(n.data?.previewStyle?.offsetX) || 0; const offsetY = Number(n.data?.previewStyle?.offsetY) || -180;
+        const w2 = Number(n.data?.previewStyle?.width) || 180; const h2 = Number(n.data?.previewStyle?.height) || 120;
         const cx2 = offsetX + w2 / 2; const cy2 = offsetY + h2 / 2;
-        const p1 = getEdgePoint(cx1, cy1, w1, h1, cx2, cy2); 
-        const p2 = getEdgePoint(cx2, cy2, w2, h2, cx1, cy1);
+        const p1 = getEdgePoint(cx1, cy1, w1, h1, cx2, cy2); const p2 = getEdgePoint(cx2, cy2, w2, h2, cx1, cy1);
 
         previewElement = (
           <React.Fragment>
@@ -616,7 +632,7 @@ function FlowEditor() {
               <line x1={p1.x} y1={p1.y} x2={p2.x} y2={p2.y} stroke="#999" strokeWidth="2" strokeDasharray="4 2" />
             </svg>
             <div className="nodrag"
-              onMouseDown={(e) => { e.stopPropagation(); previewDragRef.current = { id: n.id, startX: e.clientX, startY: e.clientY, initX: offsetX, initY: offsetY, moved: false }; }}
+              onMouseDown={(e) => { e.stopPropagation(); takeSnapshot(); previewDragRef.current = { id: n.id, startX: e.clientX, startY: e.clientY, initX: offsetX, initY: offsetY, moved: false }; }}
               onClick={(e) => { e.stopPropagation(); if (!previewDragRef.current?.moved) enterLevel(n.id, String(n.data?.content || '')); }}
               style={{ position:'absolute', left: offsetX, top: offsetY, width: `${w2}px`, height: `${h2}px`, backgroundColor:`rgba(255,255,255,${n.data?.previewStyle?.opacity || 0.7})`, borderRadius: '12px', border: '1px solid #ccc', zIndex: -1, cursor: 'grab', overflow: 'hidden', boxShadow: '0 8px 12px rgba(0,0,0,0.1)' }}
             >
@@ -654,23 +670,17 @@ function FlowEditor() {
                   onMouseDown={(e) => {
                      if (n.data?.isCropping) {
                         e.stopPropagation();
+                        takeSnapshot();
                         imageCropDragRef.current = { id: n.id, startX: e.clientX, startY: e.clientY, initX: Number(n.data?.imgPosX || 0), initY: Number(n.data?.imgPosY || 0) };
                      }
                   }}
                   style={{ width: '100%', height: '100%', overflow: 'hidden', position: 'relative', borderRadius: n.style?.borderRadius || 0, cursor: n.data?.isCropping ? 'move' : 'default' }}
                 >
                   <img src={n.data.imageUrl as string} style={{ 
-                      position: 'absolute', 
-                      width: n.data?.isCropping ? `${baseW}px` : '100%', 
-                      height: n.data?.isCropping ? `${baseH}px` : '100%', 
-                      maxWidth: 'none', maxHeight: 'none', 
-                      left: n.data?.isCropping ? `${offX}px` : 0,
-                      top: n.data?.isCropping ? `${offY}px` : 0,
-                      transform: `translate(${n.data.imgPosX || 0}px, ${n.data.imgPosY || 0}px) scale(${n.data.imgZoom || 1})`, 
-                      transformOrigin: 'center center', 
-                      pointerEvents: 'none' 
+                      position: 'absolute', width: n.data?.isCropping ? `${baseW}px` : '100%', height: n.data?.isCropping ? `${baseH}px` : '100%', 
+                      maxWidth: 'none', maxHeight: 'none', left: n.data?.isCropping ? `${offX}px` : 0, top: n.data?.isCropping ? `${offY}px` : 0,
+                      transform: `translate(${n.data.imgPosX || 0}px, ${n.data.imgPosY || 0}px) scale(${n.data.imgZoom || 1})`, transformOrigin: 'center center', pointerEvents: 'none' 
                   }} alt="img" />
-                  
                   <div className="html-content" style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: n.style?.alignItems || 'center', justifyContent: n.style?.justifyContent || 'center', pointerEvents: 'none', color: n.style?.color || '#000', fontFamily: n.style?.fontFamily || 'sans-serif', whiteSpace: 'pre-wrap', lineHeight: '1.2' }} dangerouslySetInnerHTML={{ __html: renderHTMLWithMath(n.data?.content) }} />
                 </div>
               ) : n.id !== 'center-mark' ? (
@@ -679,28 +689,18 @@ function FlowEditor() {
 
               {n.id !== 'center-mark' ? (
                  <NodeResizer 
-                    minWidth={30} 
-                    minHeight={30} 
-                    keepAspectRatio={n.data?.isImage && !n.data?.isCropping ? true : !!n.data?.keepRatio} 
-                    isVisible={selectedNodeId === n.id} 
+                    minWidth={30} minHeight={30} keepAspectRatio={n.data?.isImage && !n.data?.isCropping ? true : !!n.data?.keepRatio} 
+                    isVisible={n.selected} 
                     lineStyle={{ border: n.data?.isCropping ? '3px dashed #ef4444' : '3px solid #3b82f6', zIndex: 100 }} 
                     handleStyle={{ background: n.data?.isCropping ? '#ef4444' : '#3b82f6', zIndex: 100, borderRadius: '50%' }} 
                     onResizeStart={(_, params) => {
-                        if (n.data?.isImage && n.data?.isCropping) {
-                            n.data._rsX = params.x;
-                            n.data._rsY = params.y;
-                            n.data._rsCropOffX = n.data.cropOffsetX || 0;
-                            n.data._rsCropOffY = n.data.cropOffsetY || 0;
-                        }
+                        takeSnapshot();
+                        if (n.data?.isImage && n.data?.isCropping) { n.data._rsX = params.x; n.data._rsY = params.y; n.data._rsCropOffX = n.data.cropOffsetX || 0; n.data._rsCropOffY = n.data.cropOffsetY || 0; }
                     }}
                     onResize={(_, params) => {
                         if (n.data?.isImage && n.data?.isCropping) {
-                            const dx = params.x - n.data._rsX;
-                            const dy = params.y - n.data._rsY;
-                            updateNode({
-                                cropOffsetX: n.data._rsCropOffX - dx,
-                                cropOffsetY: n.data._rsCropOffY - dy
-                            });
+                            const dx = params.x - n.data._rsX; const dy = params.y - n.data._rsY;
+                            updateNode({ cropOffsetX: n.data._rsCropOffX - dx, cropOffsetY: n.data._rsCropOffY - dy });
                         }
                     }}
                  />
@@ -710,37 +710,26 @@ function FlowEditor() {
         }
       };
     })];
-  }, [nodes, selectedNodeId, enterLevel, levelData]);
+  }, [nodes, enterLevel, levelData, takeSnapshot, updateNode]);
 
   const updateEdgeDesign = (config: any) => {
+    takeSnapshot();
     setEdges(eds => eds.map(e => {
-      if (e.id !== selectedEdge?.id) return e;
+      if (!e.selected) return e;
       const mSize = Math.max(8, (Number(e.style?.strokeWidth) || 2) * 1.5);
       const m = { type: MarkerType.ArrowClosed, color: '#333', width: mSize, height: mSize };
       return { ...e, data: { ...(e.data || {}), double: config.double }, markerEnd: config.arrow || config.both ? m : undefined, markerStart: config.both ? m : undefined, label: config.label || '' };
     }));
   };
 
-  const isRoot = history.length === 0;
+  const isRoot = historyLevel.length === 0;
   const actionBtnStyle = { padding: '10px 16px', borderRadius: '8px', border: '1px solid #ccc', backgroundColor: '#fff', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '5px', boxShadow: '0 2px 4px rgba(0,0,0,0.05)', fontWeight: 'bold', fontSize: '14px', transition: 'all 0.2s' };
   const primaryBtnStyle = { ...actionBtnStyle, backgroundColor: '#3b82f6', color: '#fff', border: 'none', boxShadow: '0 4px 6px rgba(59, 130, 246, 0.3)' };
 
   const editorPanelStyle = isExpandedEditor ? {
-      position: 'fixed' as const,
-      top: '20px',
-      right: '20px',
-      width: '450px',
-      maxHeight: '90vh',
-      backgroundColor: '#fff',
-      zIndex: 10000,
-      padding: '20px',
-      borderRadius: '12px',
-      boxShadow: '0 15px 40px rgba(0,0,0,0.3)',
-      overflowY: 'auto' as const,
-      border: '2px solid #3b82f6'
-  } : {
-      marginTop: '10px'
-  };
+      position: 'fixed' as const, top: '20px', right: '20px', width: '450px', maxHeight: '90vh', backgroundColor: '#fff', zIndex: 10000,
+      padding: '20px', borderRadius: '12px', boxShadow: '0 15px 40px rgba(0,0,0,0.3)', overflowY: 'auto' as const, border: '2px solid #3b82f6'
+  } : { marginTop: '10px' };
 
   return (
     <div style={{ width: '100vw', height: '100vh', display: 'flex', flexDirection: 'row', overflow: 'hidden' }}>
@@ -748,27 +737,10 @@ function FlowEditor() {
         .html-content p { margin: 0; }
         .html-content strike, #node-editor strike { text-decoration: line-through double !important; }
         .html-content *, #node-editor * { line-height: 1.2 !important; vertical-align: baseline !important; }
-        
         #node-editor:empty:before { content: "テキストを入力..."; color: #aaa; pointer-events: none; }
-        
-        .react-flow__handle {
-            width: 10px !important;
-            height: 10px !important;
-            background: #333 !important;
-            border: 2px solid #fff !important;
-            transition: all 0.2s cubic-bezier(0.34, 1.56, 0.64, 1) !important;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.2) !important;
-            cursor: crosshair !important;
-        }
-        .react-flow__handle::after {
-            content: ""; position: absolute;
-            top: -12px; left: -12px; right: -12px; bottom: -12px;
-            background: transparent;
-        }
-        .react-flow__handle:hover {
-            transform: scale(2.2) !important;
-            background: #3b82f6 !important; border-color: #fff !important;
-        }
+        .react-flow__handle { width: 10px !important; height: 10px !important; background: #333 !important; border: 2px solid #fff !important; transition: all 0.2s !important; box-shadow: 0 1px 3px rgba(0,0,0,0.2) !important; cursor: crosshair !important; }
+        .react-flow__handle::after { content: ""; position: absolute; top: -12px; left: -12px; right: -12px; bottom: -12px; background: transparent; }
+        .react-flow__handle:hover { transform: scale(2.2) !important; background: #3b82f6 !important; border-color: #fff !important; }
       `}</style>
       <input type="file" ref={fileInputRef} style={{ display: 'none' }} onChange={handleFileChange} accept="image/*" />
       
@@ -799,69 +771,57 @@ function FlowEditor() {
 
         <div style={{ flexGrow: 1, position: 'relative' }}>
           <ReactFlow 
-             nodes={flowNodes} edges={edges} edgeTypes={edgeTypes} elevateNodesOnSelect={false} 
+             nodes={flowNodes} edges={edges} edgeTypes={edgeTypes} elevateNodesOnSelect={false} multiSelectionKeyCode={['Shift', 'Meta', 'Control']}
              onNodesChange={u => setNodes(nds => applyNodeChanges(u, nds))} 
              onEdgesChange={u => setEdges(eds => applyEdgeChanges(u, eds))} 
-             onConnect={p => setEdges(eds => addEdge({...p, type:'default', style: {strokeWidth: 2}}, eds))} 
-             onNodeClick={(_, n) => { setSelectedNodeId(n.id !== 'center-mark' ? n.id : null); setSelectedEdge(null); }} 
-             onEdgeClick={(_, e) => { setSelectedEdge(e); setSelectedNodeId(null); }} 
-             onPaneClick={() => { setSelectedNodeId(null); setSelectedEdge(null); }} 
+             onConnect={p => { takeSnapshot(); setEdges(eds => addEdge({...p, type:'default', style: {strokeWidth: 2}}, eds)); }} 
+             onNodeDragStart={() => takeSnapshot()}
              onNodeDoubleClick={(_, n) => enterLevel(n.id, String(n.data?.content || ''))} 
              onNodeDrag={onNodeDrag} onNodeDragStop={onNodeDragStop} fitView
           >
             <Background color="#f1f1f1" /><Controls /><SmartGuides guides={guides} />
           </ReactFlow>
           
-          {selectedNode && (
+          {selectedNodes.length > 0 && primaryNode && (
             <div style={{ position:'absolute', right:0, top:0, bottom:0, width:'340px', borderLeft:'1px solid #ddd', padding:'20px', backgroundColor:'#fff', zIndex:1000, overflowY: 'auto', boxShadow: '-4px 0 10px rgba(0,0,0,0.05)' }}>
-              <button onClick={() => setSelectedNodeId(null)} style={{ float: 'right', border: 'none', background: 'none', fontSize: '20px', cursor: 'pointer' }}>×</button>
-              <h3 style={{fontSize:'16px'}}>{selectedNode.data?.isImage ? '画像編集' : selectedNode.data?.isShape ? '図形設定' : 'テキスト設定'}</h3>
+              <h3 style={{fontSize:'16px'}}>{selectedNodes.length > 1 ? `${selectedNodes.length}個の要素を一括編集` : primaryNode.data?.isImage ? '画像編集' : primaryNode.data?.isShape ? '図形設定' : 'テキスト設定'}</h3>
               
               <div style={{ display:'flex', gap:'5px', marginBottom:'15px', marginTop:'10px' }}>
-                <button onClick={() => setNodes(nds => { const maxZ = Math.max(0, ...nds.map(n => Number(n.zIndex) || 0)); return nds.map(n => n.id === selectedNodeId ? {...n, zIndex: maxZ + 1} : n); })} style={{flex:1, padding:'8px', fontSize:'12px', fontWeight: 'bold', background: '#f0f0f0', border: '1px solid #ccc', cursor: 'pointer', borderRadius: '4px'}}>↑ 最前面へ</button>
-                <button onClick={() => setNodes(nds => { const minZ = Math.min(0, ...nds.map(n => Number(n.zIndex) || 0)); return nds.map(n => n.id === selectedNodeId ? {...n, zIndex: minZ - 1} : n); })} style={{flex:1, padding:'8px', fontSize:'12px', fontWeight: 'bold', background: '#f0f0f0', border: '1px solid #ccc', cursor: 'pointer', borderRadius: '4px'}}>↓ 最背面へ</button>
+                <button onClick={() => { takeSnapshot(); setNodes(nds => { const maxZ = Math.max(0, ...nds.map(n => Number(n.zIndex) || 0)); return nds.map(n => n.selected ? {...n, zIndex: maxZ + 1} : n); })}} style={{flex:1, padding:'8px', fontSize:'12px', fontWeight: 'bold', background: '#f0f0f0', border: '1px solid #ccc', cursor: 'pointer', borderRadius: '4px'}}>↑ 最前面へ</button>
+                <button onClick={() => { takeSnapshot(); setNodes(nds => { const minZ = Math.min(0, ...nds.map(n => Number(n.zIndex) || 0)); return nds.map(n => n.selected ? {...n, zIndex: minZ - 1} : n); })}} style={{flex:1, padding:'8px', fontSize:'12px', fontWeight: 'bold', background: '#f0f0f0', border: '1px solid #ccc', cursor: 'pointer', borderRadius: '4px'}}>↓ 最背面へ</button>
               </div>
 
-              {selectedNode.data?.isImage && (
+              {primaryNode.data?.isImage && selectedNodes.length === 1 && (
                 <div style={{ marginBottom: '20px', padding: '10px', border: '1px solid #eee', borderRadius: '8px' }}>
-                  <button 
-                     onClick={() => {
-                        const w = Number(selectedNode.style?.width) || 300;
-                        const h = Number(selectedNode.style?.height) || 200;
-                        if (!selectedNode.data?.isCropping) {
-                            updateNode({ isCropping: true, cropBaseW: w, cropBaseH: h, cropOffsetX: 0, cropOffsetY: 0 });
-                        } else {
-                            updateNode({ isCropping: false });
-                        }
+                  <button onClick={() => { takeSnapshot(); const w = Number(primaryNode.style?.width) || 300; const h = Number(primaryNode.style?.height) || 200;
+                        if (!primaryNode.data?.isCropping) updateSelectedNodes({ isCropping: true, cropBaseW: w, cropBaseH: h, cropOffsetX: 0, cropOffsetY: 0 });
+                        else updateSelectedNodes({ isCropping: false });
                      }} 
-                     style={{ width: '100%', padding: '10px', background: selectedNode.data?.isCropping ? '#ef4444' : '#fff', color: selectedNode.data?.isCropping ? '#fff' : '#333', border: selectedNode.data?.isCropping ? 'none' : '1px solid #ccc', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', transition: 'all 0.2s', marginBottom: '15px' }}
+                     style={{ width: '100%', padding: '10px', background: primaryNode.data?.isCropping ? '#ef4444' : '#fff', color: primaryNode.data?.isCropping ? '#fff' : '#333', border: primaryNode.data?.isCropping ? 'none' : '1px solid #ccc', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', transition: 'all 0.2s', marginBottom: '15px' }}
                   >
-                     {selectedNode.data?.isCropping ? '✅ トリミングを完了' : '✂️ トリミング (枠の切り抜き)'}
+                     {primaryNode.data?.isCropping ? '✅ トリミングを完了' : '✂️ トリミング (枠の切り抜き)'}
                   </button>
 
-                  {selectedNode.data?.isCropping ? (
-                     <div style={{ padding: '10px', backgroundColor: '#fef2f2', borderRadius: '6px', marginBottom: '10px', border: '1px dashed #fca5a5' }}>
-                        <p style={{fontSize: '11px', color: '#b91c1c', margin: 0}}><strong>トリミングモード中</strong><br/>・画像の周囲にある<span style={{color:'red'}}>赤い枠</span>を動かして切り取るサイズを変更できます。<br/>・画像を直接ドラッグして表示位置を調整できます。</p>
-                     </div>
+                  {primaryNode.data?.isCropping ? (
+                     <div style={{ padding: '10px', backgroundColor: '#fef2f2', borderRadius: '6px', marginBottom: '10px', border: '1px dashed #fca5a5' }}><p style={{fontSize: '11px', color: '#b91c1c', margin: 0}}><strong>トリミングモード中</strong><br/>・画像の周囲にある<span style={{color:'red'}}>赤い枠</span>を動かして切り取るサイズを変更できます。<br/>・画像を直接ドラッグして表示位置を調整できます。</p></div>
                   ) : (
                      <>
                         <label style={{fontSize: '11px', fontWeight: 'bold'}}>微調整 (X / Y位置)</label>
-                        <input type="range" min="-600" max="600" value={Number(selectedNode.data?.imgPosX || 0)} onChange={(e) => updateNode({ imgPosX: parseInt(e.target.value) })} style={{width:'100%', marginBottom: '5px'}} />
-                        <input type="range" min="-600" max="600" value={Number(selectedNode.data?.imgPosY || 0)} onChange={(e) => updateNode({ imgPosY: parseInt(e.target.value) })} style={{width:'100%', marginBottom: '10px'}} />
+                        <input type="range" min="-600" max="600" value={Number(primaryNode.data?.imgPosX || 0)} onChange={(e) => updateSelectedNodes({ imgPosX: parseInt(e.target.value) })} style={{width:'100%', marginBottom: '5px'}} />
+                        <input type="range" min="-600" max="600" value={Number(primaryNode.data?.imgPosY || 0)} onChange={(e) => updateSelectedNodes({ imgPosY: parseInt(e.target.value) })} style={{width:'100%', marginBottom: '10px'}} />
                      </>
                   )}
-
                   <label style={{fontSize: '11px', fontWeight: 'bold'}}>ズーム倍率</label>
-                  <input type="range" min="0.5" max="3" step="0.1" value={Number(selectedNode.data?.imgZoom || 1)} onChange={(e) => updateNode({ imgZoom: parseFloat(e.target.value) })} style={{width:'100%'}} />
+                  <input type="range" min="0.5" max="3" step="0.1" value={Number(primaryNode.data?.imgZoom || 1)} onChange={(e) => updateSelectedNodes({ imgZoom: parseFloat(e.target.value) })} style={{width:'100%'}} />
                 </div>
               )}
               
-              {selectedNode.data?.isShape && (
+              {primaryNode.data?.isShape && (
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '5px', marginBottom: '15px' }}>
-                  <button onClick={() => { const size = Math.max(Number(selectedNode.style?.width) || 150, Number(selectedNode.style?.height) || 150); updateNode({ shapeType: 'rect', keepRatio: true }, { borderRadius: '0px', width: size, height: size }); }} style={{ padding: '8px', cursor: 'pointer', borderRadius: '4px', background: selectedNode.data?.shapeType === 'rect' && selectedNode.data?.keepRatio ? '#ddd' : '#fff', border: '1px solid #ccc' }}>■ 正方形</button>
-                  <button onClick={() => updateNode({ shapeType: 'rect', keepRatio: false }, { borderRadius: '0px' })} style={{ padding: '8px', cursor: 'pointer', borderRadius: '4px', background: selectedNode.data?.shapeType === 'rect' && !selectedNode.data?.keepRatio ? '#ddd' : '#fff', border: '1px solid #ccc' }}>▬ 長方形</button>
-                  <button onClick={() => { const size = Math.max(Number(selectedNode.style?.width) || 150, Number(selectedNode.style?.height) || 150); updateNode({ shapeType: 'circ', keepRatio: true }, { borderRadius: '50%', width: size, height: size }); }} style={{ padding: '8px', cursor: 'pointer', borderRadius: '4px', background: selectedNode.data?.shapeType === 'circ' && selectedNode.data?.keepRatio ? '#ddd' : '#fff', border: '1px solid #ccc' }}>● 正円</button>
-                  <button onClick={() => updateNode({ shapeType: 'circ', keepRatio: false }, { borderRadius: '50%' })} style={{ padding: '8px', cursor: 'pointer', borderRadius: '4px', background: selectedNode.data?.shapeType === 'circ' && !selectedNode.data?.keepRatio ? '#ddd' : '#fff', border: '1px solid #ccc' }}>⬭ 楕円</button>
+                  <button onClick={() => { takeSnapshot(); const size = Math.max(Number(primaryNode.style?.width) || 150, Number(primaryNode.style?.height) || 150); updateSelectedNodes({ shapeType: 'rect', keepRatio: true }, { borderRadius: '0px', width: size, height: size }); }} style={{ padding: '8px', cursor: 'pointer', borderRadius: '4px', background: primaryNode.data?.shapeType === 'rect' && primaryNode.data?.keepRatio ? '#ddd' : '#fff', border: '1px solid #ccc' }}>■ 正方形</button>
+                  <button onClick={() => { takeSnapshot(); updateSelectedNodes({ shapeType: 'rect', keepRatio: false }, { borderRadius: '0px' }); }} style={{ padding: '8px', cursor: 'pointer', borderRadius: '4px', background: primaryNode.data?.shapeType === 'rect' && !primaryNode.data?.keepRatio ? '#ddd' : '#fff', border: '1px solid #ccc' }}>▬ 長方形</button>
+                  <button onClick={() => { takeSnapshot(); const size = Math.max(Number(primaryNode.style?.width) || 150, Number(primaryNode.style?.height) || 150); updateSelectedNodes({ shapeType: 'circ', keepRatio: true }, { borderRadius: '50%', width: size, height: size }); }} style={{ padding: '8px', cursor: 'pointer', borderRadius: '4px', background: primaryNode.data?.shapeType === 'circ' && primaryNode.data?.keepRatio ? '#ddd' : '#fff', border: '1px solid #ccc' }}>● 正円</button>
+                  <button onClick={() => { takeSnapshot(); updateSelectedNodes({ shapeType: 'circ', keepRatio: false }, { borderRadius: '50%' }); }} style={{ padding: '8px', cursor: 'pointer', borderRadius: '4px', background: primaryNode.data?.shapeType === 'circ' && !primaryNode.data?.keepRatio ? '#ddd' : '#fff', border: '1px solid #ccc' }}>⬭ 楕円</button>
                 </div>
               )}
 
@@ -878,100 +838,97 @@ function FlowEditor() {
                     id="node-editor" 
                     ref={editorRef}
                     contentEditable 
-                    onInput={(e) => { updateNode({ content: e.currentTarget.innerHTML }); saveSelection(); }}
-                    onBlur={(e) => { updateNode({ content: e.currentTarget.innerHTML }); saveSelection(); }}
+                    onInput={(e) => { updateSelectedNodes({ content: e.currentTarget.innerHTML }); saveSelection(); }}
+                    onBlur={(e) => { updateSelectedNodes({ content: e.currentTarget.innerHTML }); saveSelection(); }}
                     onKeyUp={saveSelection}
                     onMouseUp={saveSelection}
                     style={{ width:'100%', minHeight: isExpandedEditor ? '200px' : '80px', marginBottom: '10px', padding: '12px', border: '1px solid #ddd', borderRadius: '4px', outline: 'none', backgroundColor: '#fff', cursor: 'text', overflowY: 'auto', fontSize: isExpandedEditor ? '18px' : 'inherit' }}
                   />
                   
-                  <label style={{fontSize: '10px', color: '#666', fontWeight: 'bold'}}>部分編集 (※選択部分、または次に打つ文字に適用)</label>
+                  <label style={{fontSize: '10px', color: '#666', fontWeight: 'bold'}}>文字装飾 (※フォーカス有無で自動切替)</label>
                   
                   <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'5px', marginBottom:'5px', marginTop: '5px' }}>
-                    <button onMouseDown={(e) => e.preventDefault()} onClick={() => applyFormat('fontName', 'serif')} style={{cursor:'pointer', border:'1px solid #ccc', padding: '8px', borderRadius: '4px'}}>明朝</button>
-                    <button onMouseDown={(e) => e.preventDefault()} onClick={() => applyFormat('fontName', 'sans-serif')} style={{cursor:'pointer', border:'1px solid #ccc', padding: '8px', borderRadius: '4px'}}>ゴシック</button>
-                    <button onMouseDown={(e) => e.preventDefault()} onClick={() => applyFormat('bold')} style={{ cursor:'pointer', border:'1px solid #ccc', padding: '8px', borderRadius: '4px', background: '#fff' }}>太字</button>
-                    <button onMouseDown={(e) => e.preventDefault()} onClick={() => applyFormat('strikeThrough')} style={{ cursor:'pointer', border:'1px solid #ccc', padding: '8px', borderRadius: '4px', background: '#fff' }}>二重線</button>
+                    <button onMouseDown={(e) => e.preventDefault()} onClick={() => applyUnifiedFormat('fontName', 'serif')} style={{cursor:'pointer', border:'1px solid #ccc', padding: '8px', borderRadius: '4px'}}>明朝</button>
+                    <button onMouseDown={(e) => e.preventDefault()} onClick={() => applyUnifiedFormat('fontName', 'sans-serif')} style={{cursor:'pointer', border:'1px solid #ccc', padding: '8px', borderRadius: '4px'}}>ゴシック</button>
+                    <button onMouseDown={(e) => e.preventDefault()} onClick={() => applyUnifiedFormat('bold')} style={{ cursor:'pointer', border:'1px solid #ccc', padding: '8px', borderRadius: '4px', background: '#fff' }}>太字</button>
+                    <button onMouseDown={(e) => e.preventDefault()} onClick={() => applyUnifiedFormat('strikeThrough')} style={{ cursor:'pointer', border:'1px solid #ccc', padding: '8px', borderRadius: '4px', background: '#fff' }}>二重線</button>
                   </div>
 
                   <div style={{ display: 'flex', gap: '5px', marginTop: '5px', marginBottom: '15px' }}>
-                    {QUICK_TEXT_COLORS.map(c => <button key={c} onMouseDown={(e) => e.preventDefault()} onClick={() => applyFormat('foreColor', c)} style={{ width:'30px', height:'30px', backgroundColor:c, border: '1px solid #ddd', borderRadius: '4px', cursor: 'pointer' }} />)}
+                    {QUICK_TEXT_COLORS.map(c => <button key={c} onMouseDown={(e) => e.preventDefault()} onClick={() => applyUnifiedFormat('foreColor', c)} style={{ width:'30px', height:'30px', backgroundColor:c, border: '1px solid #ddd', borderRadius: '4px', cursor: 'pointer' }} />)}
+                    <input type="color" onChange={(e) => applyUnifiedFormat('foreColor', e.target.value)} style={{width:'30px', height:'30px', cursor: 'pointer', border: 'none', padding: 0}} />
                   </div>
 
                   <label style={{fontSize:'11px', fontWeight: 'bold'}}>文字サイズ (px)</label>
                   <div style={{display:'flex', alignItems:'center', gap:'8px', marginBottom: '15px'}}>
-                    <input type="range" min="1" max="100" value={partialFontSize} onChange={(e) => {
-                        const val = Number(e.target.value);
-                        setPartialFontSize(val);
-                        changeFontSize(`${val}px`);
-                    }} style={{flex:1}} />
-                    <input type="number" min="1" max="100" value={partialFontSize} onChange={(e) => {
-                        const val = Number(e.target.value);
-                        setPartialFontSize(val);
-                        changeFontSize(`${val}px`);
-                    }} style={{width:'50px', padding:'4px', border:'1px solid #ccc', borderRadius:'4px'}} />
-                    <button onMouseDown={(e) => e.preventDefault()} onClick={handleResetFormat} style={{fontSize:'11px', padding:'4px 8px', border:'1px solid #ccc', borderRadius:'4px', cursor:'pointer', background:'#fff', fontWeight:'bold'}}>標準リセット (14px)</button>
+                    <input type="range" min="1" max="100" value={partialFontSize} onChange={(e) => { const val = Number(e.target.value); setPartialFontSize(val); applyUnifiedFormat('fontSize', `${val}px`); }} style={{flex:1}} />
+                    <input type="number" min="1" max="100" value={partialFontSize} onChange={(e) => { const val = Number(e.target.value); setPartialFontSize(val); applyUnifiedFormat('fontSize', `${val}px`); }} style={{width:'50px', padding:'4px', border:'1px solid #ccc', borderRadius:'4px'}} />
+                    <button onMouseDown={(e) => e.preventDefault()} onClick={handleResetFormat} style={{fontSize:'11px', padding:'4px 8px', border:'1px solid #ccc', borderRadius:'4px', cursor:'pointer', background:'#fff', fontWeight:'bold'}}>標準リセット</button>
                   </div>
               </div>
 
               <hr style={{margin: '15px 0', border: 'none', borderTop: '1px solid #eee'}} />
-              <label style={{fontSize: '10px', color: '#666', fontWeight: 'bold'}}>レイアウト (枠全体にのみ適用)</label>
+              <label style={{fontSize: '10px', color: '#666', fontWeight: 'bold'}}>レイアウト (図形全体にのみ適用)</label>
 
               <div style={{ display:'flex', gap:'5px', marginBottom:'5px', marginTop: '5px' }}>
-                <button onClick={() => updateNode({}, { justifyContent: 'flex-start', textAlign: 'left' })} style={{flex:1, cursor:'pointer', border:'1px solid #ccc', padding: '5px', borderRadius: '4px'}}>左</button>
-                <button onClick={() => updateNode({}, { justifyContent: 'center', textAlign: 'center' })} style={{flex:1, cursor:'pointer', border:'1px solid #ccc', padding: '5px', borderRadius: '4px'}}>中央</button>
-                <button onClick={() => updateNode({}, { justifyContent: 'flex-end', textAlign: 'right' })} style={{flex:1, cursor:'pointer', border:'1px solid #ccc', padding: '5px', borderRadius: '4px'}}>右</button>
+                <button onClick={() => { takeSnapshot(); updateSelectedNodes({}, { justifyContent: 'flex-start', textAlign: 'left' }); }} style={{flex:1, cursor:'pointer', border:'1px solid #ccc', padding: '5px', borderRadius: '4px'}}>左</button>
+                <button onClick={() => { takeSnapshot(); updateSelectedNodes({}, { justifyContent: 'center', textAlign: 'center' }); }} style={{flex:1, cursor:'pointer', border:'1px solid #ccc', padding: '5px', borderRadius: '4px'}}>中央</button>
+                <button onClick={() => { takeSnapshot(); updateSelectedNodes({}, { justifyContent: 'flex-end', textAlign: 'right' }); }} style={{flex:1, cursor:'pointer', border:'1px solid #ccc', padding: '5px', borderRadius: '4px'}}>右</button>
               </div>
               <div style={{ display:'flex', gap:'5px', marginBottom:'15px' }}>
-                <button onClick={() => updateNode({}, { alignItems: 'flex-start' })} style={{flex:1, cursor:'pointer', border:'1px solid #ccc', padding: '5px', borderRadius: '4px'}}>上</button>
-                <button onClick={() => updateNode({}, { alignItems: 'center' })} style={{flex:1, cursor:'pointer', border:'1px solid #ccc', padding: '5px', borderRadius: '4px'}}>中</button>
-                <button onClick={() => updateNode({}, { alignItems: 'flex-end' })} style={{flex:1, cursor:'pointer', border:'1px solid #ccc', padding: '5px', borderRadius: '4px'}}>下</button>
+                <button onClick={() => { takeSnapshot(); updateSelectedNodes({}, { alignItems: 'flex-start' }); }} style={{flex:1, cursor:'pointer', border:'1px solid #ccc', padding: '5px', borderRadius: '4px'}}>上</button>
+                <button onClick={() => { takeSnapshot(); updateSelectedNodes({}, { alignItems: 'center' }); }} style={{flex:1, cursor:'pointer', border:'1px solid #ccc', padding: '5px', borderRadius: '4px'}}>中</button>
+                <button onClick={() => { takeSnapshot(); updateSelectedNodes({}, { alignItems: 'flex-end' }); }} style={{flex:1, cursor:'pointer', border:'1px solid #ccc', padding: '5px', borderRadius: '4px'}}>下</button>
               </div>
 
               <label style={{fontSize:'11px', fontWeight: 'bold'}}>全体の透明度</label>
-              <input type="range" min="0.1" max="1" step="0.1" value={Number(selectedNode.style?.opacity ?? 1)} onChange={(e) => updateNode({}, { opacity: parseFloat(e.target.value) })} style={{width:'100%', marginBottom:'15px'}} />
+              <input type="range" min="0.1" max="1" step="0.1" value={Number(primaryNode.style?.opacity ?? 1)} onChange={(e) => { takeSnapshot(); updateSelectedNodes({}, { opacity: parseFloat(e.target.value) })}} style={{width:'100%', marginBottom:'15px'}} />
 
               <label style={{fontSize:'11px', fontWeight: 'bold'}}>背景色</label>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: '5px', marginTop: '5px', marginBottom: '15px' }}>
-                {PASTEL_COLORS.map(c => <button key={c} onClick={() => updateNode({}, { backgroundColor: c })} style={{ width:'100%', aspectRatio:'1', backgroundColor:c, border: '1px solid #eee', borderRadius: '4px', cursor: 'pointer' }} />)}
-                <input type="color" value={String(selectedNode.style?.backgroundColor || '#ffffff')} onChange={(e) => updateNode({}, { backgroundColor: e.target.value })} style={{width:'100%', aspectRatio:'1', cursor: 'pointer', border: 'none', padding: 0}} />
+                {PASTEL_COLORS.map(c => <button key={c} onClick={() => { takeSnapshot(); updateSelectedNodes({}, { backgroundColor: c })}} style={{ width:'100%', aspectRatio:'1', backgroundColor:c, border: '1px solid #eee', borderRadius: '4px', cursor: 'pointer' }} />)}
+                <input type="color" value={String(primaryNode.style?.backgroundColor || '#ffffff')} onChange={(e) => { takeSnapshot(); updateSelectedNodes({}, { backgroundColor: e.target.value })}} style={{width:'100%', aspectRatio:'1', cursor: 'pointer', border: 'none', padding: 0}} />
               </div>
 
-              {!selectedNode.data?.isShape && !selectedNode.data?.isImage && (
+              {!primaryNode.data?.isShape && !primaryNode.data?.isImage && (
                 <>
-                  <button onClick={() => updateNode({ previewVisible: !selectedNode.data?.previewVisible })} style={{ width:'100%', marginTop:'10px', padding:'10px', background: selectedNode.data?.previewVisible ? '#3b82f6' : '#fff', color: selectedNode.data?.previewVisible ? '#fff' : '#333', border: '1px solid #ccc', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', transition: 'all 0.2s' }}>
-                    {selectedNode.data?.previewVisible ? '💬 吹き出しを消す' : '💬 吹き出しを追加'}
+                  <button onClick={() => { takeSnapshot(); updateSelectedNodes(n => ({ previewVisible: !n.previewVisible }))}} style={{ width:'100%', marginTop:'10px', padding:'10px', background: primaryNode.data?.previewVisible ? '#3b82f6' : '#fff', color: primaryNode.data?.previewVisible ? '#fff' : '#333', border: '1px solid #ccc', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', transition: 'all 0.2s' }}>
+                    {primaryNode.data?.previewVisible ? '💬 吹き出しを消す' : '💬 吹き出しを追加'}
                   </button>
-                  {selectedNode.data?.previewVisible && (
+                  {primaryNode.data?.previewVisible && (
                     <div style={{ marginTop: '10px', padding: '10px', background: '#f8f9fa', borderRadius: '8px' }}>
                       <p style={{fontSize: '10px', color: '#666', marginBottom: '5px'}}>※位置は画面上で吹き出しを直接ドラッグして動かせます</p>
                       <div style={{display:'flex', alignItems: 'center', gap:'5px', marginBottom:'5px'}}>
                         <div style={{fontSize:'10px', width:'30px'}}>幅</div>
-                        <input type="range" min="50" max="500" value={Number(selectedNode.data?.previewStyle?.width || 180)} onChange={(e) => updateNode({ previewStyle: { ...(selectedNode.data?.previewStyle || {}), width: parseInt(e.target.value) } })} style={{flex:1}} />
+                        <input type="range" min="50" max="500" value={Number(primaryNode.data?.previewStyle?.width || 180)} onChange={(e) => { takeSnapshot(); updateSelectedNodes({ previewStyle: { ...(primaryNode.data?.previewStyle || {}), width: parseInt(e.target.value) } })}} style={{flex:1}} />
                       </div>
                       <div style={{display:'flex', alignItems: 'center', gap:'5px', marginBottom:'5px'}}>
                         <div style={{fontSize:'10px', width:'30px'}}>高さ</div>
-                        <input type="range" min="50" max="500" value={Number(selectedNode.data?.previewStyle?.height || 120)} onChange={(e) => updateNode({ previewStyle: { ...(selectedNode.data?.previewStyle || {}), height: parseInt(e.target.value) } })} style={{flex:1}} />
+                        <input type="range" min="50" max="500" value={Number(primaryNode.data?.previewStyle?.height || 120)} onChange={(e) => { takeSnapshot(); updateSelectedNodes({ previewStyle: { ...(primaryNode.data?.previewStyle || {}), height: parseInt(e.target.value) } })}} style={{flex:1}} />
                       </div>
                     </div>
                   )}
                 </>
               )}
-              {/* ★ 新規追加：複製ボタン */}
+              {/* ★ 複製ボタンの追加 */}
               <div style={{ display: 'flex', gap: '5px', marginTop: '20px' }}>
                 <button onClick={handleDuplicate} style={{ flex:1, color: '#333', border: '1px solid #ccc', padding: '10px', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold', background: '#f8f9fa' }}>📄 複製</button>
-                <button onClick={() => { setNodes(nds => nds.filter(n => n.id !== selectedNodeId)); setSelectedNodeId(null); }} style={{ flex:1, color: 'red', border: '1px solid red', padding: '10px', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold', background: '#fffcfc' }}>🗑️ 削除</button>
+                <button onClick={() => { 
+                    takeSnapshot(); 
+                    const selIds = nodesRef.current.filter(n => n.selected).map(n => n.id);
+                    setNodes(nds => nds.filter(n => !n.selected)); 
+                    setEdges(eds => eds.filter(e => !e.selected && !selIds.includes(e.source) && !selIds.includes(e.target)));
+                }} style={{ flex:1, color: 'red', border: '1px solid red', padding: '10px', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold', background: '#fffcfc' }}>🗑️ 削除</button>
               </div>
             </div>
           )}
 
           {selectedEdge && (
             <div style={{ position:'absolute', right:0, top:0, bottom:0, width:'320px', borderLeft:'1px solid #ddd', padding:'20px', backgroundColor:'#fff', zIndex:1000 }}>
-              <button onClick={() => setSelectedEdge(null)} style={{ float: 'right', border: 'none', background: 'none', fontSize: '20px', cursor: 'pointer' }}>×</button>
-              <h3>線のデザイン</h3>
+              <h3 style={{fontSize:'16px'}}>線のデザイン</h3>
               <label style={{fontSize:'11px', fontWeight: 'bold'}}>太さ</label>
               <div style={{ display:'flex', gap:'5px', marginBottom:'20px', marginTop: '5px' }}>
-                {[2, 6, 12].map(w => <button key={w} onClick={() => setEdges(eds => eds.map(e => e.id === selectedEdge.id ? { ...e, style: { ...e.style, strokeWidth: w } } : e))} style={{flex:1, padding:'10px', cursor: 'pointer', border: '1px solid #ccc', borderRadius: '4px', background: selectedEdge.style?.strokeWidth === w ? '#ddd' : '#fff'}}>{w === 2 ? '細' : w === 6 ? '中' : '太'}</button>)}
+                {[2, 6, 12].map(w => <button key={w} onClick={() => { takeSnapshot(); setEdges(eds => eds.map(e => e.selected ? { ...e, style: { ...e.style, strokeWidth: w } } : e)); }} style={{flex:1, padding:'10px', cursor: 'pointer', border: '1px solid #ccc', borderRadius: '4px', background: selectedEdge.style?.strokeWidth === w ? '#ddd' : '#fff'}}>{w === 2 ? '細' : w === 6 ? '中' : '太'}</button>)}
               </div>
               <label style={{fontSize:'11px', fontWeight: 'bold'}}>種類 (7種)</label>
               <div style={{ display:'flex', flexDirection:'column', gap:'8px', marginTop: '5px' }}>
@@ -979,12 +936,16 @@ function FlowEditor() {
                   <button key={item.l} onClick={() => updateEdgeDesign(item.c)} style={{padding:'10px', border: '1px solid #ccc', background: '#f9f9f9', cursor: 'pointer', borderRadius: '4px', textAlign: 'left', fontWeight: 'bold'}}>{item.l}</button>
                 ))}
               </div>
-              <button onClick={() => { setEdges(eds => eds.filter(e => e.id !== selectedEdge.id)); setSelectedEdge(null); }} style={{ width:'100%', marginTop:'30px', color: 'red', border: '1px solid red', background: '#fffcfc', padding: '10px', cursor: 'pointer', fontWeight: 'bold', borderRadius: '8px' }}>線を削除</button>
+              <button onClick={() => { takeSnapshot(); setEdges(eds => eds.filter(e => !e.selected)); }} style={{ width:'100%', marginTop:'30px', color: 'red', border: '1px solid red', background: '#fffcfc', padding: '10px', cursor: 'pointer', fontWeight: 'bold', borderRadius: '8px' }}>線を削除</button>
             </div>
           )}
         </div>
 
         <div style={{ padding: '15px', backgroundColor: 'rgba(255,255,255,0.95)', borderTop: '1px solid #eee', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '10px', zIndex: 1001, boxShadow: '0 -4px 10px rgba(0,0,0,0.03)' }}>
+          {/* ★ 戻る・やり直しボタン */}
+          <button onClick={undo} disabled={past.length === 0} style={{ ...actionBtnStyle, opacity: past.length === 0 ? 0.4 : 1, cursor: past.length === 0 ? 'default' : 'pointer' }}>↩️ 戻る</button>
+          <button onClick={redo} disabled={future.length === 0} style={{ ...actionBtnStyle, opacity: future.length === 0 ? 0.4 : 1, cursor: future.length === 0 ? 'default' : 'pointer' }}>↪️ やり直し</button>
+          <div style={{ width: '1px', height: '30px', backgroundColor: '#ddd', margin: '0 5px' }} />
           <button onClick={goBack} disabled={isRoot} style={{ ...actionBtnStyle, opacity: isRoot ? 0.4 : 1, cursor: isRoot ? 'default' : 'pointer' }}>🔙 1つ前へ</button>
           <button onClick={goTop} disabled={isRoot} style={{ ...actionBtnStyle, opacity: isRoot ? 0.4 : 1, cursor: isRoot ? 'default' : 'pointer' }}>🏠 TOP層へ</button>
           <div style={{ width: '1px', height: '30px', backgroundColor: '#ddd', margin: '0 5px' }} />
