@@ -2,7 +2,7 @@
 import React, { useState, useCallback, useMemo, useRef, useEffect } from 'react';
 import { 
   ReactFlow, Background, Controls, applyNodeChanges, applyEdgeChanges, addEdge,
-  NodeResizer, ReactFlowProvider, useStore, MarkerType, getBezierPath, EdgeProps, BaseEdge, EdgeLabelRenderer 
+  NodeResizer, ReactFlowProvider, useStore, MarkerType, getBezierPath, EdgeProps, BaseEdge, EdgeLabelRenderer, useReactFlow
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import katex from 'katex';
@@ -110,13 +110,13 @@ function FlowEditor() {
   useEffect(() => { edgesRef.current = edges; }, [edges]);
 
   // ★ 複数選択対応
-  const selectedNodes = useMemo(() => nodes.filter(n => n.selected), [nodes]);
+  const selectedNodes = useMemo(() => nodes.filter((n: any) => n.selected), [nodes]);
   const primaryNode = selectedNodes.length > 0 ? selectedNodes[0] : null;
-  const selectedEdge = useMemo(() => edges.find(e => e.selected) || null, [edges]);
+  const selectedEdge = useMemo(() => edges.find((e: any) => e.selected) || null, [edges]);
 
   const clearSelection = useCallback(() => {
-    setNodes(nds => nds.map(n => ({...n, selected: false})));
-    setEdges(eds => eds.map(e => ({...e, selected: false})));
+    setNodes((nds: any[]) => nds.map((n: any) => ({...n, selected: false})));
+    setEdges((eds: any[]) => eds.map((e: any) => ({...e, selected: false})));
   }, []);
 
   // 履歴のスナップショット
@@ -231,9 +231,8 @@ function FlowEditor() {
     setFiles(updated); if (id === activeFileId) switchFile(Object.keys(updated)[0]);
   };
 
-  // ★ 複数選択されたノードを一括更新する関数
   const updateSelectedNodes = useCallback((newData: any, newStyle: any = {}) => {
-    setNodes(nds => nds.map(n => n.selected ? {
+    setNodes((nds: any[]) => nds.map((n: any) => n.selected ? {
         ...n,
         data: { ...(n.data || {}), ...(typeof newData === 'function' ? newData(n.data) : newData) },
         style: { ...(n.style || {}), ...newStyle }
@@ -247,7 +246,6 @@ function FlowEditor() {
     }
   };
 
-  // ★ 一括フォーマットロジック（フォーカス有無で自動切替）
   const applyUnifiedFormat = (type: 'fontName' | 'bold' | 'strikeThrough' | 'foreColor' | 'fontSize', value: any = '') => {
       takeSnapshot();
       const isActive = document.activeElement === editorRef.current;
@@ -298,7 +296,6 @@ function FlowEditor() {
           updateSelectedNodes({ content: editorRef.current.innerHTML });
 
       } else {
-          // 非フォーカス時：図形全体のスタイル（全体設定）を上書きする
           const styleKeyMap: any = { fontName: 'fontFamily', bold: 'fontWeight', strikeThrough: 'textDecoration', foreColor: 'color', fontSize: 'fontSize' };
           const styleKey = styleKeyMap[type];
           let styleVal = value;
@@ -306,11 +303,10 @@ function FlowEditor() {
           if (type === 'bold') styleVal = primaryNode?.style?.fontWeight === 'bold' ? 'normal' : 'bold';
           if (type === 'strikeThrough') styleVal = primaryNode?.style?.textDecoration === 'line-through double' ? 'none' : 'line-through double';
 
-          setNodes(nds => nds.map(n => {
+          setNodes((nds: any[]) => nds.map((n: any) => {
               if (!n.selected) return n;
               const tempDiv = document.createElement('div');
               tempDiv.innerHTML = n.data?.content || '';
-              // 内側のタグの個別設定を剥がすことで、全体のスタイルが効くようにする
               tempDiv.querySelectorAll('*').forEach(el => {
                   const e = el as HTMLElement;
                   if (type === 'fontSize') { if(e.style.fontSize) e.style.fontSize = ''; if(e.tagName==='FONT') e.removeAttribute('size'); }
@@ -369,7 +365,7 @@ function FlowEditor() {
           }
           updateSelectedNodes({ content: editorRef.current.innerHTML });
       } else {
-          setNodes(nds => nds.map(n => {
+          setNodes((nds: any[]) => nds.map((n: any) => {
               if (!n.selected) return n;
               const tempDiv = document.createElement('div');
               tempDiv.innerHTML = n.data?.content || '';
@@ -409,7 +405,7 @@ function FlowEditor() {
                 zIndex: Math.max(0, ...nodesRef.current.map(n => Number(n.zIndex) || 0)) + 1
             };
         });
-        setNodes(nds => [...nds.map(n => ({...n, selected: false})), ...newNodes]);
+        setNodes((nds: any[]) => [...nds.map((n: any) => ({...n, selected: false})), ...newNodes]);
     }
   }, [takeSnapshot]);
 
@@ -419,8 +415,8 @@ function FlowEditor() {
   }, [handleCopy, handlePaste]);
 
   const enterLevel = useCallback((id: string, label: string) => {
-    setNodes(nds => {
-      const target = nds.find(n => n.id === id);
+    setNodes((nds: any[]) => {
+      const target = nds.find((n: any) => n.id === id);
       if (target?.data?.isShape || target?.data?.isImage) return nds;
       setHistoryLevel(prev => [...prev, currentLevel]);
       setCurrentLevel(id); setCurrentLabel(label || '階層中'); savedRangeRef.current = null;
@@ -461,17 +457,17 @@ function FlowEditor() {
 
     if (parent && type === 'text') {
         const edgeId = `e-${parent.id}-${id}`;
-        setEdges(eds => [...eds.map(e=>({...e, selected:false})), { id: edgeId, source: parent.id, target: id, type: 'default', style: { strokeWidth: 2 } }]);
+        setEdges((eds: any[]) => [...eds.map((e: any) => ({...e, selected:false})), { id: edgeId, source: parent.id, target: id, type: 'default', style: { strokeWidth: 2 } }]);
         
-        setNodes(nds => {
-            const maxZ = Math.max(0, ...nds.map(n => Number(n.zIndex) || 0));
+        setNodes((nds: any[]) => {
+            const maxZ = Math.max(0, ...nds.map((n: any) => Number(n.zIndex) || 0));
             const newNode = { 
                 id, selected: true,
                 position: { x: parent.position.x, y: parent.position.y + Number(parent.style?.height || 100) + 80 }, 
                 data, style, zIndex: maxZ + 1 
             };
             
-            let updatedNodes = [...nds.map(n => ({...n, selected: false})), newNode];
+            let updatedNodes = [...nds.map((n: any) => ({...n, selected: false})), newNode];
 
             const childIds = edgesRef.current.filter(e => e.source === parent.id).map(e => e.target).concat(id);
             const children = updatedNodes.filter(n => childIds.includes(n.id));
@@ -496,9 +492,9 @@ function FlowEditor() {
             return updatedNodes;
         });
     } else {
-        setNodes(nds => {
-            const maxZ = Math.max(0, ...nds.map(n => Number(n.zIndex) || 0));
-            return [...nds.map(n => ({...n, selected: false})), { id, selected: true, position: { x: 100, y: 100 }, data, style, zIndex: maxZ + 1 }];
+        setNodes((nds: any[]) => {
+            const maxZ = Math.max(0, ...nds.map((n: any) => Number(n.zIndex) || 0));
+            return [...nds.map((n: any) => ({...n, selected: false})), { id, selected: true, position: { x: 100, y: 100 }, data, style, zIndex: maxZ + 1 }];
         });
     }
   }, [takeSnapshot]);
@@ -530,8 +526,8 @@ function FlowEditor() {
         e.preventDefault();
         takeSnapshot();
         const selIds = nodesRef.current.filter(n => n.selected).map(n => n.id);
-        setNodes(nds => nds.filter(n => !n.selected));
-        setEdges(eds => eds.filter(e => !e.selected && !selIds.includes(e.source) && !selIds.includes(e.target)));
+        setNodes((nds: any[]) => nds.filter((n: any) => !n.selected));
+        setEdges((eds: any[]) => eds.filter((e: any) => !e.selected && !selIds.includes(e.source) && !selIds.includes(e.target)));
       }
     };
     window.addEventListener('keydown', handleKeyDown);
@@ -546,13 +542,13 @@ function FlowEditor() {
         const dx = (e.clientX - drag.startX) / zoom;
         const dy = (e.clientY - drag.startY) / zoom;
         if (Math.abs(dx) > 3 || Math.abs(dy) > 3) drag.moved = true;
-        setNodes(nds => nds.map(n => n.id === drag.id ? { ...n, data: { ...(n.data || {}), previewStyle: { ...(n.data?.previewStyle || {}), offsetX: drag.initX + dx, offsetY: drag.initY + dy } } } : n));
+        setNodes((nds: any[]) => nds.map((n: any) => n.id === drag.id ? { ...n, data: { ...(n.data || {}), previewStyle: { ...(n.data?.previewStyle || {}), offsetX: drag.initX + dx, offsetY: drag.initY + dy } } } : n));
       }
       const imgDrag = imageCropDragRef.current;
       if (imgDrag) {
         const dx = (e.clientX - imgDrag.startX) / zoom;
         const dy = (e.clientY - imgDrag.startY) / zoom;
-        setNodes(nds => nds.map(n => n.id === imgDrag.id ? { ...n, data: { ...(n.data || {}), imgPosX: imgDrag.initX + dx, imgPosY: imgDrag.initY + dy } } : n));
+        setNodes((nds: any[]) => nds.map((n: any) => n.id === imgDrag.id ? { ...n, data: { ...(n.data || {}), imgPosX: imgDrag.initX + dx, imgPosY: imgDrag.initY + dy } } : n));
       }
     };
     const onMouseUp = () => { setTimeout(() => { previewDragRef.current = null; }, 50); imageCropDragRef.current = null; };
@@ -567,9 +563,9 @@ function FlowEditor() {
       const reader = new FileReader();
       reader.onload = (ev) => {
         takeSnapshot();
-        setNodes(nds => {
-          const maxZ = Math.max(0, ...nds.map(n => Number(n.zIndex) || 0));
-          return [...nds.map(n=>({...n, selected: false})), { 
+        setNodes((nds: any[]) => {
+          const maxZ = Math.max(0, ...nds.map((n: any) => Number(n.zIndex) || 0));
+          return [...nds.map((n: any) => ({...n, selected: false})), { 
             id: `img-${Date.now()}`, position: { x: 50, y: 50 }, zIndex: maxZ + 1, selected: true,
             data: { isImage: true, imageUrl: ev.target?.result, imgPosX: 0, imgPosY: 0, imgZoom: 1, isCropping: false, cropBaseW: 300, cropBaseH: 200, cropOffsetX: 0, cropOffsetY: 0 }, 
             style: { width: 300, height: 200, background: '#fff', padding: 0, border: '1px solid #ccc' } 
@@ -603,7 +599,7 @@ function FlowEditor() {
   }, [nodes]);
 
   const onNodeDragStop = useCallback((_: any, node: any) => {
-    setNodes(nds => nds.map(n => n.id === node.id ? { ...n, position: node.position } : n));
+    setNodes((nds: any[]) => nds.map((n: any) => n.id === node.id ? { ...n, position: node.position } : n));
     setGuides({});
   }, []);
 
@@ -700,7 +696,7 @@ function FlowEditor() {
                     onResize={(_, params) => {
                         if (n.data?.isImage && n.data?.isCropping) {
                             const dx = params.x - n.data._rsX; const dy = params.y - n.data._rsY;
-                            setNodes(nds => nds.map(node => node.id === n.id ? {
+                            setNodes((nds: any[]) => nds.map((node: any) => node.id === n.id ? {
                                 ...node,
                                 data: { ...node.data, cropOffsetX: n.data._rsCropOffX - dx, cropOffsetY: n.data._rsCropOffY - dy }
                             } : node));
@@ -717,7 +713,7 @@ function FlowEditor() {
 
   const updateEdgeDesign = (config: any) => {
     takeSnapshot();
-    setEdges(eds => eds.map(e => {
+    setEdges((eds: any[]) => eds.map((e: any) => {
       if (!e.selected) return e;
       const mSize = Math.max(8, (Number(e.style?.strokeWidth) || 2) * 1.5);
       const m = { type: MarkerType.ArrowClosed, color: '#333', width: mSize, height: mSize };
@@ -775,9 +771,9 @@ function FlowEditor() {
         <div style={{ flexGrow: 1, position: 'relative' }}>
           <ReactFlow 
              nodes={flowNodes} edges={edges} edgeTypes={edgeTypes} elevateNodesOnSelect={false} multiSelectionKeyCode={['Shift', 'Meta', 'Control']}
-             onNodesChange={u => setNodes(nds => applyNodeChanges(u, nds))} 
-             onEdgesChange={u => setEdges(eds => applyEdgeChanges(u, eds))} 
-             onConnect={p => { takeSnapshot(); setEdges(eds => addEdge({...p, type:'default', style: {strokeWidth: 2}}, eds)); }} 
+             onNodesChange={u => setNodes((nds: any[]) => applyNodeChanges(u, nds))} 
+             onEdgesChange={u => setEdges((eds: any[]) => applyEdgeChanges(u, eds))} 
+             onConnect={p => { takeSnapshot(); setEdges((eds: any[]) => addEdge({...p, type:'default', style: {strokeWidth: 2}}, eds)); }} 
              onNodeDragStart={() => takeSnapshot()}
              onNodeDoubleClick={(_, n) => enterLevel(n.id, String(n.data?.content || ''))} 
              onNodeDrag={onNodeDrag} onNodeDragStop={onNodeDragStop} fitView
@@ -793,8 +789,8 @@ function FlowEditor() {
               </div>
               
               <div style={{ display:'flex', gap:'5px', marginBottom:'15px', marginTop:'10px' }}>
-                <button onClick={() => { takeSnapshot(); setNodes(nds => { const maxZ = Math.max(0, ...nds.map(n => Number(n.zIndex) || 0)); return nds.map(n => n.selected ? {...n, zIndex: maxZ + 1} : n); })}} style={{flex:1, padding:'8px', fontSize:'12px', fontWeight: 'bold', background: '#f0f0f0', border: '1px solid #ccc', cursor: 'pointer', borderRadius: '4px'}}>↑ 最前面へ</button>
-                <button onClick={() => { takeSnapshot(); setNodes(nds => { const minZ = Math.min(0, ...nds.map(n => Number(n.zIndex) || 0)); return nds.map(n => n.selected ? {...n, zIndex: minZ - 1} : n); })}} style={{flex:1, padding:'8px', fontSize:'12px', fontWeight: 'bold', background: '#f0f0f0', border: '1px solid #ccc', cursor: 'pointer', borderRadius: '4px'}}>↓ 最背面へ</button>
+                <button onClick={() => { takeSnapshot(); setNodes((nds: any[]) => { const maxZ = Math.max(0, ...nds.map((n: any) => Number(n.zIndex) || 0)); return nds.map((n: any) => n.selected ? {...n, zIndex: maxZ + 1} : n); })}} style={{flex:1, padding:'8px', fontSize:'12px', fontWeight: 'bold', background: '#f0f0f0', border: '1px solid #ccc', cursor: 'pointer', borderRadius: '4px'}}>↑ 最前面へ</button>
+                <button onClick={() => { takeSnapshot(); setNodes((nds: any[]) => { const minZ = Math.min(0, ...nds.map((n: any) => Number(n.zIndex) || 0)); return nds.map((n: any) => n.selected ? {...n, zIndex: minZ - 1} : n); })}} style={{flex:1, padding:'8px', fontSize:'12px', fontWeight: 'bold', background: '#f0f0f0', border: '1px solid #ccc', cursor: 'pointer', borderRadius: '4px'}}>↓ 最背面へ</button>
               </div>
 
               {primaryNode.data?.isImage && selectedNodes.length === 1 && (
@@ -920,9 +916,9 @@ function FlowEditor() {
                 <button onClick={handleDuplicate} style={{ flex:1, color: '#333', border: '1px solid #ccc', padding: '10px', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold', background: '#f8f9fa' }}>📄 複製</button>
                 <button onClick={() => { 
                     takeSnapshot(); 
-                    const selIds = nodesRef.current.filter(n => n.selected).map(n => n.id);
-                    setNodes(nds => nds.filter(n => !n.selected)); 
-                    setEdges(eds => eds.filter(e => !e.selected && !selIds.includes(e.source) && !selIds.includes(e.target)));
+                    const selIds = nodesRef.current.filter((n: any) => n.selected).map((n: any) => n.id);
+                    setNodes((nds: any[]) => nds.filter((n: any) => !n.selected)); 
+                    setEdges((eds: any[]) => eds.filter((e: any) => !e.selected && !selIds.includes(e.source) && !selIds.includes(e.target)));
                 }} style={{ flex:1, color: 'red', border: '1px solid red', padding: '10px', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold', background: '#fffcfc' }}>🗑️ 削除</button>
               </div>
             </div>
@@ -936,7 +932,7 @@ function FlowEditor() {
               </div>
               <label style={{fontSize:'11px', fontWeight: 'bold'}}>太さ</label>
               <div style={{ display:'flex', gap:'5px', marginBottom:'20px', marginTop: '5px' }}>
-                {[2, 6, 12].map(w => <button key={w} onClick={() => { takeSnapshot(); setEdges(eds => eds.map(e => e.selected ? { ...e, style: { ...e.style, strokeWidth: w } } : e)); }} style={{flex:1, padding:'10px', cursor: 'pointer', border: '1px solid #ccc', borderRadius: '4px', background: selectedEdge.style?.strokeWidth === w ? '#ddd' : '#fff'}}>{w === 2 ? '細' : w === 6 ? '中' : '太'}</button>)}
+                {[2, 6, 12].map(w => <button key={w} onClick={() => { takeSnapshot(); setEdges((eds: any[]) => eds.map((e: any) => e.selected ? { ...e, style: { ...e.style, strokeWidth: w } } : e)); }} style={{flex:1, padding:'10px', cursor: 'pointer', border: '1px solid #ccc', borderRadius: '4px', background: selectedEdge.style?.strokeWidth === w ? '#ddd' : '#fff'}}>{w === 2 ? '細' : w === 6 ? '中' : '太'}</button>)}
               </div>
               <label style={{fontSize:'11px', fontWeight: 'bold'}}>種類 (7種)</label>
               <div style={{ display:'flex', flexDirection:'column', gap:'8px', marginTop: '5px' }}>
@@ -944,7 +940,7 @@ function FlowEditor() {
                   <button key={item.l} onClick={() => updateEdgeDesign(item.c)} style={{padding:'10px', border: '1px solid #ccc', background: '#f9f9f9', cursor: 'pointer', borderRadius: '4px', textAlign: 'left', fontWeight: 'bold'}}>{item.l}</button>
                 ))}
               </div>
-              <button onClick={() => { takeSnapshot(); setEdges(eds => eds.filter(e => !e.selected)); }} style={{ width:'100%', marginTop:'30px', color: 'red', border: '1px solid red', background: '#fffcfc', padding: '10px', cursor: 'pointer', fontWeight: 'bold', borderRadius: '8px' }}>線を削除</button>
+              <button onClick={() => { takeSnapshot(); setEdges((eds: any[]) => eds.filter((e: any) => !e.selected)); }} style={{ width:'100%', marginTop:'30px', color: 'red', border: '1px solid red', background: '#fffcfc', padding: '10px', cursor: 'pointer', fontWeight: 'bold', borderRadius: '8px' }}>線を削除</button>
             </div>
           )}
         </div>
