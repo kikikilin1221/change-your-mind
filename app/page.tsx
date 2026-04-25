@@ -73,7 +73,7 @@ const PASTEL_COLORS = ['#FFB7B2', '#FFDAC1', '#E2F0CB', '#B5EAD7', '#C7CEEA', '#
 const QUICK_TEXT_COLORS = ['#000000', '#FF0000', '#008000', '#0000FF', '#FFF000'];
 
 function FlowEditor() {
-  const { setViewport, getZoom } = useReactFlow();
+  const { setViewport, getZoom, getViewport } = useReactFlow();
   const fileInputRef = useRef<HTMLInputElement>(null);
   
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
@@ -93,7 +93,6 @@ function FlowEditor() {
   const [selectedEdge, setSelectedEdge] = useState<any | null>(null);
   const [guides, setGuides] = useState<{ lineX?: number, lineY?: number }>({});
   
-  // ★ 初期値を標準の14px (Webにおける10.5pt相当) に設定
   const [partialFontSize, setPartialFontSize] = useState<number>(14);
   
   const previewDragRef = useRef<{ id: string, startX: number, startY: number, initX: number, initY: number, moved: boolean } | null>(null);
@@ -101,6 +100,16 @@ function FlowEditor() {
   
   const editorRef = useRef<HTMLDivElement>(null);
   const savedRangeRef = useRef<Range | null>(null);
+
+  // ★ コピー＆ペーストやレイアウト計算用の最新状態参照Ref
+  const nodesRef = useRef<any[]>([]);
+  const edgesRef = useRef<any[]>([]);
+  const selectedNodeIdRef = useRef<string | null>(null);
+  const copiedNodeRef = useRef<any | null>(null);
+
+  useEffect(() => { nodesRef.current = nodes; }, [nodes]);
+  useEffect(() => { edgesRef.current = edges; }, [edges]);
+  useEffect(() => { selectedNodeIdRef.current = selectedNodeId; }, [selectedNodeId]);
 
   const selectedNode = useMemo(() => nodes.find(n => n.id === selectedNodeId) || null, [nodes, selectedNodeId]);
 
@@ -274,7 +283,7 @@ function FlowEditor() {
             selection.addRange(range);
         }
     } else {
-        if (isReset) document.execCommand('removeFormat'); // リセット時は既存フォーマットも剥がす
+        if (isReset) document.execCommand('removeFormat');
         document.execCommand('fontSize', false, '7');
         const fonts = editorRef.current.querySelectorAll('font[size="7"]');
         fonts.forEach((f) => {
@@ -291,9 +300,8 @@ function FlowEditor() {
     updateNode({ content: editorRef.current.innerHTML });
   };
 
-  // ★ 究極の「標準リセット」機能
   const handleResetFormat = () => {
-      setPartialFontSize(14); // スライダーを標準(14px)に戻す
+      setPartialFontSize(14);
       if (!editorRef.current) return;
       editorRef.current.focus();
       const selection = window.getSelection();
@@ -307,13 +315,11 @@ function FlowEditor() {
       if (selection.rangeCount > 0) {
           const range = selection.getRangeAt(0);
           if (range.collapsed) {
-              // 選択していない場合：進行中の太字や色をすべて解除
               if (document.queryCommandState('bold')) document.execCommand('bold');
               if (document.queryCommandState('strikeThrough')) document.execCommand('strikeThrough');
               document.execCommand('foreColor', false, '#000000');
               document.execCommand('fontName', false, 'sans-serif');
               
-              // 14pxのクリーンな箱を設置
               const span = document.createElement('span');
               span.style.fontSize = '14px';
               span.style.color = '#000000';
@@ -327,7 +333,6 @@ function FlowEditor() {
               selection.removeAllRanges();
               selection.addRange(range);
           } else {
-              // 選択している場合：全ての装飾を剥がして標準設定を上書き
               document.execCommand('removeFormat');
               document.execCommand('fontSize', false, '7');
               const fonts = editorRef.current.querySelectorAll('font[size="7"]');
@@ -347,6 +352,40 @@ function FlowEditor() {
       
       updateNode({ content: editorRef.current.innerHTML });
   };
+
+  // ★ コピー機能
+  const handleCopy = useCallback(() => {
+    const id = selectedNodeIdRef.current;
+    if (id) {
+        const nodeToCopy = nodesRef.current.find(n => n.id === id);
+        if (nodeToCopy) {
+            copiedNodeRef.current = JSON.parse(JSON.stringify(nodeToCopy));
+        }
+    }
+  }, []);
+
+  // ★ ペースト機能
+  const handlePaste = useCallback(() => {
+    if (copiedNodeRef.current) {
+        const original = copiedNodeRef.current;
+        const newId = `node-${Date.now()}`;
+        const maxZ = Math.max(0, ...nodesRef.current.map(n => Number(n.zIndex) || 0));
+        const newNode = {
+            ...original,
+            id: newId,
+            position: { x: original.position.x + 30, y: original.position.y + 30 },
+            zIndex: maxZ + 1
+        };
+        setNodes(nds => [...nds, newNode]);
+        setSelectedNodeId(newId);
+    }
+  }, []);
+
+  // ★ 複製機能（コピーしてすぐペースト）
+  const handleDuplicate = useCallback(() => {
+      handleCopy();
+      setTimeout(handlePaste, 10);
+  }, [handleCopy, handlePaste]);
 
   const enterLevel = useCallback((id: string, label: string) => {
     setNodes(nds => {
@@ -374,31 +413,97 @@ function FlowEditor() {
     setNodes(rootData.nodes || []); setEdges(rootData.edges || []);
   };
 
+  // ★ マインドマップ型 AddNode機能（Enter一発で繋ぐ）
   const addNode = useCallback((type: 'text' | 'image' | 'shape') => {
     const id = `node-${Date.now()}`;
     let data: any = { content: '項目', previewVisible: false, previewStyle: { opacity: 0.7, offsetX: 0, offsetY: -150, width: 180, height: 120 } };
     let style: any = { backgroundColor: '#ffffff', color: '#000', borderRadius: '12px', fontSize: '14px', width: 200, height: 100, display: 'flex', alignItems: 'center', justifyContent: 'center', textAlign: 'center' };
+    
     if (type === 'image') { fileInputRef.current?.click(); return; }
     if (type === 'shape') {
       data = { content: '', isShape: true, shapeType: 'rect', keepRatio: false };
       style = { ...style, backgroundColor: '#eee', borderRadius: '4px', border: '3px solid #333' };
     }
-    setNodes(nds => {
-      const maxZ = Math.max(0, ...nds.map(n => Number(n.zIndex) || 0));
-      return [...nds, { id, position: { x: 100, y: 100 }, data, style, zIndex: maxZ + 1 }];
-    });
+
+    const selId = selectedNodeIdRef.current;
+    
+    // 何か選択されていれば、そこからツリー構造を伸ばす（マインドマップ形式）
+    if (selId && type === 'text') {
+        // 先に線を引く
+        setEdges(eds => [...eds, { id: `e-${selId}-${id}`, source: selId, target: id, type: 'default', style: { strokeWidth: 2 } }]);
+        
+        setNodes(nds => {
+            const parent = nds.find(n => n.id === selId);
+            if (!parent) return [...nds, { id, position: { x: 100, y: 100 }, data, style, zIndex: 1 }];
+            
+            const maxZ = Math.max(0, ...nds.map(n => Number(n.zIndex) || 0));
+            const newNode = { 
+                id, 
+                position: { x: parent.position.x, y: parent.position.y + Number(parent.style?.height || 100) + 80 }, 
+                data, style, zIndex: maxZ + 1 
+            };
+            
+            let updatedNodes = [...nds, newNode];
+
+            // ピラミッド型自動レイアウト計算
+            const childIds = edgesRef.current.filter(e => e.source === selId).map(e => e.target).concat(id);
+            const children = updatedNodes.filter(n => childIds.includes(n.id));
+            
+            if (children.length > 0) {
+                const Px = parent.position.x + (Number(parent.style?.width || 200) / 2);
+                const spacing = 240; // 要素間の間隔
+                const totalWidth = (children.length - 1) * spacing;
+                const startX = Px - totalWidth / 2;
+                
+                children.forEach((child, index) => {
+                    const childNode = updatedNodes.find(n => n.id === child.id);
+                    if (childNode) {
+                        const childW = Number(childNode.style?.width || 200);
+                        childNode.position = {
+                            x: startX + index * spacing - (childW / 2),
+                            y: parent.position.y + Number(parent.style?.height || 100) + 80
+                        };
+                    }
+                });
+            }
+            return updatedNodes;
+        });
+        setSelectedNodeId(id);
+    } else {
+        // 何も選択されていない場合は普通に追加
+        setNodes(nds => {
+            const maxZ = Math.max(0, ...nds.map(n => Number(n.zIndex) || 0));
+            return [...nds, { id, position: { x: 100, y: 100 }, data, style, zIndex: maxZ + 1 }];
+        });
+        setSelectedNodeId(id);
+    }
   }, []);
 
+  // ★ キーボードショートカットの監視
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      const activeEl = document.activeElement as HTMLElement;
+      const isEditing = activeEl?.tagName === 'INPUT' || 
+                        activeEl?.tagName === 'TEXTAREA' || 
+                        activeEl?.isContentEditable;
+      
+      // 文字入力中は誤動作防止のためショートカットを無効化
+      if (isEditing) return;
+
       if (e.key === 'Enter') {
-        const activeTag = document.activeElement?.tagName;
-        if (activeTag !== 'INPUT' && activeTag !== 'TEXTAREA' && activeTag !== 'DIV') { e.preventDefault(); addNode('text'); }
+        e.preventDefault();
+        addNode('text');
+      } else if ((e.ctrlKey || e.metaKey) && e.key === 'c') {
+        e.preventDefault();
+        handleCopy();
+      } else if ((e.ctrlKey || e.metaKey) && e.key === 'v') {
+        e.preventDefault();
+        handlePaste();
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [addNode]);
+  }, [addNode, handleCopy, handlePaste]);
 
   useEffect(() => {
     const onMouseMove = (e: MouseEvent) => {
@@ -667,7 +772,6 @@ function FlowEditor() {
       `}</style>
       <input type="file" ref={fileInputRef} style={{ display: 'none' }} onChange={handleFileChange} accept="image/*" />
       
-      {/* ★ 拡大エディタ用のオーバーレイのZIndexを1000より低く設定 */}
       {isExpandedEditor && (
           <div onClick={() => setIsExpandedEditor(false)} style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.3)', zIndex: 990, cursor: 'pointer' }} />
       )}
@@ -796,7 +900,6 @@ function FlowEditor() {
 
                   <label style={{fontSize:'11px', fontWeight: 'bold'}}>文字サイズ (px)</label>
                   <div style={{display:'flex', alignItems:'center', gap:'8px', marginBottom: '15px'}}>
-                    {/* ★ 1〜100に拡張した部分編集の文字サイズ設定 */}
                     <input type="range" min="1" max="100" value={partialFontSize} onChange={(e) => {
                         const val = Number(e.target.value);
                         setPartialFontSize(val);
@@ -807,7 +910,6 @@ function FlowEditor() {
                         setPartialFontSize(val);
                         changeFontSize(`${val}px`);
                     }} style={{width:'50px', padding:'4px', border:'1px solid #ccc', borderRadius:'4px'}} />
-                    {/* ★ 標準リセットボタン（サイズ14px・装飾全解除） */}
                     <button onMouseDown={(e) => e.preventDefault()} onClick={handleResetFormat} style={{fontSize:'11px', padding:'4px 8px', border:'1px solid #ccc', borderRadius:'4px', cursor:'pointer', background:'#fff', fontWeight:'bold'}}>標準リセット (14px)</button>
                   </div>
               </div>
@@ -855,7 +957,11 @@ function FlowEditor() {
                   )}
                 </>
               )}
-              <button onClick={() => { setNodes(nds => nds.filter(n => n.id !== selectedNodeId)); setSelectedNodeId(null); }} style={{ width:'100%', marginTop:'20px', color: 'red', border: '1px solid red', padding: '10px', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold', background: '#fffcfc' }}>ゴミ箱へ削除</button>
+              {/* ★ 新規追加：複製ボタン */}
+              <div style={{ display: 'flex', gap: '5px', marginTop: '20px' }}>
+                <button onClick={handleDuplicate} style={{ flex:1, color: '#333', border: '1px solid #ccc', padding: '10px', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold', background: '#f8f9fa' }}>📄 複製</button>
+                <button onClick={() => { setNodes(nds => nds.filter(n => n.id !== selectedNodeId)); setSelectedNodeId(null); }} style={{ flex:1, color: 'red', border: '1px solid red', padding: '10px', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold', background: '#fffcfc' }}>🗑️ 削除</button>
+              </div>
             </div>
           )}
 
