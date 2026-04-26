@@ -67,7 +67,19 @@ const renderHTMLWithMath = (html: string) => {
   }
 };
 
-// ★ クラッシュ防止用の安全なクローン関数（これがないと履歴やコピペでアプリが死にます）
+// ★ HTMLタグを剥がして「1行目のテキストのみ」を綺麗に抽出する関数
+const extractFirstLineText = (html: string) => {
+  if (!html) return '';
+  let text = html.replace(/<br\s*[\/]?>/gi, '\n')
+                 .replace(/<\/div>/gi, '\n')
+                 .replace(/<\/p>/gi, '\n')
+                 .replace(/<[^>]+>/g, '');
+  const lines = text.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+  const firstLine = lines[0] || '';
+  return firstLine.length > 20 ? firstLine.substring(0, 20) + '...' : firstLine;
+};
+
+// クラッシュ防止用の安全なクローン関数
 const safeCloneNodes = (nds: any[]) => nds.map(n => ({ ...n, data: { ...n.data }, style: { ...n.style }, position: { ...n.position } }));
 const safeCloneEdges = (eds: any[]) => eds.map(e => ({ ...e, data: { ...e.data }, style: { ...e.style } }));
 
@@ -87,7 +99,7 @@ function FlowEditor() {
   
   const [nodes, setNodes] = useState<any[]>([]);
   const [edges, setEdges] = useState<any[]>([]);
-  const [levelData, setLevelData] = useState<Record<string, { nodes: any[]; edges: any[]; bgColor?: string }>>({});
+  const [levelData, setLevelData] = useState<Record<string, { nodes: any[]; edges: any[]; bgColor?: string; label?: string }>>({});
   
   const [historyLevel, setHistoryLevel] = useState<string[]>([]);
   const [currentLevel, setCurrentLevel] = useState('root');
@@ -105,12 +117,14 @@ function FlowEditor() {
   const nodesRef = useRef<any[]>([]);
   const edgesRef = useRef<any[]>([]);
   const copiedNodesRef = useRef<any[]>([]);
+  const currentLabelRef = useRef<string>(currentLabel);
   
   const [past, setPast] = useState<{nodes: any[], edges: any[]}[]>([]);
   const [future, setFuture] = useState<{nodes: any[], edges: any[]}[]>([]);
 
   useEffect(() => { nodesRef.current = nodes; }, [nodes]);
   useEffect(() => { edgesRef.current = edges; }, [edges]);
+  useEffect(() => { currentLabelRef.current = currentLabel; }, [currentLabel]);
 
   const selectedNodes = useMemo(() => nodes.filter((n: any) => n.selected), [nodes]);
   const primaryNode = selectedNodes.length > 0 ? selectedNodes[0] : null;
@@ -121,7 +135,6 @@ function FlowEditor() {
     setEdges((eds: any[]) => eds.map((e: any) => ({...e, selected: false})));
   }, []);
 
-  // ★ 絶対にクラッシュしないスナップショット関数
   const takeSnapshot = useCallback(() => {
       setPast(p => [...p.slice(-40), { nodes: safeCloneNodes(nodesRef.current), edges: safeCloneEdges(edgesRef.current) }]);
       setFuture([]);
@@ -159,22 +172,26 @@ function FlowEditor() {
       const lastId = localStorage.getItem('my-logic-active-id') || 'default';
       if (parsed[lastId]) loadFileInitial(lastId, parsed);
     } else {
-      const initial = { 'default': { name: '無題のノート', levelData: { root: { nodes: [], edges: [], bgColor: '#ffffff' } }, currentLevel: 'root', currentLabel: 'TOP層' } };
+      const initial = { 'default': { name: '無題のノート', levelData: { root: { nodes: [], edges: [], bgColor: '#ffffff', label: 'TOP層' } }, currentLevel: 'root', currentLabel: 'TOP層' } };
       setFiles(initial); localStorage.setItem('my-logic-files', JSON.stringify(initial));
     }
   }, []);
+
+  useEffect(() => {
+    setLevelData(prev => ({ ...prev, [currentLevel]: { ...(prev[currentLevel] || {}), nodes, edges, label: currentLabel } }));
+  }, [nodes, edges, currentLevel, currentLabel]);
 
   useEffect(() => {
     if (!activeFileId) return;
     setFiles(prev => {
       const currentFileData = prev[activeFileId];
       if (!currentFileData) return prev;
-      const updatedLevelData = { ...levelData, [currentLevel]: { nodes, edges, bgColor: levelData[currentLevel]?.bgColor } };
+      const updatedLevelData = { ...levelData, [currentLevel]: { nodes, edges, bgColor: levelData[currentLevel]?.bgColor, label: currentLabel } };
       return { ...prev, [activeFileId]: { ...currentFileData, levelData: updatedLevelData, currentLevel, currentLabel } };
     });
     localStorage.setItem('my-logic-files', JSON.stringify(files));
     localStorage.setItem('my-logic-active-id', activeFileId);
-  }, [nodes, edges, currentLevel, currentLabel, activeFileId]); // levelDataとfilesは無限ループを防ぐため除外
+  }, [nodes, edges, currentLevel, currentLabel, activeFileId]); 
 
   useEffect(() => {
     if (editorRef.current) {
@@ -190,9 +207,10 @@ function FlowEditor() {
 
   const loadFileInitial = (id: string, allFiles = files) => {
     const target = allFiles[id]; if (!target) return;
-    const loadedLevelData = target.levelData || { root: { nodes: [], edges: [], bgColor: '#ffffff' } };
+    const loadedLevelData = target.levelData || { root: { nodes: [], edges: [], bgColor: '#ffffff', label: 'TOP層' } };
     const initialLevel = target.currentLevel || 'root';
-    setActiveFileId(id); setLevelData(loadedLevelData); setCurrentLevel(initialLevel); setCurrentLabel(target.currentLabel || 'TOP層');
+    setActiveFileId(id); setLevelData(loadedLevelData); setCurrentLevel(initialLevel); 
+    setCurrentLabel(loadedLevelData[initialLevel]?.label || target.currentLabel || 'TOP層');
     setNodes(loadedLevelData[initialLevel]?.nodes || []); setEdges(loadedLevelData[initialLevel]?.edges || []);
     setHistoryLevel([]); setPast([]); setFuture([]);
   };
@@ -203,9 +221,10 @@ function FlowEditor() {
         const target = currentFiles[newId];
         if (target) {
           setActiveFileId(newId);
-          const nextLevelData = target.levelData || { root: { nodes: [], edges: [], bgColor: '#ffffff' } };
+          const nextLevelData = target.levelData || { root: { nodes: [], edges: [], bgColor: '#ffffff', label: 'TOP層' } };
           const nextLevel = target.currentLevel || 'root';
-          setLevelData(nextLevelData); setCurrentLevel(nextLevel); setCurrentLabel(target.currentLabel || 'TOP層');
+          setLevelData(nextLevelData); setCurrentLevel(nextLevel); 
+          setCurrentLabel(nextLevelData[nextLevel]?.label || target.currentLabel || 'TOP層');
           setNodes(nextLevelData[nextLevel]?.nodes || []); setEdges(nextLevelData[nextLevel]?.edges || []);
           setPast([]); setFuture([]); savedRangeRef.current = null;
         }
@@ -218,7 +237,7 @@ function FlowEditor() {
     const name = prompt("ファイル名", `ノート ${Object.keys(files).length + 1}`);
     if (!name) return;
     const newId = `file-${Date.now()}`;
-    const newF = { name, levelData: { root: { nodes: [], edges: [], bgColor: '#ffffff' } }, currentLevel: 'root', currentLabel: 'TOP層' };
+    const newF = { name, levelData: { root: { nodes: [], edges: [], bgColor: '#ffffff', label: 'TOP層' } }, currentLevel: 'root', currentLabel: 'TOP層' };
     setFiles(prev => ({ ...prev, [newId]: newF })); switchFile(newId);
   };
 
@@ -378,42 +397,63 @@ function FlowEditor() {
       handleCopy(); setTimeout(handlePaste, 10);
   }, [handleCopy, handlePaste]);
 
-  // ★ 階層移動の安定化（移動前に確実にデータを保存する）
-  const enterLevel = useCallback((id: string, label: string) => {
-    const target = nodesRef.current.find((n: any) => n.id === id);
-    if (target?.data?.isShape || target?.data?.isImage) return;
+  // ★ 階層に入るとき、移動前に状態を確実に保存＆タイトル抽出
+  const enterLevel = useCallback((id: string, defaultLabel: string) => {
+    setLevelData(prev => ({ 
+        ...prev, 
+        [currentLevel]: { nodes: safeCloneNodes(nodesRef.current), edges: safeCloneEdges(edgesRef.current), bgColor: prev[currentLevel]?.bgColor, label: currentLabelRef.current } 
+    }));
 
-    setLevelData(prev => ({ ...prev, [currentLevel]: { nodes: safeCloneNodes(nodesRef.current), edges: safeCloneEdges(edgesRef.current), bgColor: prev[currentLevel]?.bgColor } }));
-    
-    setHistoryLevel(prev => [...prev, currentLevel]);
-    setCurrentLevel(id); setCurrentLabel(label || '階層中'); savedRangeRef.current = null;
-    
-    setNodes((levelData[id]?.nodes || []).map((n:any) => ({...n, selected: false})));
-    setEdges((levelData[id]?.edges || []).map((e:any) => ({...e, selected: false})));
-    setPast([]); setFuture([]);
+    setNodes((nds: any[]) => {
+      const target = nds.find((n: any) => n.id === id);
+      if (target?.data?.isShape || target?.data?.isImage) return nds;
+      
+      setHistoryLevel(prev => [...prev, currentLevel]);
+      setCurrentLevel(id); savedRangeRef.current = null;
+      
+      const nextData = levelData[id] || { nodes: [], edges: [] };
+      setCurrentLabel(nextData.label || defaultLabel || '階層中');
+      
+      setEdges((nextData.edges || []).map((e:any) => ({...e, selected: false})));
+      setPast([]); setFuture([]);
+      return (nextData.nodes || []).map((n:any) => ({...n, selected: false}));
+    });
   }, [currentLevel, levelData]);
 
   const goBack = () => {
     if (historyLevel.length === 0) return;
     const newHist = [...historyLevel]; const prevLevel = newHist.pop()!;
     
-    setLevelData(prev => ({ ...prev, [currentLevel]: { nodes: safeCloneNodes(nodesRef.current), edges: safeCloneEdges(edgesRef.current), bgColor: prev[currentLevel]?.bgColor } }));
+    setLevelData(prev => ({ 
+        ...prev, 
+        [currentLevel]: { nodes: safeCloneNodes(nodesRef.current), edges: safeCloneEdges(edgesRef.current), bgColor: prev[currentLevel]?.bgColor, label: currentLabelRef.current } 
+    }));
     
-    setCurrentLevel(prevLevel); setHistoryLevel(newHist); setCurrentLabel(prevLevel === 'root' ? 'TOP層' : '階層中'); savedRangeRef.current = null;
+    setCurrentLevel(prevLevel); setHistoryLevel(newHist); savedRangeRef.current = null;
     
-    setNodes((levelData[prevLevel]?.nodes || []).map((n:any) => ({...n, selected: false})));
-    setEdges((levelData[prevLevel]?.edges || []).map((e:any) => ({...e, selected: false})));
+    const prevData = levelData[prevLevel] || { nodes: [], edges: [] };
+    setCurrentLabel(prevData.label || (prevLevel === 'root' ? 'TOP層' : '階層中'));
+    
+    setNodes((prevData.nodes || []).map((n:any) => ({...n, selected: false})));
+    setEdges((prevData.edges || []).map((e:any) => ({...e, selected: false})));
     setPast([]); setFuture([]);
   };
 
   const goTop = () => {
     if (historyLevel.length === 0) return;
-    setLevelData(prev => ({ ...prev, [currentLevel]: { nodes: safeCloneNodes(nodesRef.current), edges: safeCloneEdges(edgesRef.current), bgColor: prev[currentLevel]?.bgColor } }));
     
-    setCurrentLevel('root'); setHistoryLevel([]); setCurrentLabel('TOP層'); savedRangeRef.current = null;
+    setLevelData(prev => ({ 
+        ...prev, 
+        [currentLevel]: { nodes: safeCloneNodes(nodesRef.current), edges: safeCloneEdges(edgesRef.current), bgColor: prev[currentLevel]?.bgColor, label: currentLabelRef.current } 
+    }));
     
-    setNodes((levelData['root']?.nodes || []).map((n:any) => ({...n, selected: false})));
-    setEdges((levelData['root']?.edges || []).map((e:any) => ({...e, selected: false})));
+    setCurrentLevel('root'); setHistoryLevel([]); savedRangeRef.current = null;
+    
+    const rootData = levelData['root'] || { nodes: [], edges: [] };
+    setCurrentLabel(rootData.label || 'TOP層');
+    
+    setNodes((rootData.nodes || []).map((n:any) => ({...n, selected: false})));
+    setEdges((rootData.edges || []).map((e:any) => ({...e, selected: false})));
     setPast([]); setFuture([]);
   };
 
@@ -601,7 +641,8 @@ function FlowEditor() {
             </svg>
             <div className="nodrag"
               onMouseDown={(e) => { e.stopPropagation(); takeSnapshot(); previewDragRef.current = { id: n.id, startX: e.clientX, startY: e.clientY, initX: offsetX, initY: offsetY, moved: false }; }}
-              onClick={(e) => { e.stopPropagation(); if (!previewDragRef.current?.moved) enterLevel(n.id, String(n.data?.content || '')); }}
+              // ★ HTMLを綺麗に剥がした1行目だけを名前にする
+              onClick={(e) => { e.stopPropagation(); if (!previewDragRef.current?.moved) enterLevel(n.id, extractFirstLineText(n.data?.content)); }}
               style={{ position:'absolute', left: offsetX, top: offsetY, width: `${w2}px`, height: `${h2}px`, backgroundColor:`rgba(255,255,255,${n.data?.previewStyle?.opacity || 0.7})`, borderRadius: '12px', border: '1px solid #ccc', zIndex: -1, cursor: 'grab', overflow: 'hidden', boxShadow: '0 8px 12px rgba(0,0,0,0.1)' }}
             >
               {levelData[n.id]?.nodes?.length ? (
@@ -734,19 +775,32 @@ function FlowEditor() {
       <div style={{ flexGrow: 1, display: 'flex', flexDirection: 'column', backgroundColor: levelData[currentLevel]?.bgColor || '#ffffff', transition: 'background-color 0.3s' }}>
         <div style={{ padding: '10px 15px', backgroundColor: 'rgba(255,255,255,0.8)', borderBottom: '1px solid #eee', display: 'flex', alignItems: 'center', zIndex: 100 }}>
           <button onClick={() => setIsSidebarOpen(!isSidebarOpen)} style={{ background: 'none', border: 'none', fontSize: '24px', cursor: 'pointer', marginRight: '15px', padding: '0 5px' }}>☰</button>
-          <div style={{ flex: 1, textAlign: 'center', fontWeight: 'bold', fontSize: '16px' }}>階層: {currentLabel}</div>
+          
+          {/* ★ 階層名を入力可能なフォームにしました！ */}
+          <div style={{ flex: 1, display: 'flex', justifyContent: 'center', alignItems: 'center', fontWeight: 'bold', fontSize: '16px' }}>
+            階層: 
+            <input 
+              type="text" 
+              value={currentLabel} 
+              onChange={(e) => setCurrentLabel(e.target.value)} 
+              style={{ marginLeft: '8px', fontSize: '16px', fontWeight: 'bold', color: '#333', textAlign: 'center', border: 'none', borderBottom: '1px dashed #999', background: 'transparent', outline: 'none', minWidth: '200px' }} 
+            />
+          </div>
+
           <div style={{ width: '40px' }}></div>
         </div>
 
         <div style={{ flexGrow: 1, position: 'relative' }}>
-          {/* ★ ここにあった旧コードの onConnect を最新の安全な仕様に修正しています！ */}
           <ReactFlow 
              nodes={flowNodes} edges={edges} edgeTypes={edgeTypes} elevateNodesOnSelect={false} multiSelectionKeyCode={['Shift', 'Meta', 'Control']}
              onNodesChange={u => setNodes((nds: any[]) => applyNodeChanges(u, nds))} 
              onEdgesChange={u => setEdges((eds: any[]) => applyEdgeChanges(u, eds))} 
              onConnect={p => { takeSnapshot(); setEdges((eds: any[]) => addEdge({...p, type:'default', style: {strokeWidth: 2}}, eds)); }} 
              onNodeDragStart={() => takeSnapshot()}
-             onNodeDoubleClick={(_, n) => enterLevel(n.id, String(n.data?.content || ''))} 
+             onNodeDoubleClick={(_, n) => {
+                // ★ 階層に入るときは、HTMLを綺麗に剥がした「1行目」をタイトルとして渡す
+                enterLevel(n.id, extractFirstLineText(n.data?.content));
+             }} 
              onNodeDrag={onNodeDrag} onNodeDragStop={onNodeDragStop} fitView
           >
             <Background color="#f1f1f1" /><Controls /><SmartGuides guides={guides} />
