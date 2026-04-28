@@ -67,16 +67,20 @@ const renderHTMLWithMath = (html: string) => {
   }
 };
 
-// ★ HTMLタグを剥がして「1行目のテキストのみ」を綺麗に抽出する関数
+// ★ 【改善】HTMLタグを綺麗に剥がして「1行目のテキストのみ」を抽出する関数
 const extractFirstLineText = (html: string) => {
-  if (!html) return '';
-  let text = html.replace(/<br\s*[\/]?>/gi, '\n')
-                 .replace(/<\/div>/gi, '\n')
-                 .replace(/<\/p>/gi, '\n')
-                 .replace(/<[^>]+>/g, '');
+  if (!html) return '名称未設定';
+  // 仮のDOM要素を作ってHTMLを安全にテキスト化する
+  const tempDiv = document.createElement('div');
+  tempDiv.innerHTML = html.replace(/<br\s*[\/]?>/gi, '\n').replace(/<\/div>/gi, '\n').replace(/<\/p>/gi, '\n');
+  const text = tempDiv.textContent || tempDiv.innerText || '';
+  
+  // 行ごとに分割し、空行を除去して1行目を取得
   const lines = text.split('\n').map(l => l.trim()).filter(l => l.length > 0);
-  const firstLine = lines[0] || '';
-  return firstLine.length > 20 ? firstLine.substring(0, 20) + '...' : firstLine;
+  const firstLine = lines[0] || '名称未設定';
+  
+  // 15文字を超えたら「...」で省略
+  return firstLine.length > 15 ? firstLine.substring(0, 15) + '...' : firstLine;
 };
 
 // クラッシュ防止用の安全なクローン関数
@@ -164,6 +168,7 @@ function FlowEditor() {
     }
   }, [primaryNode?.id, primaryNode?.style?.fontSize]);
 
+  // 初期ロード時のみLocalStorageから読み込む
   useEffect(() => {
     const saved = localStorage.getItem('my-logic-files');
     if (saved) {
@@ -173,25 +178,10 @@ function FlowEditor() {
       if (parsed[lastId]) loadFileInitial(lastId, parsed);
     } else {
       const initial = { 'default': { name: '無題のノート', levelData: { root: { nodes: [], edges: [], bgColor: '#ffffff', label: 'TOP層' } }, currentLevel: 'root', currentLabel: 'TOP層' } };
-      setFiles(initial); localStorage.setItem('my-logic-files', JSON.stringify(initial));
+      setFiles(initial); 
+      localStorage.setItem('my-logic-files', JSON.stringify(initial));
     }
   }, []);
-
-  useEffect(() => {
-    setLevelData(prev => ({ ...prev, [currentLevel]: { ...(prev[currentLevel] || {}), nodes, edges, label: currentLabel } }));
-  }, [nodes, edges, currentLevel, currentLabel]);
-
-  useEffect(() => {
-    if (!activeFileId) return;
-    setFiles(prev => {
-      const currentFileData = prev[activeFileId];
-      if (!currentFileData) return prev;
-      const updatedLevelData = { ...levelData, [currentLevel]: { nodes, edges, bgColor: levelData[currentLevel]?.bgColor, label: currentLabel } };
-      return { ...prev, [activeFileId]: { ...currentFileData, levelData: updatedLevelData, currentLevel, currentLabel } };
-    });
-    localStorage.setItem('my-logic-files', JSON.stringify(files));
-    localStorage.setItem('my-logic-active-id', activeFileId);
-  }, [nodes, edges, currentLevel, currentLabel, activeFileId]); 
 
   useEffect(() => {
     if (editorRef.current) {
@@ -205,6 +195,40 @@ function FlowEditor() {
     }
   }, [primaryNode?.id]);
 
+  // ★ 【改善】手動セーブ機能の実装（自動保存によるクラッシュを防止）
+  const handleManualSave = useCallback(() => {
+    setFiles(prev => {
+        const currentFileData = prev[activeFileId];
+        if (!currentFileData) return prev;
+        
+        const updatedLevelData = {
+            ...levelData,
+            [currentLevel]: { 
+                nodes: safeCloneNodes(nodesRef.current), 
+                edges: safeCloneEdges(edgesRef.current), 
+                bgColor: levelData[currentLevel]?.bgColor, 
+                label: currentLabelRef.current 
+            }
+        };
+        
+        const updatedFiles = {
+            ...prev,
+            [activeFileId]: {
+                ...currentFileData,
+                levelData: updatedLevelData,
+                currentLevel,
+                currentLabel: currentLabelRef.current
+            }
+        };
+        
+        // LocalStorageへの書き込みはここだけで行う
+        localStorage.setItem('my-logic-files', JSON.stringify(updatedFiles));
+        localStorage.setItem('my-logic-active-id', activeFileId);
+        return updatedFiles;
+    });
+    alert('💾 データを保存しました！\n（バグ等でリロードしてもここから再開できます）');
+  }, [activeFileId, currentLevel, levelData]);
+
   const loadFileInitial = (id: string, allFiles = files) => {
     const target = allFiles[id]; if (!target) return;
     const loadedLevelData = target.levelData || { root: { nodes: [], edges: [], bgColor: '#ffffff', label: 'TOP層' } };
@@ -216,6 +240,22 @@ function FlowEditor() {
   };
 
   const switchFile = (newId: string) => {
+    // 別のファイルへ移る前に、メモリ上の現在の階層データを保存
+    setFiles(prev => {
+        const currentFileData = prev[activeFileId];
+        if (currentFileData) {
+            const updatedLevelData = {
+                ...levelData,
+                [currentLevel]: { nodes: safeCloneNodes(nodesRef.current), edges: safeCloneEdges(edgesRef.current), bgColor: levelData[currentLevel]?.bgColor, label: currentLabelRef.current }
+            };
+            return {
+                ...prev,
+                [activeFileId]: { ...currentFileData, levelData: updatedLevelData, currentLevel, currentLabel: currentLabelRef.current }
+            };
+        }
+        return prev;
+    });
+
     setTimeout(() => {
       setFiles(currentFiles => {
         const target = currentFiles[newId];
@@ -397,7 +437,7 @@ function FlowEditor() {
       handleCopy(); setTimeout(handlePaste, 10);
   }, [handleCopy, handlePaste]);
 
-  // ★ 階層に入るとき、移動前に状態を確実に保存＆タイトル抽出
+  // ★ 階層に入るとき、移動前に状態を確実に保存
   const enterLevel = useCallback((id: string, defaultLabel: string) => {
     setLevelData(prev => ({ 
         ...prev, 
@@ -412,7 +452,7 @@ function FlowEditor() {
       setCurrentLevel(id); savedRangeRef.current = null;
       
       const nextData = levelData[id] || { nodes: [], edges: [] };
-      setCurrentLabel(nextData.label || defaultLabel || '階層中');
+      setCurrentLabel(nextData.label && nextData.label !== '階層中' ? nextData.label : defaultLabel || '階層中');
       
       setEdges((nextData.edges || []).map((e:any) => ({...e, selected: false})));
       setPast([]); setFuture([]);
@@ -513,11 +553,18 @@ function FlowEditor() {
     }
   }, [takeSnapshot]);
 
+  // ★ キーボードショートカット（保存 Cmd+S を追加）
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       const activeEl = document.activeElement as HTMLElement;
       const isEditing = activeEl?.tagName === 'INPUT' || activeEl?.tagName === 'TEXTAREA' || activeEl?.isContentEditable;
       
+      if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+          e.preventDefault();
+          handleManualSave();
+          return;
+      }
+
       if ((e.ctrlKey || e.metaKey) && e.key === 'z') {
           if (e.shiftKey) { e.preventDefault(); redo(); } 
           else { e.preventDefault(); undo(); }
@@ -544,7 +591,7 @@ function FlowEditor() {
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [addNode, handleCopy, handlePaste, undo, redo, takeSnapshot]);
+  }, [addNode, handleCopy, handlePaste, undo, redo, takeSnapshot, handleManualSave]);
 
   useEffect(() => {
     const onMouseMove = (e: MouseEvent) => {
@@ -611,9 +658,10 @@ function FlowEditor() {
   }, [nodes]);
 
   const onNodeDragStop = useCallback((_: any, node: any) => {
+    takeSnapshot();
     setNodes((nds: any[]) => nds.map((n: any) => n.id === node.id ? { ...n, position: node.position } : n));
     setGuides({});
-  }, []);
+  }, [takeSnapshot]);
 
   const flowNodes = useMemo(() => {
     const centerNode: any = { 
@@ -640,8 +688,7 @@ function FlowEditor() {
               <line x1={p1.x} y1={p1.y} x2={p2.x} y2={p2.y} stroke="#999" strokeWidth="2" strokeDasharray="4 2" />
             </svg>
             <div className="nodrag"
-              onMouseDown={(e) => { e.stopPropagation(); takeSnapshot(); previewDragRef.current = { id: n.id, startX: e.clientX, startY: e.clientY, initX: offsetX, initY: offsetY, moved: false }; }}
-              // ★ HTMLを綺麗に剥がした1行目だけを名前にする
+              onMouseDown={(e) => { e.stopPropagation(); previewDragRef.current = { id: n.id, startX: e.clientX, startY: e.clientY, initX: offsetX, initY: offsetY, moved: false }; }}
               onClick={(e) => { e.stopPropagation(); if (!previewDragRef.current?.moved) enterLevel(n.id, extractFirstLineText(n.data?.content)); }}
               style={{ position:'absolute', left: offsetX, top: offsetY, width: `${w2}px`, height: `${h2}px`, backgroundColor:`rgba(255,255,255,${n.data?.previewStyle?.opacity || 0.7})`, borderRadius: '12px', border: '1px solid #ccc', zIndex: -1, cursor: 'grab', overflow: 'hidden', boxShadow: '0 8px 12px rgba(0,0,0,0.1)' }}
             >
@@ -720,7 +767,7 @@ function FlowEditor() {
         }
       };
     })];
-  }, [nodes, enterLevel, levelData, takeSnapshot]);
+  }, [nodes, enterLevel, levelData]);
 
   const updateEdgeDesign = (config: any) => {
     takeSnapshot();
@@ -972,6 +1019,11 @@ function FlowEditor() {
         <div style={{ padding: '15px', backgroundColor: 'rgba(255,255,255,0.95)', borderTop: '1px solid #eee', display: 'flex', flexWrap: 'wrap', justifyContent: 'center', alignItems: 'center', gap: '10px', zIndex: 1001, boxShadow: '0 -4px 10px rgba(0,0,0,0.03)' }}>
           <button onClick={undo} disabled={past.length === 0} style={{ ...actionBtnStyle, opacity: past.length === 0 ? 0.4 : 1, cursor: past.length === 0 ? 'default' : 'pointer' }}>↩️ 戻る</button>
           <button onClick={redo} disabled={future.length === 0} style={{ ...actionBtnStyle, opacity: future.length === 0 ? 0.4 : 1, cursor: future.length === 0 ? 'default' : 'pointer' }}>↪️ やり直し</button>
+          <div style={{ width: '1px', height: '30px', backgroundColor: '#ddd', margin: '0 5px' }} />
+          
+          {/* ★ 手動保存ボタンを追加 */}
+          <button onClick={handleManualSave} style={{ ...primaryBtnStyle, backgroundColor: '#059669', boxShadow: '0 4px 6px rgba(5, 150, 105, 0.3)' }}>💾 手動保存</button>
+          
           <div style={{ width: '1px', height: '30px', backgroundColor: '#ddd', margin: '0 5px' }} />
           <button onClick={goBack} disabled={isRoot} style={{ ...actionBtnStyle, opacity: isRoot ? 0.4 : 1, cursor: isRoot ? 'default' : 'pointer' }}>🔙 1つ前へ</button>
           <button onClick={goTop} disabled={isRoot} style={{ ...actionBtnStyle, opacity: isRoot ? 0.4 : 1, cursor: isRoot ? 'default' : 'pointer' }}>🏠 TOP層へ</button>
