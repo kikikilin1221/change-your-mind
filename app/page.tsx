@@ -2,7 +2,7 @@
 import React, { useState, useCallback, useMemo, useRef, useEffect } from 'react';
 import { 
   ReactFlow, Background, Controls, applyNodeChanges, applyEdgeChanges, addEdge,
-  NodeResizer, ReactFlowProvider, useStore, MarkerType, getBezierPath, EdgeProps, BaseEdge, EdgeLabelRenderer, useReactFlow, Position
+  NodeResizer, ReactFlowProvider, useStore, MarkerType, getBezierPath, EdgeProps, BaseEdge, EdgeLabelRenderer, useReactFlow, Position, Handle, ConnectionMode
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import katex from 'katex';
@@ -554,12 +554,18 @@ function FlowEditor() {
     const parent = selNodes.length === 1 ? selNodes[0] : null;
 
     if (parent && (type === 'text' || type === 'table')) {
+        // ★ 自動で引く線のハンドル位置を「縦繋ぎ/横繋ぎ」設定に合わせて指定
+        const isHorizontal = parent.data?.connectionDir === 'horizontal';
+        const sourceHandle = isHorizontal ? 'right' : 'bottom';
+        const targetHandle = isHorizontal ? 'left' : 'top';
+
         const edgeId = `e-${parent.id}-${id}`;
-        setEdges((eds: any[]) => [...eds.map((e: any) => ({...e, selected:false})), { id: edgeId, source: parent.id, target: id, type: 'default', style: { strokeWidth: 2 } }]);
+        setEdges((eds: any[]) => [...eds.map((e: any) => ({...e, selected:false})), { 
+            id: edgeId, source: parent.id, target: id, sourceHandle, targetHandle, type: 'default', style: { strokeWidth: 2 } 
+        }]);
         
         setNodes((nds: any[]) => {
             const maxZ = Math.max(0, ...nds.map((n: any) => Number(n.zIndex) || 0));
-            const isHorizontal = parent.data?.connectionDir === 'horizontal';
             
             const parentW = Number(parent.style?.width || 200);
             const parentH = Number(parent.style?.height || 100);
@@ -715,8 +721,6 @@ function FlowEditor() {
     return [centerNode, ...nodes.map(n => {
       const isPreview = Boolean(n.data?.previewVisible && !n.data?.isShape && !n.data?.isImage && !n.data?.isTable);
       let previewElement: React.ReactNode = null;
-      
-      const dir = n.data?.connectionDir || 'vertical';
 
       if (isPreview) {
         const w1 = Number(n.style?.width) || 200; const h1 = Number(n.style?.height) || 100;
@@ -749,7 +753,7 @@ function FlowEditor() {
           </React.Fragment>
         );
       } else if (n.data?.isTable) {
-        // ★ テーブルの「≡ 表を移動 ≡」の文字を消して、スッキリしたグレーのバーに変更
+        // ★ 表のドラッグハンドルから不要な文字を削除
         previewElement = (
             <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column' }}>
                 <div className="custom-drag-handle" style={{ height: '14px', background: '#e2e8f0', cursor: 'grab', borderTopLeftRadius: '6px', borderTopRightRadius: '6px' }}></div>
@@ -804,12 +808,21 @@ function FlowEditor() {
       return {
         ...n,
         draggable: n.data?.isImage && n.data?.isCropping ? false : true,
-        sourcePosition: dir === 'horizontal' ? Position.Right : Position.Bottom,
-        targetPosition: dir === 'horizontal' ? Position.Left : Position.Top,
         data: {
           ...n.data,
           label: (
             <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: n.style?.alignItems || 'center', justifyContent: n.style?.justifyContent || 'center', position: 'relative' }}>
+              
+              {/* ★ 全方位に接続ポイント（黒い点）を配置し、どこからでも自由に繋げるように設定 */}
+              {n.id !== 'center-mark' && (
+                <>
+                  <Handle type="source" position={Position.Top} id="top" />
+                  <Handle type="source" position={Position.Bottom} id="bottom" />
+                  <Handle type="source" position={Position.Left} id="left" />
+                  <Handle type="source" position={Position.Right} id="right" />
+                </>
+              )}
+
               {previewElement}
               
               {n.data?.isImage ? (
@@ -834,11 +847,13 @@ function FlowEditor() {
                 <div className="html-content" style={{ pointerEvents: 'none', width: '100%', color: n.style?.color || '#000', fontFamily: n.style?.fontFamily || 'sans-serif', fontSize: n.style?.fontSize || '14px', fontWeight: n.style?.fontWeight || 'normal', textDecoration: n.style?.textDecoration || 'none', whiteSpace: 'pre-wrap', lineHeight: '1.2', textAlign: n.style?.textAlign || 'center' }} dangerouslySetInnerHTML={{ __html: renderHTMLWithMath(n.data?.content) }} />
               ) : null}
 
+              {/* ★ リサイズの青枠線を1pxの極細に変更、かつ画像の縦横比固定を解除 */}
               {n.id !== 'center-mark' ? (
                  <NodeResizer 
-                    minWidth={30} minHeight={30} keepAspectRatio={n.data?.isImage && !n.data?.isCropping ? true : !!n.data?.keepRatio} 
+                    minWidth={30} minHeight={30} 
+                    keepAspectRatio={!!n.data?.keepRatio} 
                     isVisible={n.selected} 
-                    lineStyle={{ border: n.data?.isCropping ? '3px dashed #ef4444' : '3px solid #3b82f6', zIndex: 100 }} 
+                    lineStyle={{ border: n.data?.isCropping ? '2px dashed #ef4444' : '1px solid #3b82f6', zIndex: 100 }} 
                     handleStyle={{ background: n.data?.isCropping ? '#ef4444' : '#3b82f6', zIndex: 100, borderRadius: '50%' }} 
                     onResizeStart={(_, params) => {
                         takeSnapshot();
@@ -896,7 +911,7 @@ function FlowEditor() {
 
   const isTableEditing = primaryNode?.data?.isTable && (selectedCells[primaryNode.id]?.length || 0) > 0;
   
-  // ★ テキスト・画像・図形ノード用のエディタ同期（これがないと編集再開時に表示されない）
+  // ★ 文字を入力したあと、再選択した時に右側のエディタパネルが正しく同期されるよう修正
   useEffect(() => {
     if (editorRef.current) {
         if (primaryNode && !primaryNode.data?.isTable) {
@@ -909,7 +924,6 @@ function FlowEditor() {
     }
   }, [primaryNode?.id, primaryNode?.data?.content, primaryNode?.data?.isTable]);
 
-  // ★ テーブルセル用のエディタ同期
   useEffect(() => {
       if (editorRef.current && primaryNode?.data?.isTable) {
           const activeCells = selectedCells[primaryNode.id] || [];
@@ -924,7 +938,6 @@ function FlowEditor() {
       }
   }, [primaryNode?.id, primaryNode?.data?.isTable, selectedCells, primaryNode?.data?.cells]);
 
-
   return (
     <div style={{ width: '100vw', height: '100vh', display: 'flex', flexDirection: 'row', overflow: 'hidden' }}>
       <style>{`
@@ -932,7 +945,9 @@ function FlowEditor() {
         .html-content strike, #node-editor strike { text-decoration: line-through double !important; }
         .html-content *, #node-editor * { line-height: 1.2 !important; vertical-align: baseline !important; }
         #node-editor:empty:before { content: "テキストを入力..."; color: #aaa; pointer-events: none; }
-        .react-flow__handle { width: 10px !important; height: 10px !important; background: #333 !important; border: 2px solid #fff !important; transition: all 0.2s !important; box-shadow: 0 1px 3px rgba(0,0,0,0.2) !important; cursor: crosshair !important; }
+        
+        /* ★ ハンドル（黒い点）のデザイン調整 */
+        .react-flow__handle { width: 10px !important; height: 10px !important; background: #333 !important; border: 2px solid #fff !important; transition: all 0.2s !important; box-shadow: 0 1px 3px rgba(0,0,0,0.2) !important; cursor: crosshair !important; z-index: 10 !important; }
         .react-flow__handle::after { content: ""; position: absolute; top: -12px; left: -12px; right: -12px; bottom: -12px; background: transparent; }
         .react-flow__handle:hover { transform: scale(2.2) !important; background: #3b82f6 !important; border-color: #fff !important; }
       `}</style>
@@ -974,7 +989,9 @@ function FlowEditor() {
         </div>
 
         <div style={{ flexGrow: 1, position: 'relative' }}>
+          {/* ★ connectionModeをLooseにすることで、どの点同士でも自由につなげるようになります */}
           <ReactFlow 
+             connectionMode={ConnectionMode.Loose}
              nodes={flowNodes} edges={edges} edgeTypes={edgeTypes} elevateNodesOnSelect={false} multiSelectionKeyCode={['Shift', 'Meta', 'Control']}
              onNodesChange={u => setNodes((nds: any[]) => applyNodeChanges(u, nds))} 
              onEdgesChange={u => setEdges((eds: any[]) => applyEdgeChanges(u, eds))} 
