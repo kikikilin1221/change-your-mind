@@ -2,7 +2,7 @@
 import React, { useState, useCallback, useMemo, useRef, useEffect } from 'react';
 import { 
   ReactFlow, Background, Controls, applyNodeChanges, applyEdgeChanges, addEdge,
-  NodeResizer, ReactFlowProvider, useStore, MarkerType, getBezierPath, EdgeProps, BaseEdge, EdgeLabelRenderer, useReactFlow, Position, ConnectionMode
+  NodeResizer, ReactFlowProvider, useStore, MarkerType, getBezierPath, EdgeProps, BaseEdge, EdgeLabelRenderer, useReactFlow, Position, Handle, ConnectionMode
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import katex from 'katex';
@@ -538,8 +538,9 @@ function FlowEditor() {
         connectionDir = parent.data.connectionDir;
     }
 
+    // ★ 新規追加時の文字の配置を「左上」に設定
     let data: any = { content: '項目', previewVisible: false, previewStyle: { opacity: 0.7, offsetX: 0, offsetY: -150, width: 180, height: 120 }, connectionDir };
-    let style: any = { backgroundColor: '#ffffff', color: '#000', borderRadius: '12px', fontSize: '14px', width: 200, height: 100, display: 'flex', alignItems: 'center', justifyContent: 'center', textAlign: 'center' };
+    let style: any = { backgroundColor: '#ffffff', color: '#000', borderRadius: '12px', fontSize: '14px', width: 200, height: 100, display: 'flex', alignItems: 'flex-start', justifyContent: 'flex-start', textAlign: 'left', padding: '10px' };
     
     if (type === 'image') { fileInputRef.current?.click(); return; }
     
@@ -560,11 +561,13 @@ function FlowEditor() {
 
     if (parent && (type === 'text' || type === 'table')) {
         const isHorizontal = connectionDir === 'horizontal';
+        // ★ 自動追加の時、対象ノードの「ソース」と追加されるノードの「ターゲット」を厳密にID指定
+        const sourceHandle = isHorizontal ? 'right-src' : 'bottom-src';
+        const targetHandle = isHorizontal ? 'left-tgt' : 'top-tgt';
 
         const edgeId = `e-${parent.id}-${id}`;
-        // ★ 手動で繋ぐ時と同じように、極力シンプルに接続する
         setEdges((eds: any[]) => [...eds.map((e: any) => ({...e, selected:false})), { 
-            id: edgeId, source: parent.id, target: id, type: 'default', style: { strokeWidth: 2 } 
+            id: edgeId, source: parent.id, target: id, sourceHandle, targetHandle, type: 'default', style: { strokeWidth: 2 } 
         }]);
         
         setNodes((nds: any[]) => {
@@ -620,6 +623,21 @@ function FlowEditor() {
       const activeEl = document.activeElement as HTMLElement;
       const isEditing = activeEl?.tagName === 'INPUT' || activeEl?.tagName === 'TEXTAREA' || activeEl?.isContentEditable;
       
+      // ★ Tabキーで一発文字入力モードへ
+      if (e.key === 'Tab' && !isEditing && selectedNodes.length === 1) {
+          e.preventDefault();
+          if (editorRef.current) {
+              editorRef.current.focus();
+              const sel = window.getSelection();
+              const range = document.createRange();
+              range.selectNodeContents(editorRef.current);
+              range.collapse(false); // カーソルを一番最後に置く
+              sel?.removeAllRanges();
+              sel?.addRange(range);
+          }
+          return;
+      }
+
       if ((e.ctrlKey || e.metaKey) && e.key === 's') { e.preventDefault(); handleManualSave(); return; }
       if ((e.ctrlKey || e.metaKey) && e.key === 'z') {
           if (e.shiftKey) { e.preventDefault(); redo(); } else { e.preventDefault(); undo(); } return;
@@ -644,7 +662,7 @@ function FlowEditor() {
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [addNode, handleCopy, handlePaste, undo, redo, takeSnapshot, handleManualSave]);
+  }, [addNode, handleCopy, handlePaste, undo, redo, takeSnapshot, handleManualSave, selectedNodes.length]);
 
   useEffect(() => {
     const onMouseMove = (e: MouseEvent) => {
@@ -677,7 +695,7 @@ function FlowEditor() {
           const maxZ = Math.max(0, ...nds.map((n: any) => Number(n.zIndex) || 0));
           return [...nds.map((n: any) => ({...n, selected: false})), { 
             id: `img-${Date.now()}`, position: { x: 50, y: 50 }, zIndex: maxZ + 1, selected: true,
-            data: { isImage: true, imageUrl: ev.target?.result, imgPosX: 0, imgPosY: 0, imgZoom: 1, isCropping: false, cropBaseW: 300, cropBaseH: 200, cropOffsetX: 0, cropOffsetY: 0, connectionDir: 'vertical' }, 
+            data: { isImage: true, imageUrl: ev.target?.result, imgPosX: 0, imgPosY: 0, imgZoom: 1, isCropping: false, cropBaseW: 300, cropBaseH: 200, cropOffsetX: 0, cropOffsetY: 0, connectionDir: 'vertical', keepRatio: false }, 
             style: { width: 300, height: 200, background: '#fff', padding: 0, border: '1px solid #ccc' } 
           }];
         });
@@ -809,7 +827,6 @@ function FlowEditor() {
       const offX = n.data?.cropOffsetX || 0;
       const offY = n.data?.cropOffsetY || 0;
 
-      // ★ デフォルトの機能をそのまま使い、接続点を向きに応じて2つにする
       return {
         ...n,
         draggable: n.data?.isImage && n.data?.isCropping ? false : true,
@@ -820,6 +837,31 @@ function FlowEditor() {
           label: (
             <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: n.style?.alignItems || 'center', justifyContent: n.style?.justifyContent || 'center', position: 'relative' }}>
               
+              {/* ★ ここが超重要！磁石のようにピッタリくっつくようにSource/Targetのペアを配置 */}
+              {n.id !== 'center-mark' && (
+                <>
+                  {dir === 'horizontal' ? (
+                    <>
+                      {/* 左側の接続点 */}
+                      <Handle type="source" position={Position.Left} id="left-src" className="custom-handle" />
+                      <Handle type="target" position={Position.Left} id="left-tgt" className="custom-handle-target" />
+                      {/* 右側の接続点 */}
+                      <Handle type="source" position={Position.Right} id="right-src" className="custom-handle" />
+                      <Handle type="target" position={Position.Right} id="right-tgt" className="custom-handle-target" />
+                    </>
+                  ) : (
+                    <>
+                      {/* 上側の接続点 */}
+                      <Handle type="source" position={Position.Top} id="top-src" className="custom-handle" />
+                      <Handle type="target" position={Position.Top} id="top-tgt" className="custom-handle-target" />
+                      {/* 下側の接続点 */}
+                      <Handle type="source" position={Position.Bottom} id="bottom-src" className="custom-handle" />
+                      <Handle type="target" position={Position.Bottom} id="bottom-tgt" className="custom-handle-target" />
+                    </>
+                  )}
+                </>
+              )}
+
               {previewElement}
               
               {n.data?.isImage ? (
@@ -838,10 +880,10 @@ function FlowEditor() {
                       maxWidth: 'none', maxHeight: 'none', left: n.data?.isCropping ? `${offX}px` : 0, top: n.data?.isCropping ? `${offY}px` : 0,
                       transform: `translate(${n.data.imgPosX || 0}px, ${n.data.imgPosY || 0}px) scale(${n.data.imgZoom || 1})`, transformOrigin: 'center center', pointerEvents: 'none' 
                   }} alt="img" />
-                  <div className="html-content" style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: n.style?.alignItems || 'center', justifyContent: n.style?.justifyContent || 'center', pointerEvents: 'none', color: n.style?.color || '#000', fontFamily: n.style?.fontFamily || 'sans-serif', fontSize: n.style?.fontSize || '14px', fontWeight: n.style?.fontWeight || 'normal', textDecoration: n.style?.textDecoration || 'none', whiteSpace: 'pre-wrap', lineHeight: '1.2' }} dangerouslySetInnerHTML={{ __html: renderHTMLWithMath(n.data?.content) }} />
+                  <div className="html-content" style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: n.style?.alignItems || 'flex-start', justifyContent: n.style?.justifyContent || 'flex-start', pointerEvents: 'none', color: n.style?.color || '#000', fontFamily: n.style?.fontFamily || 'sans-serif', fontSize: n.style?.fontSize || '14px', fontWeight: n.style?.fontWeight || 'normal', textDecoration: n.style?.textDecoration || 'none', whiteSpace: 'pre-wrap', lineHeight: '1.2', textAlign: n.style?.textAlign || 'left', padding: '10px' }} dangerouslySetInnerHTML={{ __html: renderHTMLWithMath(n.data?.content) }} />
                 </div>
               ) : n.id !== 'center-mark' && !n.data?.isTable ? (
-                <div className="html-content" style={{ pointerEvents: 'none', width: '100%', color: n.style?.color || '#000', fontFamily: n.style?.fontFamily || 'sans-serif', fontSize: n.style?.fontSize || '14px', fontWeight: n.style?.fontWeight || 'normal', textDecoration: n.style?.textDecoration || 'none', whiteSpace: 'pre-wrap', lineHeight: '1.2', textAlign: n.style?.textAlign || 'center' }} dangerouslySetInnerHTML={{ __html: renderHTMLWithMath(n.data?.content) }} />
+                <div className="html-content" style={{ pointerEvents: 'none', width: '100%', color: n.style?.color || '#000', fontFamily: n.style?.fontFamily || 'sans-serif', fontSize: n.style?.fontSize || '14px', fontWeight: n.style?.fontWeight || 'normal', textDecoration: n.style?.textDecoration || 'none', whiteSpace: 'pre-wrap', lineHeight: '1.2', textAlign: n.style?.textAlign || 'left', padding: '10px' }} dangerouslySetInnerHTML={{ __html: renderHTMLWithMath(n.data?.content) }} />
               ) : null}
 
               {n.id !== 'center-mark' ? (
@@ -940,9 +982,13 @@ function FlowEditor() {
         .html-content *, #node-editor * { line-height: 1.2 !important; vertical-align: baseline !important; }
         #node-editor:empty:before { content: "テキストを入力..."; color: #aaa; pointer-events: none; }
         
-        .react-flow__handle { width: 10px !important; height: 10px !important; background: #333 !important; border: 2px solid #fff !important; transition: all 0.2s !important; box-shadow: 0 1px 3px rgba(0,0,0,0.2) !important; cursor: crosshair !important; z-index: 10 !important; }
-        .react-flow__handle::after { content: ""; position: absolute; top: -12px; left: -12px; right: -12px; bottom: -12px; background: transparent; }
-        .react-flow__handle:hover { transform: scale(2.2) !important; background: #3b82f6 !important; border-color: #fff !important; }
+        /* ★ ハンドル（黒い点）のデザイン調整 */
+        .custom-handle { width: 10px !important; height: 10px !important; background: #333 !important; border: 2px solid #fff !important; transition: all 0.2s !important; box-shadow: 0 1px 3px rgba(0,0,0,0.2) !important; cursor: crosshair !important; z-index: 10 !important; }
+        .custom-handle::after { content: ""; position: absolute; top: -12px; left: -12px; right: -12px; bottom: -12px; background: transparent; }
+        .custom-handle:hover { transform: scale(2.2) !important; background: #3b82f6 !important; border-color: #fff !important; }
+
+        /* ★ 透明な受信用（ターゲット）ハンドルの設定。これがあることで確実にスナップします */
+        .custom-handle-target { width: 24px !important; height: 24px !important; background: transparent !important; border: none !important; z-index: 11 !important; cursor: crosshair !important; }
       `}</style>
       <input type="file" ref={fileInputRef} style={{ display: 'none' }} onChange={handleFileChange} accept="image/*" />
       
@@ -1083,7 +1129,7 @@ function FlowEditor() {
 
               <div style={editorPanelStyle}>
                   <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'5px' }}>
-                      <label style={{fontSize: '11px', fontWeight: 'bold'}}>{primaryNode.data?.isTable ? (isTableEditing ? '選択セルの文字内容' : '文字内容 (※セルを選択してください)') : '文字内容'}</label>
+                      <label style={{fontSize: '11px', fontWeight: 'bold'}}>{primaryNode.data?.isTable ? (isTableEditing ? '選択セルの文字内容' : '文字内容 (※セルを選択してください)') : '文字内容 (Tabキーですぐ入力)'}</label>
                       <button onClick={() => setIsExpandedEditor(!isExpandedEditor)} style={{ fontSize: '10px', padding: '4px 8px', borderRadius: '4px', border: '1px solid #3b82f6', background: isExpandedEditor ? '#3b82f6' : '#eff6ff', color: isExpandedEditor ? '#fff' : '#3b82f6', fontWeight: 'bold', cursor: 'pointer', transition: '0.2s' }}>
                           {isExpandedEditor ? '↙️ パネルを戻す' : '↗️ 大きく開く'}
                       </button>
