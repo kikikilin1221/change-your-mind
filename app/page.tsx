@@ -261,7 +261,6 @@ function FlowEditor() {
   const applyUnifiedFormat = (type: 'fontName' | 'bold' | 'strikeThrough' | 'foreColor' | 'fontSize', value: any = '') => {
       takeSnapshot();
       const isActive = document.activeElement === editorRef.current;
-      
       const isTableEditing = primaryNode?.data?.isTable && (selectedCells[primaryNode.id]?.length || 0) > 0;
 
       if (isActive && editorRef.current) {
@@ -534,7 +533,6 @@ function FlowEditor() {
     let data: any = { content: '項目', previewVisible: false, previewStyle: { opacity: 0.7, offsetX: 0, offsetY: -150, width: 180, height: 120 }, connectionDir: 'vertical' };
     let style: any = { backgroundColor: '#ffffff', color: '#000', borderRadius: '12px', fontSize: '14px', width: 200, height: 100, display: 'flex', alignItems: 'center', justifyContent: 'center', textAlign: 'center' };
     
-    // ★ ここにあった handleFileChange は上で正しく定義してあります！
     if (type === 'image') { fileInputRef.current?.click(); return; }
     
     if (type === 'shape') {
@@ -660,7 +658,6 @@ function FlowEditor() {
     return () => { window.removeEventListener('mousemove', onMouseMove); window.removeEventListener('mouseup', onMouseUp); };
   }, [getZoom]);
 
-  // ★ 復活させた画像アップロード関数
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
@@ -752,9 +749,10 @@ function FlowEditor() {
           </React.Fragment>
         );
       } else if (n.data?.isTable) {
+        // ★ テーブルの「≡ 表を移動 ≡」の文字を消して、スッキリしたグレーのバーに変更
         previewElement = (
             <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column' }}>
-                <div className="custom-drag-handle" style={{ height: '20px', background: '#e2e8f0', cursor: 'grab', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '10px', color: '#64748b' }}>≡ 表を移動 ≡</div>
+                <div className="custom-drag-handle" style={{ height: '14px', background: '#e2e8f0', cursor: 'grab', borderTopLeftRadius: '6px', borderTopRightRadius: '6px' }}></div>
                 <div className="nodrag" style={{ flex: 1, overflow: 'auto', padding: '10px' }}>
                     <table style={{ width: '100%', height: '100%', borderCollapse: 'collapse', tableLayout: 'fixed' }}>
                         <tbody>
@@ -898,6 +896,20 @@ function FlowEditor() {
 
   const isTableEditing = primaryNode?.data?.isTable && (selectedCells[primaryNode.id]?.length || 0) > 0;
   
+  // ★ テキスト・画像・図形ノード用のエディタ同期（これがないと編集再開時に表示されない）
+  useEffect(() => {
+    if (editorRef.current) {
+        if (primaryNode && !primaryNode.data?.isTable) {
+            if (editorRef.current.innerHTML !== (primaryNode.data.content || '')) {
+                editorRef.current.innerHTML = primaryNode.data.content || '';
+            }
+        } else if (!primaryNode) {
+            editorRef.current.innerHTML = '';
+        }
+    }
+  }, [primaryNode?.id, primaryNode?.data?.content, primaryNode?.data?.isTable]);
+
+  // ★ テーブルセル用のエディタ同期
   useEffect(() => {
       if (editorRef.current && primaryNode?.data?.isTable) {
           const activeCells = selectedCells[primaryNode.id] || [];
@@ -910,7 +922,8 @@ function FlowEditor() {
               editorRef.current.innerHTML = '';
           }
       }
-  }, [primaryNode?.id, primaryNode?.data?.cells, selectedCells]);
+  }, [primaryNode?.id, primaryNode?.data?.isTable, selectedCells, primaryNode?.data?.cells]);
+
 
   return (
     <div style={{ width: '100vw', height: '100vh', display: 'flex', flexDirection: 'row', overflow: 'hidden' }}>
