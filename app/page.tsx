@@ -36,7 +36,7 @@ const DoubleEdge = ({ id, sourceX, sourceY, targetX, targetY, sourcePosition, ta
       {isDouble && <BaseEdge path={edgePath} style={{ ...style, strokeWidth: strokeWidth, stroke: '#fff' }} />}
       {label && (
         <EdgeLabelRenderer>
-          <div style={{ position: 'absolute', transform: `translate(-50%, -50%) translate(${labelX}px,${labelY}px)`, background: 'white', padding: '2px 5px', borderRadius: '5px', fontSize: '16px', fontWeight: 'bold', pointerEvents: 'none', border: '1px solid #ccc', zIndex: 1000 }}>{String(label)}</div>
+          <div className="no-print" style={{ position: 'absolute', transform: `translate(-50%, -50%) translate(${labelX}px,${labelY}px)`, background: 'white', padding: '2px 5px', borderRadius: '5px', fontSize: '16px', fontWeight: 'bold', pointerEvents: 'none', border: '1px solid #ccc', zIndex: 1000 }}>{String(label)}</div>
         </EdgeLabelRenderer>
       )}
     </>
@@ -48,7 +48,7 @@ function SmartGuides({ guides }: { guides: { lineX?: number, lineY?: number } })
   const transform = useStore(s => s.transform);
   if (guides.lineX === undefined && guides.lineY === undefined) return null;
   return (
-    <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 9999 }}>
+    <div className="no-print" style={{ position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 9999 }}>
       {guides.lineX !== undefined && <div style={{ position: 'absolute', left: guides.lineX * transform[2] + transform[0], top: 0, width: '1px', height: '100%', backgroundColor: '#ef4444' }} />}
       {guides.lineY !== undefined && <div style={{ position: 'absolute', top: guides.lineY * transform[2] + transform[1], left: 0, height: '1px', width: '100%', backgroundColor: '#ef4444' }} />}
     </div>
@@ -89,6 +89,8 @@ function FlowEditor() {
   
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [isExpandedEditor, setIsExpandedEditor] = useState(false);
+  const [isTopBarOpen, setIsTopBarOpen] = useState(true);
+  const [isBottomBarOpen, setIsBottomBarOpen] = useState(true);
   
   const [files, setFiles] = useState<Record<string, any>>({});
   const [activeFileId, setActiveFileId] = useState<string>('default');
@@ -538,7 +540,6 @@ function FlowEditor() {
         connectionDir = parent.data.connectionDir;
     }
 
-    // ★ 新規追加時の文字の配置を「左上」に設定
     let data: any = { content: '項目', previewVisible: false, previewStyle: { opacity: 0.7, offsetX: 0, offsetY: -150, width: 180, height: 120 }, connectionDir };
     let style: any = { backgroundColor: '#ffffff', color: '#000', borderRadius: '12px', fontSize: '14px', width: 200, height: 100, display: 'flex', alignItems: 'flex-start', justifyContent: 'flex-start', textAlign: 'left', padding: '10px' };
     
@@ -561,7 +562,6 @@ function FlowEditor() {
 
     if (parent && (type === 'text' || type === 'table')) {
         const isHorizontal = connectionDir === 'horizontal';
-        // ★ 自動追加の時、対象ノードの「ソース」と追加されるノードの「ターゲット」を厳密にID指定
         const sourceHandle = isHorizontal ? 'right-src' : 'bottom-src';
         const targetHandle = isHorizontal ? 'left-tgt' : 'top-tgt';
 
@@ -631,7 +631,7 @@ function FlowEditor() {
               const sel = window.getSelection();
               const range = document.createRange();
               range.selectNodeContents(editorRef.current);
-              range.collapse(false); // カーソルを一番最後に置く
+              range.collapse(false);
               sel?.removeAllRanges();
               sel?.addRange(range);
           }
@@ -830,33 +830,29 @@ function FlowEditor() {
       return {
         ...n,
         draggable: n.data?.isImage && n.data?.isCropping ? false : true,
-        sourcePosition: dir === 'horizontal' ? Position.Right : Position.Bottom,
-        targetPosition: dir === 'horizontal' ? Position.Left : Position.Top,
         data: {
           ...n.data,
           label: (
             <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: n.style?.alignItems || 'center', justifyContent: n.style?.justifyContent || 'center', position: 'relative' }}>
               
-              {/* ★ ここが超重要！磁石のようにピッタリくっつくようにSource/Targetのペアを配置 */}
+              {/* ★ 常に4方向に「透明な受信用の的(Target)」を置くことで、どこからでもピッタリ線が吸い付くようにする */}
               {n.id !== 'center-mark' && (
                 <>
+                  <Handle type="target" position={Position.Top} id="top-tgt" className="custom-handle-target" />
+                  <Handle type="target" position={Position.Bottom} id="bottom-tgt" className="custom-handle-target" />
+                  <Handle type="target" position={Position.Left} id="left-tgt" className="custom-handle-target" />
+                  <Handle type="target" position={Position.Right} id="right-tgt" className="custom-handle-target" />
+
+                  {/* 黒い点(Source)は見た目通り2つだけ */}
                   {dir === 'horizontal' ? (
                     <>
-                      {/* 左側の接続点 */}
                       <Handle type="source" position={Position.Left} id="left-src" className="custom-handle" />
-                      <Handle type="target" position={Position.Left} id="left-tgt" className="custom-handle-target" />
-                      {/* 右側の接続点 */}
                       <Handle type="source" position={Position.Right} id="right-src" className="custom-handle" />
-                      <Handle type="target" position={Position.Right} id="right-tgt" className="custom-handle-target" />
                     </>
                   ) : (
                     <>
-                      {/* 上側の接続点 */}
                       <Handle type="source" position={Position.Top} id="top-src" className="custom-handle" />
-                      <Handle type="target" position={Position.Top} id="top-tgt" className="custom-handle-target" />
-                      {/* 下側の接続点 */}
                       <Handle type="source" position={Position.Bottom} id="bottom-src" className="custom-handle" />
-                      <Handle type="target" position={Position.Bottom} id="bottom-tgt" className="custom-handle-target" />
                     </>
                   )}
                 </>
@@ -924,8 +920,8 @@ function FlowEditor() {
   };
 
   const isRoot = historyLevel.length === 0;
-  const actionBtnStyle = { padding: '10px 16px', borderRadius: '8px', border: '1px solid #ccc', backgroundColor: '#fff', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '5px', boxShadow: '0 2px 4px rgba(0,0,0,0.05)', fontWeight: 'bold', fontSize: '14px', transition: 'all 0.2s' };
-  const primaryBtnStyle = { ...actionBtnStyle, backgroundColor: '#3b82f6', color: '#fff', border: 'none', boxShadow: '0 4px 6px rgba(59, 130, 246, 0.3)' };
+  const actionBtnStyle = { padding: '6px 10px', borderRadius: '6px', border: '1px solid #ccc', backgroundColor: '#fff', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px', boxShadow: '0 2px 4px rgba(0,0,0,0.05)', fontWeight: 'bold', fontSize: '12px', transition: 'all 0.2s', whiteSpace: 'nowrap' };
+  const primaryBtnStyle = { ...actionBtnStyle, backgroundColor: '#3b82f6', color: '#fff', border: 'none', boxShadow: '0 2px 4px rgba(59, 130, 246, 0.3)' };
 
   const editorPanelStyle = isExpandedEditor ? {
       position: 'fixed' as const, top: '20px', right: '20px', width: '450px', maxHeight: '90vh', backgroundColor: '#fff', zIndex: 10000,
@@ -982,21 +978,27 @@ function FlowEditor() {
         .html-content *, #node-editor * { line-height: 1.2 !important; vertical-align: baseline !important; }
         #node-editor:empty:before { content: "テキストを入力..."; color: #aaa; pointer-events: none; }
         
-        /* ★ ハンドル（黒い点）のデザイン調整 */
+        /* 印刷時に消す要素 */
+        @media print {
+            .no-print { display: none !important; }
+            .react-flow__background { background-color: #fff !important; }
+        }
+
         .custom-handle { width: 10px !important; height: 10px !important; background: #333 !important; border: 2px solid #fff !important; transition: all 0.2s !important; box-shadow: 0 1px 3px rgba(0,0,0,0.2) !important; cursor: crosshair !important; z-index: 10 !important; }
         .custom-handle::after { content: ""; position: absolute; top: -12px; left: -12px; right: -12px; bottom: -12px; background: transparent; }
         .custom-handle:hover { transform: scale(2.2) !important; background: #3b82f6 !important; border-color: #fff !important; }
 
-        /* ★ 透明な受信用（ターゲット）ハンドルの設定。これがあることで確実にスナップします */
-        .custom-handle-target { width: 24px !important; height: 24px !important; background: transparent !important; border: none !important; z-index: 11 !important; cursor: crosshair !important; }
+        /* ★ 透明なターゲット(受信用)ハンドル。これを大きく見えないように置くことで磁石のように吸い付く */
+        .custom-handle-target { width: 30px !important; height: 30px !important; background: transparent !important; border: none !important; z-index: 1 !important; cursor: crosshair !important; pointer-events: auto !important; }
       `}</style>
       <input type="file" ref={fileInputRef} style={{ display: 'none' }} onChange={handleFileChange} accept="image/*" />
       
       {isExpandedEditor && (
-          <div onClick={() => setIsExpandedEditor(false)} style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.3)', zIndex: 990, cursor: 'pointer' }} />
+          <div className="no-print" onClick={() => setIsExpandedEditor(false)} style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.3)', zIndex: 990, cursor: 'pointer' }} />
       )}
 
-      <div style={{ width: isSidebarOpen ? '220px' : '0px', transition: 'width 0.3s ease', backgroundColor: '#f8f9fa', borderRight: isSidebarOpen ? '1px solid #ddd' : 'none', display: 'flex', flexDirection: 'column', overflow: 'hidden', zIndex: 10 }}>
+      {/* サイドバー */}
+      <div className="no-print" style={{ width: isSidebarOpen ? '220px' : '0px', transition: 'width 0.3s ease', backgroundColor: '#f8f9fa', borderRight: isSidebarOpen ? '1px solid #ddd' : 'none', display: 'flex', flexDirection: 'column', overflow: 'hidden', zIndex: 10 }}>
         <div style={{ width: '220px', display: 'flex', flexDirection: 'column', height: '100%', padding: '15px' }}>
           <h2>ファイル一覧</h2>
           <button onClick={createNewFile} style={{ padding: '8px', marginBottom: '20px', backgroundColor: '#fff', border: '1px solid #ddd', cursor: 'pointer', borderRadius: '6px', fontWeight: 'bold' }}>＋ 新規ノート</button>
@@ -1010,22 +1012,27 @@ function FlowEditor() {
         </div>
       </div>
 
-      <div style={{ flexGrow: 1, display: 'flex', flexDirection: 'column', backgroundColor: levelData[currentLevel]?.bgColor || '#ffffff', transition: 'background-color 0.3s' }}>
-        <div style={{ padding: '10px 15px', backgroundColor: 'rgba(255,255,255,0.8)', borderBottom: '1px solid #eee', display: 'flex', alignItems: 'center', zIndex: 100 }}>
-          <button onClick={() => setIsSidebarOpen(!isSidebarOpen)} style={{ background: 'none', border: 'none', fontSize: '24px', cursor: 'pointer', marginRight: '15px', padding: '0 5px' }}>☰</button>
-          
-          <div style={{ flex: 1, display: 'flex', justifyContent: 'center', alignItems: 'center', fontWeight: 'bold', fontSize: '16px' }}>
-            階層: 
-            <input 
-              type="text" 
-              value={currentLabel} 
-              onChange={(e) => setCurrentLabel(e.target.value)} 
-              style={{ marginLeft: '8px', fontSize: '16px', fontWeight: 'bold', color: '#333', textAlign: 'center', border: 'none', borderBottom: '1px dashed #999', background: 'transparent', outline: 'none', minWidth: '200px' }} 
-            />
+      <div style={{ flexGrow: 1, display: 'flex', flexDirection: 'column', backgroundColor: levelData[currentLevel]?.bgColor || '#ffffff', transition: 'background-color 0.3s', position: 'relative' }}>
+        
+        {/* ★ 上部バー（折りたたみ可能） */}
+        {isTopBarOpen ? (
+          <div className="no-print" style={{ padding: '8px 15px', backgroundColor: 'rgba(255,255,255,0.9)', borderBottom: '1px solid #eee', display: 'flex', alignItems: 'center', zIndex: 100, backdropFilter: 'blur(4px)' }}>
+            <button onClick={() => setIsSidebarOpen(!isSidebarOpen)} style={{ background: 'none', border: 'none', fontSize: '20px', cursor: 'pointer', marginRight: '15px', padding: '0 5px' }}>☰</button>
+            <div style={{ flex: 1, display: 'flex', justifyContent: 'center', alignItems: 'center', fontWeight: 'bold', fontSize: '14px' }}>
+              階層: 
+              <input 
+                type="text" 
+                value={currentLabel} 
+                onChange={(e) => setCurrentLabel(e.target.value)} 
+                style={{ marginLeft: '8px', fontSize: '14px', fontWeight: 'bold', color: '#333', textAlign: 'center', border: 'none', borderBottom: '1px dashed #999', background: 'transparent', outline: 'none', minWidth: '150px' }} 
+              />
+            </div>
+            {/* 上部バーを隠すボタン */}
+            <button onClick={() => setIsTopBarOpen(false)} style={{ padding: '4px 8px', fontSize: '10px', background: '#e2e8f0', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold', color: '#475569' }}>▲ 隠す</button>
           </div>
-
-          <div style={{ width: '40px' }}></div>
-        </div>
+        ) : (
+          <button className="no-print" onClick={() => setIsTopBarOpen(true)} style={{ position: 'absolute', top: 10, right: 10, zIndex: 100, padding: '4px 8px', fontSize: '10px', background: '#e2e8f0', border: '1px solid #cbd5e1', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold', color: '#475569', boxShadow: '0 2px 4px rgba(0,0,0,0.1)' }}>▼ 階層メニューを表示</button>
+        )}
 
         <div style={{ flexGrow: 1, position: 'relative' }}>
           <ReactFlow 
@@ -1040,52 +1047,52 @@ function FlowEditor() {
              }} 
              onNodeDrag={onNodeDrag} onNodeDragStop={onNodeDragStop} fitView
           >
-            <Background color="#f1f1f1" /><Controls /><SmartGuides guides={guides} />
+            <Background color="#f1f1f1" className="no-print" /><Controls className="no-print" /><SmartGuides guides={guides} />
           </ReactFlow>
           
           {selectedNodes.length > 0 && primaryNode && (
-            <div style={{ position:'absolute', right:0, top:0, bottom:0, width:'340px', borderLeft:'1px solid #ddd', padding:'20px', backgroundColor:'#fff', zIndex:1000, overflowY: 'auto', boxShadow: '-4px 0 10px rgba(0,0,0,0.05)' }}>
+            <div className="no-print" style={{ position:'absolute', right:0, top:0, bottom:0, width:'320px', borderLeft:'1px solid #ddd', padding:'15px', backgroundColor:'#fff', zIndex:1000, overflowY: 'auto', boxShadow: '-4px 0 10px rgba(0,0,0,0.05)' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
-                <h3 style={{fontSize:'16px', margin: 0}}>{selectedNodes.length > 1 ? `${selectedNodes.length}個の要素を一括編集` : primaryNode.data?.isTable ? '表の設定' : primaryNode.data?.isImage ? '画像編集' : primaryNode.data?.isShape ? '図形設定' : 'テキスト設定'}</h3>
-                <button onClick={clearSelection} style={{ border: 'none', background: 'none', fontSize: '20px', cursor: 'pointer', padding: '0 5px' }}>×</button>
+                <h3 style={{fontSize:'14px', margin: 0}}>{selectedNodes.length > 1 ? `${selectedNodes.length}個の要素を一括編集` : primaryNode.data?.isTable ? '表の設定' : primaryNode.data?.isImage ? '画像編集' : primaryNode.data?.isShape ? '図形設定' : 'テキスト設定'}</h3>
+                <button onClick={clearSelection} style={{ border: 'none', background: 'none', fontSize: '18px', cursor: 'pointer', padding: '0 5px' }}>×</button>
               </div>
 
               <label style={{fontSize: '11px', fontWeight: 'bold'}}>接続の向き (Enterキーでの追加方向)</label>
               <div style={{ display: 'flex', gap: '5px', marginBottom: '15px', marginTop: '5px' }}>
-                <button onClick={() => { takeSnapshot(); updateSelectedNodes({ connectionDir: 'vertical' })}} style={{ flex: 1, padding: '8px', cursor: 'pointer', borderRadius: '4px', background: primaryNode.data?.connectionDir !== 'horizontal' ? '#cbd5e1' : '#fff', border: '1px solid #ccc', fontWeight: 'bold' }}>↓ 縦に繋ぐ</button>
-                <button onClick={() => { takeSnapshot(); updateSelectedNodes({ connectionDir: 'horizontal' })}} style={{ flex: 1, padding: '8px', cursor: 'pointer', borderRadius: '4px', background: primaryNode.data?.connectionDir === 'horizontal' ? '#cbd5e1' : '#fff', border: '1px solid #ccc', fontWeight: 'bold' }}>→ 横に繋ぐ</button>
+                <button onClick={() => { takeSnapshot(); updateSelectedNodes({ connectionDir: 'vertical' })}} style={{ flex: 1, padding: '6px', cursor: 'pointer', borderRadius: '4px', background: primaryNode.data?.connectionDir !== 'horizontal' ? '#cbd5e1' : '#fff', border: '1px solid #ccc', fontWeight: 'bold', fontSize: '12px' }}>↓ 縦に繋ぐ</button>
+                <button onClick={() => { takeSnapshot(); updateSelectedNodes({ connectionDir: 'horizontal' })}} style={{ flex: 1, padding: '6px', cursor: 'pointer', borderRadius: '4px', background: primaryNode.data?.connectionDir === 'horizontal' ? '#cbd5e1' : '#fff', border: '1px solid #ccc', fontWeight: 'bold', fontSize: '12px' }}>→ 横に繋ぐ</button>
               </div>
               
               <div style={{ display:'flex', gap:'5px', marginBottom:'15px' }}>
-                <button onClick={() => { takeSnapshot(); setNodes((nds: any[]) => { const maxZ = Math.max(0, ...nds.map((n: any) => Number(n.zIndex) || 0)); return nds.map((n: any) => n.selected ? {...n, zIndex: maxZ + 1} : n); })}} style={{flex:1, padding:'8px', fontSize:'12px', fontWeight: 'bold', background: '#f0f0f0', border: '1px solid #ccc', cursor: 'pointer', borderRadius: '4px'}}>↑ 最前面へ</button>
-                <button onClick={() => { takeSnapshot(); setNodes((nds: any[]) => { const minZ = Math.min(0, ...nds.map((n: any) => Number(n.zIndex) || 0)); return nds.map((n: any) => n.selected ? {...n, zIndex: minZ - 1} : n); })}} style={{flex:1, padding:'8px', fontSize:'12px', fontWeight: 'bold', background: '#f0f0f0', border: '1px solid #ccc', cursor: 'pointer', borderRadius: '4px'}}>↓ 最背面へ</button>
+                <button onClick={() => { takeSnapshot(); setNodes((nds: any[]) => { const maxZ = Math.max(0, ...nds.map((n: any) => Number(n.zIndex) || 0)); return nds.map((n: any) => n.selected ? {...n, zIndex: maxZ + 1} : n); })}} style={{flex:1, padding:'6px', fontSize:'11px', fontWeight: 'bold', background: '#f0f0f0', border: '1px solid #ccc', cursor: 'pointer', borderRadius: '4px'}}>↑ 最前面へ</button>
+                <button onClick={() => { takeSnapshot(); setNodes((nds: any[]) => { const minZ = Math.min(0, ...nds.map((n: any) => Number(n.zIndex) || 0)); return nds.map((n: any) => n.selected ? {...n, zIndex: minZ - 1} : n); })}} style={{flex:1, padding:'6px', fontSize:'11px', fontWeight: 'bold', background: '#f0f0f0', border: '1px solid #ccc', cursor: 'pointer', borderRadius: '4px'}}>↓ 最背面へ</button>
               </div>
 
               {primaryNode.data?.isTable && (
-                  <div style={{ padding: '15px', background: '#f8f9fa', borderRadius: '8px', marginBottom: '15px', border: '1px solid #ddd' }}>
+                  <div style={{ padding: '10px', background: '#f8f9fa', borderRadius: '8px', marginBottom: '15px', border: '1px solid #ddd' }}>
                       <label style={{fontSize: '11px', fontWeight: 'bold'}}>表の構成</label>
                       <div style={{ display: 'flex', gap: '5px', marginTop: '5px', marginBottom: '15px' }}>
-                          <button onClick={() => addTableRowCol('row')} style={{ flex:1, padding: '5px', cursor: 'pointer', borderRadius: '4px', border: '1px solid #ccc', background: '#fff' }}>行を追加</button>
-                          <button onClick={() => addTableRowCol('col')} style={{ flex:1, padding: '5px', cursor: 'pointer', borderRadius: '4px', border: '1px solid #ccc', background: '#fff' }}>列を追加</button>
+                          <button onClick={() => addTableRowCol('row')} style={{ flex:1, padding: '4px', fontSize: '12px', cursor: 'pointer', borderRadius: '4px', border: '1px solid #ccc', background: '#fff' }}>行を追加</button>
+                          <button onClick={() => addTableRowCol('col')} style={{ flex:1, padding: '4px', fontSize: '12px', cursor: 'pointer', borderRadius: '4px', border: '1px solid #ccc', background: '#fff' }}>列を追加</button>
                       </div>
 
                       <label style={{fontSize: '11px', fontWeight: 'bold', color: '#b91c1c'}}>選択セル枠線のデザイン</label>
                       {isTableEditing ? (
                           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '5px', marginTop: '5px' }}>
-                              <select value={tableBorderWidth} onChange={(e) => setTableBorderWidth(e.target.value)} style={{ padding: '5px', borderRadius: '4px', border: '1px solid #ccc', background: '#fff' }}>
-                                  <option value="1px">細線 (1px)</option>
-                                  <option value="2px">中線 (2px)</option>
-                                  <option value="4px">太線 (4px)</option>
+                              <select value={tableBorderWidth} onChange={(e) => setTableBorderWidth(e.target.value)} style={{ padding: '4px', fontSize: '11px', borderRadius: '4px', border: '1px solid #ccc', background: '#fff' }}>
+                                  <option value="1px">細線</option>
+                                  <option value="2px">中線</option>
+                                  <option value="4px">太線</option>
                                   <option value="0px">線なし</option>
                               </select>
-                              <select value={tableBorderStyle} onChange={(e) => setTableBorderStyle(e.target.value)} style={{ padding: '5px', borderRadius: '4px', border: '1px solid #ccc', background: '#fff' }}>
-                                  <option value="solid">単線 (Solid)</option>
-                                  <option value="dashed">破線 (Dashed)</option>
-                                  <option value="dotted">点線 (Dotted)</option>
-                                  <option value="double">二重線 (Double)</option>
+                              <select value={tableBorderStyle} onChange={(e) => setTableBorderStyle(e.target.value)} style={{ padding: '4px', fontSize: '11px', borderRadius: '4px', border: '1px solid #ccc', background: '#fff' }}>
+                                  <option value="solid">単線</option>
+                                  <option value="dashed">破線</option>
+                                  <option value="dotted">点線</option>
+                                  <option value="double">二重線</option>
                               </select>
-                              <input type="color" value={tableBorderColor} onChange={(e) => setTableBorderColor(e.target.value)} style={{ width: '100%', height: '30px', border: 'none', cursor: 'pointer', background: 'transparent' }} />
-                              <button onClick={applyTableBorder} style={{ background: '#3b82f6', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}>適用</button>
+                              <input type="color" value={tableBorderColor} onChange={(e) => setTableBorderColor(e.target.value)} style={{ width: '100%', height: '24px', border: 'none', cursor: 'pointer', background: 'transparent' }} />
+                              <button onClick={applyTableBorder} style={{ background: '#3b82f6', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold', fontSize: '11px' }}>適用</button>
                           </div>
                       ) : (
                           <p style={{fontSize: '10px', color: '#666', marginTop: '5px'}}>※表の中のセルをクリックして選択してください<br/>(Shiftキーで複数選択)</p>
@@ -1099,31 +1106,31 @@ function FlowEditor() {
                         if (!primaryNode.data?.isCropping) updateSelectedNodes({ isCropping: true, cropBaseW: w, cropBaseH: h, cropOffsetX: 0, cropOffsetY: 0 });
                         else updateSelectedNodes({ isCropping: false });
                      }} 
-                     style={{ width: '100%', padding: '10px', background: primaryNode.data?.isCropping ? '#ef4444' : '#fff', color: primaryNode.data?.isCropping ? '#fff' : '#333', border: primaryNode.data?.isCropping ? 'none' : '1px solid #ccc', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', transition: 'all 0.2s', marginBottom: '15px' }}
+                     style={{ width: '100%', padding: '8px', fontSize: '12px', background: primaryNode.data?.isCropping ? '#ef4444' : '#fff', color: primaryNode.data?.isCropping ? '#fff' : '#333', border: primaryNode.data?.isCropping ? 'none' : '1px solid #ccc', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', transition: 'all 0.2s', marginBottom: '15px' }}
                   >
-                     {primaryNode.data?.isCropping ? '✅ トリミングを完了' : '✂️ トリミング (枠の切り抜き)'}
+                     {primaryNode.data?.isCropping ? '✅ トリミング完了' : '✂️ トリミング'}
                   </button>
 
                   {primaryNode.data?.isCropping ? (
-                     <div style={{ padding: '10px', backgroundColor: '#fef2f2', borderRadius: '6px', marginBottom: '10px', border: '1px dashed #fca5a5' }}><p style={{fontSize: '11px', color: '#b91c1c', margin: 0}}><strong>トリミングモード中</strong><br/>・画像の周囲にある<span style={{color:'red'}}>赤い枠</span>を動かして切り取るサイズを変更できます。<br/>・画像を直接ドラッグして表示位置を調整できます。</p></div>
+                     <div style={{ padding: '10px', backgroundColor: '#fef2f2', borderRadius: '6px', marginBottom: '10px', border: '1px dashed #fca5a5' }}><p style={{fontSize: '10px', color: '#b91c1c', margin: 0}}><strong>トリミングモード中</strong><br/>・画像の周囲の<span style={{color:'red'}}>赤い枠</span>を動かして切り取れます。<br/>・画像を直接ドラッグして位置を調整できます。</p></div>
                   ) : (
                      <>
-                        <label style={{fontSize: '11px', fontWeight: 'bold'}}>微調整 (X / Y位置)</label>
+                        <label style={{fontSize: '10px', fontWeight: 'bold'}}>微調整 (X / Y位置)</label>
                         <input type="range" min="-600" max="600" value={Number(primaryNode.data?.imgPosX || 0)} onChange={(e) => updateSelectedNodes({ imgPosX: parseInt(e.target.value) })} style={{width:'100%', marginBottom: '5px'}} />
                         <input type="range" min="-600" max="600" value={Number(primaryNode.data?.imgPosY || 0)} onChange={(e) => updateSelectedNodes({ imgPosY: parseInt(e.target.value) })} style={{width:'100%', marginBottom: '10px'}} />
                      </>
                   )}
-                  <label style={{fontSize: '11px', fontWeight: 'bold'}}>ズーム倍率</label>
+                  <label style={{fontSize: '10px', fontWeight: 'bold'}}>ズーム倍率</label>
                   <input type="range" min="0.5" max="3" step="0.1" value={Number(primaryNode.data?.imgZoom || 1)} onChange={(e) => updateSelectedNodes({ imgZoom: parseFloat(e.target.value) })} style={{width:'100%'}} />
                 </div>
               )}
               
               {primaryNode.data?.isShape && (
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '5px', marginBottom: '15px' }}>
-                  <button onClick={() => { takeSnapshot(); const size = Math.max(Number(primaryNode.style?.width) || 150, Number(primaryNode.style?.height) || 150); updateSelectedNodes({ shapeType: 'rect', keepRatio: true }, { borderRadius: '0px', width: size, height: size }); }} style={{ padding: '8px', cursor: 'pointer', borderRadius: '4px', background: primaryNode.data?.shapeType === 'rect' && primaryNode.data?.keepRatio ? '#ddd' : '#fff', border: '1px solid #ccc' }}>■ 正方形</button>
-                  <button onClick={() => { takeSnapshot(); updateSelectedNodes({ shapeType: 'rect', keepRatio: false }, { borderRadius: '0px' }); }} style={{ padding: '8px', cursor: 'pointer', borderRadius: '4px', background: primaryNode.data?.shapeType === 'rect' && !primaryNode.data?.keepRatio ? '#ddd' : '#fff', border: '1px solid #ccc' }}>▬ 長方形</button>
-                  <button onClick={() => { takeSnapshot(); const size = Math.max(Number(primaryNode.style?.width) || 150, Number(primaryNode.style?.height) || 150); updateSelectedNodes({ shapeType: 'circ', keepRatio: true }, { borderRadius: '50%', width: size, height: size }); }} style={{ padding: '8px', cursor: 'pointer', borderRadius: '4px', background: primaryNode.data?.shapeType === 'circ' && primaryNode.data?.keepRatio ? '#ddd' : '#fff', border: '1px solid #ccc' }}>● 正円</button>
-                  <button onClick={() => { takeSnapshot(); updateSelectedNodes({ shapeType: 'circ', keepRatio: false }, { borderRadius: '50%' }); }} style={{ padding: '8px', cursor: 'pointer', borderRadius: '4px', background: primaryNode.data?.shapeType === 'circ' && !primaryNode.data?.keepRatio ? '#ddd' : '#fff', border: '1px solid #ccc' }}>⬭ 楕円</button>
+                  <button onClick={() => { takeSnapshot(); const size = Math.max(Number(primaryNode.style?.width) || 150, Number(primaryNode.style?.height) || 150); updateSelectedNodes({ shapeType: 'rect', keepRatio: true }, { borderRadius: '0px', width: size, height: size }); }} style={{ padding: '6px', fontSize: '12px', cursor: 'pointer', borderRadius: '4px', background: primaryNode.data?.shapeType === 'rect' && primaryNode.data?.keepRatio ? '#ddd' : '#fff', border: '1px solid #ccc' }}>■ 正方形</button>
+                  <button onClick={() => { takeSnapshot(); updateSelectedNodes({ shapeType: 'rect', keepRatio: false }, { borderRadius: '0px' }); }} style={{ padding: '6px', fontSize: '12px', cursor: 'pointer', borderRadius: '4px', background: primaryNode.data?.shapeType === 'rect' && !primaryNode.data?.keepRatio ? '#ddd' : '#fff', border: '1px solid #ccc' }}>▬ 長方形</button>
+                  <button onClick={() => { takeSnapshot(); const size = Math.max(Number(primaryNode.style?.width) || 150, Number(primaryNode.style?.height) || 150); updateSelectedNodes({ shapeType: 'circ', keepRatio: true }, { borderRadius: '50%', width: size, height: size }); }} style={{ padding: '6px', fontSize: '12px', cursor: 'pointer', borderRadius: '4px', background: primaryNode.data?.shapeType === 'circ' && primaryNode.data?.keepRatio ? '#ddd' : '#fff', border: '1px solid #ccc' }}>● 正円</button>
+                  <button onClick={() => { takeSnapshot(); updateSelectedNodes({ shapeType: 'circ', keepRatio: false }, { borderRadius: '50%' }); }} style={{ padding: '6px', fontSize: '12px', cursor: 'pointer', borderRadius: '4px', background: primaryNode.data?.shapeType === 'circ' && !primaryNode.data?.keepRatio ? '#ddd' : '#fff', border: '1px solid #ccc' }}>⬭ 楕円</button>
                 </div>
               )}
 
@@ -1154,57 +1161,57 @@ function FlowEditor() {
                     }}
                     onKeyUp={saveSelection}
                     onMouseUp={saveSelection}
-                    style={{ width:'100%', minHeight: isExpandedEditor ? '200px' : '80px', marginBottom: '10px', padding: '12px', border: '1px solid #ddd', borderRadius: '4px', outline: 'none', backgroundColor: (!primaryNode.data?.isTable || isTableEditing) ? '#fff' : '#f1f5f9', cursor: 'text', overflowY: 'auto', fontSize: isExpandedEditor ? '18px' : 'inherit' }}
+                    style={{ width:'100%', minHeight: isExpandedEditor ? '200px' : '60px', marginBottom: '10px', padding: '8px', border: '1px solid #ddd', borderRadius: '4px', outline: 'none', backgroundColor: (!primaryNode.data?.isTable || isTableEditing) ? '#fff' : '#f1f5f9', cursor: 'text', overflowY: 'auto', fontSize: isExpandedEditor ? '16px' : '13px' }}
                   />
                   
-                  <label style={{fontSize: '10px', color: '#666', fontWeight: 'bold'}}>文字装飾 (※フォーカス有無で自動切替)</label>
+                  <label style={{fontSize: '10px', color: '#666', fontWeight: 'bold'}}>文字装飾</label>
                   
                   <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'5px', marginBottom:'5px', marginTop: '5px' }}>
-                    <button onMouseDown={(e) => e.preventDefault()} onClick={() => applyUnifiedFormat('fontName', 'serif')} style={{cursor:'pointer', border:'1px solid #ccc', padding: '8px', borderRadius: '4px'}}>明朝</button>
-                    <button onMouseDown={(e) => e.preventDefault()} onClick={() => applyUnifiedFormat('fontName', 'sans-serif')} style={{cursor:'pointer', border:'1px solid #ccc', padding: '8px', borderRadius: '4px'}}>ゴシック</button>
-                    <button onMouseDown={(e) => e.preventDefault()} onClick={() => applyUnifiedFormat('bold')} style={{ cursor:'pointer', border:'1px solid #ccc', padding: '8px', borderRadius: '4px', background: '#fff' }}>太字</button>
-                    <button onMouseDown={(e) => e.preventDefault()} onClick={() => applyUnifiedFormat('strikeThrough')} style={{ cursor:'pointer', border:'1px solid #ccc', padding: '8px', borderRadius: '4px', background: '#fff' }}>二重線</button>
+                    <button onMouseDown={(e) => e.preventDefault()} onClick={() => applyUnifiedFormat('fontName', 'serif')} style={{cursor:'pointer', border:'1px solid #ccc', padding: '6px', fontSize:'12px', borderRadius: '4px'}}>明朝</button>
+                    <button onMouseDown={(e) => e.preventDefault()} onClick={() => applyUnifiedFormat('fontName', 'sans-serif')} style={{cursor:'pointer', border:'1px solid #ccc', padding: '6px', fontSize:'12px', borderRadius: '4px'}}>ゴシック</button>
+                    <button onMouseDown={(e) => e.preventDefault()} onClick={() => applyUnifiedFormat('bold')} style={{ cursor:'pointer', border:'1px solid #ccc', padding: '6px', fontSize:'12px', borderRadius: '4px', background: '#fff' }}>太字</button>
+                    <button onMouseDown={(e) => e.preventDefault()} onClick={() => applyUnifiedFormat('strikeThrough')} style={{ cursor:'pointer', border:'1px solid #ccc', padding: '6px', fontSize:'12px', borderRadius: '4px', background: '#fff' }}>二重線</button>
                   </div>
 
                   <div style={{ display: 'flex', gap: '5px', marginTop: '5px', marginBottom: '15px' }}>
-                    {QUICK_TEXT_COLORS.map(c => <button key={c} onMouseDown={(e) => e.preventDefault()} onClick={() => applyUnifiedFormat('foreColor', c)} style={{ width:'30px', height:'30px', backgroundColor:c, border: '1px solid #ddd', borderRadius: '4px', cursor: 'pointer' }} />)}
-                    <input type="color" onChange={(e) => applyUnifiedFormat('foreColor', e.target.value)} style={{width:'30px', height:'30px', cursor: 'pointer', border: 'none', padding: 0}} />
+                    {QUICK_TEXT_COLORS.map(c => <button key={c} onMouseDown={(e) => e.preventDefault()} onClick={() => applyUnifiedFormat('foreColor', c)} style={{ width:'24px', height:'24px', backgroundColor:c, border: '1px solid #ddd', borderRadius: '4px', cursor: 'pointer' }} />)}
+                    <input type="color" onChange={(e) => applyUnifiedFormat('foreColor', e.target.value)} style={{width:'24px', height:'24px', cursor: 'pointer', border: 'none', padding: 0}} />
                   </div>
 
-                  <label style={{fontSize:'11px', fontWeight: 'bold'}}>文字サイズ (px)</label>
+                  <label style={{fontSize:'10px', fontWeight: 'bold'}}>文字サイズ (px)</label>
                   <div style={{display:'flex', alignItems:'center', gap:'8px', marginBottom: '15px'}}>
                     <input type="range" min="1" max="100" value={partialFontSize} onChange={(e) => { const val = Number(e.target.value); setPartialFontSize(val); applyUnifiedFormat('fontSize', `${val}px`); }} style={{flex:1}} />
-                    <input type="number" min="1" max="100" value={partialFontSize} onChange={(e) => { const val = Number(e.target.value); setPartialFontSize(val); applyUnifiedFormat('fontSize', `${val}px`); }} style={{width:'50px', padding:'4px', border:'1px solid #ccc', borderRadius:'4px'}} />
-                    <button onMouseDown={(e) => e.preventDefault()} onClick={handleResetFormat} style={{fontSize:'11px', padding:'4px 8px', border:'1px solid #ccc', borderRadius:'4px', cursor:'pointer', background:'#fff', fontWeight:'bold'}}>標準リセット</button>
+                    <input type="number" min="1" max="100" value={partialFontSize} onChange={(e) => { const val = Number(e.target.value); setPartialFontSize(val); applyUnifiedFormat('fontSize', `${val}px`); }} style={{width:'40px', padding:'2px', fontSize:'11px', border:'1px solid #ccc', borderRadius:'4px'}} />
+                    <button onMouseDown={(e) => e.preventDefault()} onClick={handleResetFormat} style={{fontSize:'10px', padding:'4px 6px', border:'1px solid #ccc', borderRadius:'4px', cursor:'pointer', background:'#fff', fontWeight:'bold'}}>標準へ</button>
                   </div>
               </div>
 
-              <hr style={{margin: '15px 0', border: 'none', borderTop: '1px solid #eee'}} />
+              <hr style={{margin: '10px 0', border: 'none', borderTop: '1px solid #eee'}} />
               <label style={{fontSize: '10px', color: '#666', fontWeight: 'bold'}}>{primaryNode.data?.isTable ? 'レイアウト (選択セルのみ)' : 'レイアウト (図形全体にのみ適用)'}</label>
 
               <div style={{ display:'flex', gap:'5px', marginBottom:'5px', marginTop: '5px' }}>
-                <button onClick={() => handleLayout('left', undefined)} style={{flex:1, cursor:'pointer', border:'1px solid #ccc', padding: '5px', borderRadius: '4px'}}>左</button>
-                <button onClick={() => handleLayout('center', undefined)} style={{flex:1, cursor:'pointer', border:'1px solid #ccc', padding: '5px', borderRadius: '4px'}}>中央</button>
-                <button onClick={() => handleLayout('right', undefined)} style={{flex:1, cursor:'pointer', border:'1px solid #ccc', padding: '5px', borderRadius: '4px'}}>右</button>
+                <button onClick={() => handleLayout('left', undefined)} style={{flex:1, cursor:'pointer', border:'1px solid #ccc', padding: '4px', fontSize:'11px', borderRadius: '4px'}}>左</button>
+                <button onClick={() => handleLayout('center', undefined)} style={{flex:1, cursor:'pointer', border:'1px solid #ccc', padding: '4px', fontSize:'11px', borderRadius: '4px'}}>中央</button>
+                <button onClick={() => handleLayout('right', undefined)} style={{flex:1, cursor:'pointer', border:'1px solid #ccc', padding: '4px', fontSize:'11px', borderRadius: '4px'}}>右</button>
               </div>
               <div style={{ display:'flex', gap:'5px', marginBottom:'15px' }}>
-                <button onClick={() => handleLayout(undefined, 'top')} style={{flex:1, cursor:'pointer', border:'1px solid #ccc', padding: '5px', borderRadius: '4px'}}>上</button>
-                <button onClick={() => handleLayout(undefined, 'middle')} style={{flex:1, cursor:'pointer', border:'1px solid #ccc', padding: '5px', borderRadius: '4px'}}>中</button>
-                <button onClick={() => handleLayout(undefined, 'bottom')} style={{flex:1, cursor:'pointer', border:'1px solid #ccc', padding: '5px', borderRadius: '4px'}}>下</button>
+                <button onClick={() => handleLayout(undefined, 'top')} style={{flex:1, cursor:'pointer', border:'1px solid #ccc', padding: '4px', fontSize:'11px', borderRadius: '4px'}}>上</button>
+                <button onClick={() => handleLayout(undefined, 'middle')} style={{flex:1, cursor:'pointer', border:'1px solid #ccc', padding: '4px', fontSize:'11px', borderRadius: '4px'}}>中</button>
+                <button onClick={() => handleLayout(undefined, 'bottom')} style={{flex:1, cursor:'pointer', border:'1px solid #ccc', padding: '4px', fontSize:'11px', borderRadius: '4px'}}>下</button>
               </div>
 
-              <label style={{fontSize:'11px', fontWeight: 'bold'}}>全体の透明度</label>
-              <input type="range" min="0.1" max="1" step="0.1" value={Number(primaryNode.style?.opacity ?? 1)} onChange={(e) => { takeSnapshot(); updateSelectedNodes({}, { opacity: parseFloat(e.target.value) })}} style={{width:'100%', marginBottom:'15px'}} />
+              <label style={{fontSize:'10px', fontWeight: 'bold'}}>全体の透明度</label>
+              <input type="range" min="0.1" max="1" step="0.1" value={Number(primaryNode.style?.opacity ?? 1)} onChange={(e) => { takeSnapshot(); updateSelectedNodes({}, { opacity: parseFloat(e.target.value) })}} style={{width:'100%', marginBottom:'10px'}} />
 
-              <label style={{fontSize:'11px', fontWeight: 'bold'}}>背景色</label>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: '5px', marginTop: '5px', marginBottom: '15px' }}>
+              <label style={{fontSize:'10px', fontWeight: 'bold'}}>背景色</label>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: '4px', marginTop: '5px', marginBottom: '10px' }}>
                 {PASTEL_COLORS.map(c => <button key={c} onClick={() => { takeSnapshot(); updateSelectedNodes({}, { backgroundColor: c })}} style={{ width:'100%', aspectRatio:'1', backgroundColor:c, border: '1px solid #eee', borderRadius: '4px', cursor: 'pointer' }} />)}
                 <input type="color" value={String(primaryNode.style?.backgroundColor || '#ffffff')} onChange={(e) => { takeSnapshot(); updateSelectedNodes({}, { backgroundColor: e.target.value })}} style={{width:'100%', aspectRatio:'1', cursor: 'pointer', border: 'none', padding: 0}} />
               </div>
 
               {!primaryNode.data?.isShape && !primaryNode.data?.isImage && !primaryNode.data?.isTable && (
                 <>
-                  <button onClick={() => { takeSnapshot(); updateSelectedNodes((n: any) => ({ previewVisible: !n.previewVisible }))}} style={{ width:'100%', marginTop:'10px', padding:'10px', background: primaryNode.data?.previewVisible ? '#3b82f6' : '#fff', color: primaryNode.data?.previewVisible ? '#fff' : '#333', border: '1px solid #ccc', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', transition: 'all 0.2s' }}>
+                  <button onClick={() => { takeSnapshot(); updateSelectedNodes((n: any) => ({ previewVisible: !n.previewVisible }))}} style={{ width:'100%', marginTop:'5px', padding:'8px', fontSize:'12px', background: primaryNode.data?.previewVisible ? '#3b82f6' : '#fff', color: primaryNode.data?.previewVisible ? '#fff' : '#333', border: '1px solid #ccc', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', transition: 'all 0.2s' }}>
                     {primaryNode.data?.previewVisible ? '💬 吹き出しを消す' : '💬 吹き出しを追加'}
                   </button>
                   {primaryNode.data?.previewVisible && (
@@ -1222,63 +1229,72 @@ function FlowEditor() {
                   )}
                 </>
               )}
-              <div style={{ display: 'flex', gap: '5px', marginTop: '20px' }}>
-                <button onClick={handleDuplicate} style={{ flex:1, color: '#333', border: '1px solid #ccc', padding: '10px', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold', background: '#f8f9fa' }}>📄 複製</button>
+              <div style={{ display: 'flex', gap: '5px', marginTop: '15px' }}>
+                <button onClick={handleDuplicate} style={{ flex:1, color: '#333', fontSize:'12px', border: '1px solid #ccc', padding: '8px', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold', background: '#f8f9fa' }}>📄 複製</button>
                 <button onClick={() => { 
                     takeSnapshot(); 
                     const selIds = nodesRef.current.filter((n: any) => n.selected).map((n: any) => n.id);
                     setNodes((nds: any[]) => nds.filter((n: any) => !n.selected)); 
                     setEdges((eds: any[]) => eds.filter((e: any) => !e.selected && !selIds.includes(e.source) && !selIds.includes(e.target)));
                     setSelectedCells({});
-                }} style={{ flex:1, color: 'red', border: '1px solid red', padding: '10px', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold', background: '#fffcfc' }}>🗑️ 削除</button>
+                }} style={{ flex:1, color: 'red', fontSize:'12px', border: '1px solid red', padding: '8px', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold', background: '#fffcfc' }}>🗑️ 削除</button>
               </div>
             </div>
           )}
 
           {selectedEdge && (
-            <div style={{ position:'absolute', right:0, top:0, bottom:0, width:'320px', borderLeft:'1px solid #ddd', padding:'20px', backgroundColor:'#fff', zIndex:1000 }}>
+            <div className="no-print" style={{ position:'absolute', right:0, top:0, bottom:0, width:'300px', borderLeft:'1px solid #ddd', padding:'20px', backgroundColor:'#fff', zIndex:1000, overflowY: 'auto' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
-                <h3 style={{fontSize:'16px', margin: 0}}>線のデザイン</h3>
-                <button onClick={clearSelection} style={{ border: 'none', background: 'none', fontSize: '20px', cursor: 'pointer', padding: '0 5px' }}>×</button>
+                <h3 style={{fontSize:'14px', margin: 0}}>線のデザイン</h3>
+                <button onClick={clearSelection} style={{ border: 'none', background: 'none', fontSize: '18px', cursor: 'pointer', padding: '0 5px' }}>×</button>
               </div>
               <label style={{fontSize:'11px', fontWeight: 'bold'}}>太さ</label>
               <div style={{ display:'flex', gap:'5px', marginBottom:'20px', marginTop: '5px' }}>
-                {[2, 6, 12].map(w => <button key={w} onClick={() => { takeSnapshot(); setEdges((eds: any[]) => eds.map((e: any) => e.selected ? { ...e, style: { ...e.style, strokeWidth: w } } : e)); }} style={{flex:1, padding:'10px', cursor: 'pointer', border: '1px solid #ccc', borderRadius: '4px', background: selectedEdge.style?.strokeWidth === w ? '#ddd' : '#fff'}}>{w === 2 ? '細' : w === 6 ? '中' : '太'}</button>)}
+                {[2, 6, 12].map(w => <button key={w} onClick={() => { takeSnapshot(); setEdges((eds: any[]) => eds.map((e: any) => e.selected ? { ...e, style: { ...e.style, strokeWidth: w } } : e)); }} style={{flex:1, padding:'6px', fontSize:'12px', cursor: 'pointer', border: '1px solid #ccc', borderRadius: '4px', background: selectedEdge.style?.strokeWidth === w ? '#ddd' : '#fff'}}>{w === 2 ? '細' : w === 6 ? '中' : '太'}</button>)}
               </div>
               <label style={{fontSize:'11px', fontWeight: 'bold'}}>種類 (7種)</label>
-              <div style={{ display:'flex', flexDirection:'column', gap:'8px', marginTop: '5px' }}>
+              <div style={{ display:'flex', flexDirection:'column', gap:'5px', marginTop: '5px' }}>
                 {[{l:'普通',c:{}},{l:'片矢印 (→)',c:{arrow:true}},{l:'二重片矢印 (⇒)',c:{double:true,arrow:true}},{l:'両矢印 (↔)',c:{both:true}},{l:'二重両矢印 (⇔)',c:{double:true,both:true}},{l:'論理和 (∧)',c:{label:'∧'}},{l:'論理積 (∨)',c:{label:'∨'}}].map(item => (
-                  <button key={item.l} onClick={() => updateEdgeDesign(item.c)} style={{padding:'10px', border: '1px solid #ccc', background: '#f9f9f9', cursor: 'pointer', borderRadius: '4px', textAlign: 'left', fontWeight: 'bold'}}>{item.l}</button>
+                  <button key={item.l} onClick={() => updateEdgeDesign(item.c)} style={{padding:'8px', fontSize:'12px', border: '1px solid #ccc', background: '#f9f9f9', cursor: 'pointer', borderRadius: '4px', textAlign: 'left', fontWeight: 'bold'}}>{item.l}</button>
                 ))}
               </div>
-              <button onClick={() => { takeSnapshot(); setEdges((eds: any[]) => eds.filter((e: any) => !e.selected)); }} style={{ width:'100%', marginTop:'30px', color: 'red', border: '1px solid red', background: '#fffcfc', padding: '10px', cursor: 'pointer', fontWeight: 'bold', borderRadius: '8px' }}>線を削除</button>
+              <button onClick={() => { takeSnapshot(); setEdges((eds: any[]) => eds.filter((e: any) => !e.selected)); }} style={{ width:'100%', marginTop:'30px', color: 'red', fontSize:'12px', border: '1px solid red', background: '#fffcfc', padding: '8px', cursor: 'pointer', fontWeight: 'bold', borderRadius: '8px' }}>線を削除</button>
             </div>
           )}
         </div>
 
-        <div style={{ padding: '15px', backgroundColor: 'rgba(255,255,255,0.95)', borderTop: '1px solid #eee', display: 'flex', flexWrap: 'wrap', justifyContent: 'center', alignItems: 'center', gap: '10px', zIndex: 1001, boxShadow: '0 -4px 10px rgba(0,0,0,0.03)' }}>
-          <button onClick={undo} disabled={past.length === 0} style={{ ...actionBtnStyle, opacity: past.length === 0 ? 0.4 : 1, cursor: past.length === 0 ? 'default' : 'pointer' }}>↩️ 戻る</button>
-          <button onClick={redo} disabled={future.length === 0} style={{ ...actionBtnStyle, opacity: future.length === 0 ? 0.4 : 1, cursor: future.length === 0 ? 'default' : 'pointer' }}>↪️ やり直し</button>
-          <div style={{ width: '1px', height: '30px', backgroundColor: '#ddd', margin: '0 5px' }} />
-          <button onClick={handleManualSave} style={{ ...primaryBtnStyle, backgroundColor: '#059669', boxShadow: '0 4px 6px rgba(5, 150, 105, 0.3)' }}>💾 手動保存</button>
-          <div style={{ width: '1px', height: '30px', backgroundColor: '#ddd', margin: '0 5px' }} />
-          <button onClick={goBack} disabled={isRoot} style={{ ...actionBtnStyle, opacity: isRoot ? 0.4 : 1, cursor: isRoot ? 'default' : 'pointer' }}>🔙 1つ前へ</button>
-          <button onClick={goTop} disabled={isRoot} style={{ ...actionBtnStyle, opacity: isRoot ? 0.4 : 1, cursor: isRoot ? 'default' : 'pointer' }}>🏠 TOP層へ</button>
-          <div style={{ width: '1px', height: '30px', backgroundColor: '#ddd', margin: '0 5px' }} />
-          <button onClick={() => setViewport({ x: 0, y: 0, zoom: 1 }, { duration: 800 })} style={actionBtnStyle}>🎯 中央リセット</button>
-          <button onClick={() => addNode('text')} style={primaryBtnStyle}>📝 テキスト</button>
-          <button onClick={() => addNode('image')} style={{ ...primaryBtnStyle, backgroundColor: '#10b981', boxShadow: '0 4px 6px rgba(16, 185, 129, 0.3)' }}>📸 画像</button>
-          <button onClick={() => addNode('shape')} style={{ ...primaryBtnStyle, backgroundColor: '#f59e0b', boxShadow: '0 4px 6px rgba(245, 158, 11, 0.3)' }}>🟦 図形</button>
-          <button onClick={() => addNode('table')} style={{ ...primaryBtnStyle, backgroundColor: '#6366f1', boxShadow: '0 4px 6px rgba(99, 102, 241, 0.3)' }}>🧮 表</button>
-          <div style={{ width: '1px', height: '30px', backgroundColor: '#ddd', margin: '0 5px' }} />
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', fontWeight: 'bold', color: '#555', backgroundColor: '#fff', padding: '6px 12px', borderRadius: '8px', border: '1px solid #ccc' }}>
-            <span>🎨 階層の背景色</span>
-            <input type="color" value={levelData[currentLevel]?.bgColor || '#ffffff'} onChange={(e) => {
-              const newColor = e.target.value;
-              setLevelData(prev => ({ ...prev, [currentLevel]: { ...(prev[currentLevel] || {}), bgColor: newColor } }));
-            }} style={{width:'24px', height:'24px', cursor:'pointer', border: 'none', padding: 0, borderRadius: '4px'}} />
+        {/* ★ 下部メニュー（開閉可能＆1行に最適化＆印刷ボタン追加） */}
+        {isBottomBarOpen ? (
+          <div className="no-print" style={{ padding: '8px 10px', backgroundColor: 'rgba(255,255,255,0.95)', borderTop: '1px solid #eee', display: 'flex', flexWrap: 'nowrap', overflowX: 'auto', justifyContent: 'center', alignItems: 'center', gap: '6px', zIndex: 1001, boxShadow: '0 -4px 10px rgba(0,0,0,0.03)', backdropFilter: 'blur(4px)' }}>
+            <button onClick={undo} disabled={past.length === 0} style={{ ...actionBtnStyle, opacity: past.length === 0 ? 0.4 : 1, cursor: past.length === 0 ? 'default' : 'pointer' }}>↩️ 戻る</button>
+            <button onClick={redo} disabled={future.length === 0} style={{ ...actionBtnStyle, opacity: future.length === 0 ? 0.4 : 1, cursor: future.length === 0 ? 'default' : 'pointer' }}>↪️ 進む</button>
+            <div style={{ width: '1px', height: '24px', backgroundColor: '#ddd', margin: '0 2px' }} />
+            <button onClick={handleManualSave} style={{ ...primaryBtnStyle, backgroundColor: '#059669', boxShadow: '0 2px 4px rgba(5, 150, 105, 0.3)' }}>💾 保存</button>
+            <div style={{ width: '1px', height: '24px', backgroundColor: '#ddd', margin: '0 2px' }} />
+            <button onClick={goBack} disabled={isRoot} style={{ ...actionBtnStyle, opacity: isRoot ? 0.4 : 1, cursor: isRoot ? 'default' : 'pointer' }}>🔙 前へ</button>
+            <button onClick={goTop} disabled={isRoot} style={{ ...actionBtnStyle, opacity: isRoot ? 0.4 : 1, cursor: isRoot ? 'default' : 'pointer' }}>🏠 TOP</button>
+            <div style={{ width: '1px', height: '24px', backgroundColor: '#ddd', margin: '0 2px' }} />
+            <button onClick={() => setViewport({ x: 0, y: 0, zoom: 1 }, { duration: 800 })} style={actionBtnStyle}>🎯 中央</button>
+            <button onClick={() => window.print()} style={{ ...actionBtnStyle, backgroundColor: '#f1f5f9' }}>🖨️ 印刷</button>
+            <div style={{ width: '1px', height: '24px', backgroundColor: '#ddd', margin: '0 2px' }} />
+            <button onClick={() => addNode('text')} style={primaryBtnStyle}>📝 テキスト</button>
+            <button onClick={() => addNode('image')} style={{ ...primaryBtnStyle, backgroundColor: '#10b981', boxShadow: '0 2px 4px rgba(16, 185, 129, 0.3)' }}>📸 画像</button>
+            <button onClick={() => addNode('shape')} style={{ ...primaryBtnStyle, backgroundColor: '#f59e0b', boxShadow: '0 2px 4px rgba(245, 158, 11, 0.3)' }}>🟦 図形</button>
+            <button onClick={() => addNode('table')} style={{ ...primaryBtnStyle, backgroundColor: '#6366f1', boxShadow: '0 2px 4px rgba(99, 102, 241, 0.3)' }}>🧮 表</button>
+            <div style={{ width: '1px', height: '24px', backgroundColor: '#ddd', margin: '0 2px' }} />
+            <div style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '11px', fontWeight: 'bold', color: '#555', backgroundColor: '#fff', padding: '4px 8px', borderRadius: '6px', border: '1px solid #ccc' }}>
+              <span>🎨 背景</span>
+              <input type="color" value={levelData[currentLevel]?.bgColor || '#ffffff'} onChange={(e) => {
+                const newColor = e.target.value;
+                setLevelData(prev => ({ ...prev, [currentLevel]: { ...(prev[currentLevel] || {}), bgColor: newColor } }));
+              }} style={{width:'16px', height:'16px', cursor:'pointer', border: 'none', padding: 0, borderRadius: '4px'}} />
+            </div>
+            {/* 下部バーを隠すボタン */}
+            <button onClick={() => setIsBottomBarOpen(false)} style={{ padding: '4px 8px', marginLeft: 'auto', fontSize: '10px', background: '#e2e8f0', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold', color: '#475569' }}>▼ 隠す</button>
           </div>
-        </div>
+        ) : (
+          <button className="no-print" onClick={() => setIsBottomBarOpen(true)} style={{ position: 'absolute', bottom: 10, right: 10, zIndex: 100, padding: '4px 8px', fontSize: '10px', background: '#e2e8f0', border: '1px solid #cbd5e1', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold', color: '#475569', boxShadow: '0 -2px 4px rgba(0,0,0,0.1)' }}>▲ ツールバーを表示</button>
+        )}
       </div>
     </div>
   );
