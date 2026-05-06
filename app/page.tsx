@@ -530,18 +530,27 @@ function FlowEditor() {
   const addNode = useCallback((type: 'text' | 'image' | 'shape' | 'table') => {
     takeSnapshot();
     const id = `node-${Date.now()}`;
-    let data: any = { content: '項目', previewVisible: false, previewStyle: { opacity: 0.7, offsetX: 0, offsetY: -150, width: 180, height: 120 }, connectionDir: 'vertical' };
+    
+    // ★ 親が選択されている場合、その設定（縦/横）を引き継ぐ
+    const selNodes = nodesRef.current.filter(n => n.selected);
+    const parent = selNodes.length === 1 ? selNodes[0] : null;
+    let connectionDir = 'vertical';
+    if (parent && parent.data?.connectionDir) {
+        connectionDir = parent.data.connectionDir;
+    }
+
+    let data: any = { content: '項目', previewVisible: false, previewStyle: { opacity: 0.7, offsetX: 0, offsetY: -150, width: 180, height: 120 }, connectionDir };
     let style: any = { backgroundColor: '#ffffff', color: '#000', borderRadius: '12px', fontSize: '14px', width: 200, height: 100, display: 'flex', alignItems: 'center', justifyContent: 'center', textAlign: 'center' };
     
     if (type === 'image') { fileInputRef.current?.click(); return; }
     
     if (type === 'shape') {
-      data = { content: '', isShape: true, shapeType: 'rect', keepRatio: false, connectionDir: 'vertical' };
+      data = { content: '', isShape: true, shapeType: 'rect', keepRatio: false, connectionDir };
       style = { ...style, backgroundColor: '#eee', borderRadius: '4px', border: '3px solid #333' };
     }
     if (type === 'table') {
       data = { 
-          isTable: true, rows: 2, cols: 2, connectionDir: 'vertical',
+          isTable: true, rows: 2, cols: 2, connectionDir,
           cells: {
               "0-0": { content: "セル", style: { border: '1px solid #ccc' } }, "0-1": { content: "セル", style: { border: '1px solid #ccc' } },
               "1-0": { content: "セル", style: { border: '1px solid #333' } }, "1-1": { content: "セル", style: { border: '1px solid #333' } }
@@ -550,12 +559,8 @@ function FlowEditor() {
       style = { ...style, width: 300, height: 150, padding: 0, backgroundColor: '#fff', display: 'block', borderRadius: '8px', border: '2px solid #ccc' };
     }
 
-    const selNodes = nodesRef.current.filter(n => n.selected);
-    const parent = selNodes.length === 1 ? selNodes[0] : null;
-
     if (parent && (type === 'text' || type === 'table')) {
-        // ★ 自動で引く線のハンドル位置を「縦繋ぎ/横繋ぎ」設定に合わせて指定
-        const isHorizontal = parent.data?.connectionDir === 'horizontal';
+        const isHorizontal = connectionDir === 'horizontal';
         const sourceHandle = isHorizontal ? 'right' : 'bottom';
         const targetHandle = isHorizontal ? 'left' : 'top';
 
@@ -721,6 +726,8 @@ function FlowEditor() {
     return [centerNode, ...nodes.map(n => {
       const isPreview = Boolean(n.data?.previewVisible && !n.data?.isShape && !n.data?.isImage && !n.data?.isTable);
       let previewElement: React.ReactNode = null;
+      
+      const dir = n.data?.connectionDir || 'vertical';
 
       if (isPreview) {
         const w1 = Number(n.style?.width) || 200; const h1 = Number(n.style?.height) || 100;
@@ -753,7 +760,6 @@ function FlowEditor() {
           </React.Fragment>
         );
       } else if (n.data?.isTable) {
-        // ★ 表のドラッグハンドルから不要な文字を削除
         previewElement = (
             <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column' }}>
                 <div className="custom-drag-handle" style={{ height: '14px', background: '#e2e8f0', cursor: 'grab', borderTopLeftRadius: '6px', borderTopRightRadius: '6px' }}></div>
@@ -808,18 +814,27 @@ function FlowEditor() {
       return {
         ...n,
         draggable: n.data?.isImage && n.data?.isCropping ? false : true,
+        sourcePosition: dir === 'horizontal' ? Position.Right : Position.Bottom,
+        targetPosition: dir === 'horizontal' ? Position.Left : Position.Top,
         data: {
           ...n.data,
           label: (
             <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: n.style?.alignItems || 'center', justifyContent: n.style?.justifyContent || 'center', position: 'relative' }}>
               
-              {/* ★ 全方位に接続ポイント（黒い点）を配置し、どこからでも自由に繋げるように設定 */}
+              {/* ★ 向きに応じて接続ポイントを2つだけに制限してスッキリさせる */}
               {n.id !== 'center-mark' && (
                 <>
-                  <Handle type="source" position={Position.Top} id="top" />
-                  <Handle type="source" position={Position.Bottom} id="bottom" />
-                  <Handle type="source" position={Position.Left} id="left" />
-                  <Handle type="source" position={Position.Right} id="right" />
+                  {dir === 'horizontal' ? (
+                    <>
+                      <Handle type="source" position={Position.Left} id="left" />
+                      <Handle type="source" position={Position.Right} id="right" />
+                    </>
+                  ) : (
+                    <>
+                      <Handle type="source" position={Position.Top} id="top" />
+                      <Handle type="source" position={Position.Bottom} id="bottom" />
+                    </>
+                  )}
                 </>
               )}
 
@@ -847,11 +862,9 @@ function FlowEditor() {
                 <div className="html-content" style={{ pointerEvents: 'none', width: '100%', color: n.style?.color || '#000', fontFamily: n.style?.fontFamily || 'sans-serif', fontSize: n.style?.fontSize || '14px', fontWeight: n.style?.fontWeight || 'normal', textDecoration: n.style?.textDecoration || 'none', whiteSpace: 'pre-wrap', lineHeight: '1.2', textAlign: n.style?.textAlign || 'center' }} dangerouslySetInnerHTML={{ __html: renderHTMLWithMath(n.data?.content) }} />
               ) : null}
 
-              {/* ★ リサイズの青枠線を1pxの極細に変更、かつ画像の縦横比固定を解除 */}
               {n.id !== 'center-mark' ? (
                  <NodeResizer 
-                    minWidth={30} minHeight={30} 
-                    keepAspectRatio={!!n.data?.keepRatio} 
+                    minWidth={30} minHeight={30} keepAspectRatio={!!n.data?.keepRatio} 
                     isVisible={n.selected} 
                     lineStyle={{ border: n.data?.isCropping ? '2px dashed #ef4444' : '1px solid #3b82f6', zIndex: 100 }} 
                     handleStyle={{ background: n.data?.isCropping ? '#ef4444' : '#3b82f6', zIndex: 100, borderRadius: '50%' }} 
@@ -911,7 +924,6 @@ function FlowEditor() {
 
   const isTableEditing = primaryNode?.data?.isTable && (selectedCells[primaryNode.id]?.length || 0) > 0;
   
-  // ★ 文字を入力したあと、再選択した時に右側のエディタパネルが正しく同期されるよう修正
   useEffect(() => {
     if (editorRef.current) {
         if (primaryNode && !primaryNode.data?.isTable) {
@@ -989,7 +1001,6 @@ function FlowEditor() {
         </div>
 
         <div style={{ flexGrow: 1, position: 'relative' }}>
-          {/* ★ connectionModeをLooseにすることで、どの点同士でも自由につなげるようになります */}
           <ReactFlow 
              connectionMode={ConnectionMode.Loose}
              nodes={flowNodes} edges={edges} edgeTypes={edgeTypes} elevateNodesOnSelect={false} multiSelectionKeyCode={['Shift', 'Meta', 'Control']}
