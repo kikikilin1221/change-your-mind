@@ -2,7 +2,7 @@
 import React, { useState, useCallback, useMemo, useRef, useEffect } from 'react';
 import { 
   ReactFlow, Background, Controls, applyNodeChanges, applyEdgeChanges, addEdge,
-  NodeResizer, ReactFlowProvider, useStore, MarkerType, getBezierPath, EdgeProps, BaseEdge, EdgeLabelRenderer, useReactFlow
+  NodeResizer, ReactFlowProvider, useStore, MarkerType, getBezierPath, EdgeProps, BaseEdge, EdgeLabelRenderer, useReactFlow, Position
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import katex from 'katex';
@@ -55,7 +55,6 @@ function SmartGuides({ guides }: { guides: { lineX?: number, lineY?: number } })
   );
 }
 
-// --- 数式とHTMLの統合レンダラー ---
 const renderHTMLWithMath = (html: string) => {
   if (!html) return '';
   try {
@@ -67,23 +66,16 @@ const renderHTMLWithMath = (html: string) => {
   }
 };
 
-// ★ 【改善】HTMLタグを綺麗に剥がして「1行目のテキストのみ」を抽出する関数
 const extractFirstLineText = (html: string) => {
   if (!html) return '名称未設定';
-  // 仮のDOM要素を作ってHTMLを安全にテキスト化する
   const tempDiv = document.createElement('div');
   tempDiv.innerHTML = html.replace(/<br\s*[\/]?>/gi, '\n').replace(/<\/div>/gi, '\n').replace(/<\/p>/gi, '\n');
   const text = tempDiv.textContent || tempDiv.innerText || '';
-  
-  // 行ごとに分割し、空行を除去して1行目を取得
   const lines = text.split('\n').map(l => l.trim()).filter(l => l.length > 0);
   const firstLine = lines[0] || '名称未設定';
-  
-  // 15文字を超えたら「...」で省略
   return firstLine.length > 15 ? firstLine.substring(0, 15) + '...' : firstLine;
 };
 
-// クラッシュ防止用の安全なクローン関数
 const safeCloneNodes = (nds: any[]) => nds.map(n => ({ ...n, data: { ...n.data }, style: { ...n.style }, position: { ...n.position } }));
 const safeCloneEdges = (eds: any[]) => eds.map(e => ({ ...e, data: { ...e.data }, style: { ...e.style } }));
 
@@ -112,6 +104,11 @@ function FlowEditor() {
   
   const [partialFontSize, setPartialFontSize] = useState<number>(14);
   
+  const [selectedCells, setSelectedCells] = useState<Record<string, string[]>>({});
+  const [tableBorderWidth, setTableBorderWidth] = useState('1px');
+  const [tableBorderStyle, setTableBorderStyle] = useState('solid');
+  const [tableBorderColor, setTableBorderColor] = useState('#000000');
+  
   const previewDragRef = useRef<{ id: string, startX: number, startY: number, initX: number, initY: number, moved: boolean } | null>(null);
   const imageCropDragRef = useRef<{ id: string, startX: number, startY: number, initX: number, initY: number } | null>(null);
   
@@ -137,6 +134,7 @@ function FlowEditor() {
   const clearSelection = useCallback(() => {
     setNodes((nds: any[]) => nds.map((n: any) => ({...n, selected: false})));
     setEdges((eds: any[]) => eds.map((e: any) => ({...e, selected: false})));
+    setSelectedCells({});
   }, []);
 
   const takeSnapshot = useCallback(() => {
@@ -163,12 +161,11 @@ function FlowEditor() {
   }, [future]);
 
   useEffect(() => {
-    if (primaryNode) {
+    if (primaryNode && !primaryNode.data?.isTable) {
         setPartialFontSize(parseInt(String(primaryNode.style?.fontSize || 14)));
     }
-  }, [primaryNode?.id, primaryNode?.style?.fontSize]);
+  }, [primaryNode?.id, primaryNode?.style?.fontSize, primaryNode?.data?.isTable]);
 
-  // 初期ロード時のみLocalStorageから読み込む
   useEffect(() => {
     const saved = localStorage.getItem('my-logic-files');
     if (saved) {
@@ -183,50 +180,17 @@ function FlowEditor() {
     }
   }, []);
 
-  useEffect(() => {
-    if (editorRef.current) {
-        if (primaryNode) {
-            if (editorRef.current.innerHTML !== (primaryNode.data.content || '')) {
-                editorRef.current.innerHTML = primaryNode.data.content || '';
-            }
-        } else {
-            editorRef.current.innerHTML = '';
-        }
-    }
-  }, [primaryNode?.id]);
-
-  // ★ 【改善】手動セーブ機能の実装（自動保存によるクラッシュを防止）
   const handleManualSave = useCallback(() => {
     setFiles(prev => {
         const currentFileData = prev[activeFileId];
         if (!currentFileData) return prev;
-        
-        const updatedLevelData = {
-            ...levelData,
-            [currentLevel]: { 
-                nodes: safeCloneNodes(nodesRef.current), 
-                edges: safeCloneEdges(edgesRef.current), 
-                bgColor: levelData[currentLevel]?.bgColor, 
-                label: currentLabelRef.current 
-            }
-        };
-        
-        const updatedFiles = {
-            ...prev,
-            [activeFileId]: {
-                ...currentFileData,
-                levelData: updatedLevelData,
-                currentLevel,
-                currentLabel: currentLabelRef.current
-            }
-        };
-        
-        // LocalStorageへの書き込みはここだけで行う
+        const updatedLevelData = { ...levelData, [currentLevel]: { nodes: safeCloneNodes(nodesRef.current), edges: safeCloneEdges(edgesRef.current), bgColor: levelData[currentLevel]?.bgColor, label: currentLabelRef.current } };
+        const updatedFiles = { ...prev, [activeFileId]: { ...currentFileData, levelData: updatedLevelData, currentLevel, currentLabel: currentLabelRef.current } };
         localStorage.setItem('my-logic-files', JSON.stringify(updatedFiles));
         localStorage.setItem('my-logic-active-id', activeFileId);
         return updatedFiles;
     });
-    alert('💾 データを保存しました！\n（バグ等でリロードしてもここから再開できます）');
+    alert('💾 データを保存しました！');
   }, [activeFileId, currentLevel, levelData]);
 
   const loadFileInitial = (id: string, allFiles = files) => {
@@ -236,22 +200,15 @@ function FlowEditor() {
     setActiveFileId(id); setLevelData(loadedLevelData); setCurrentLevel(initialLevel); 
     setCurrentLabel(loadedLevelData[initialLevel]?.label || target.currentLabel || 'TOP層');
     setNodes(loadedLevelData[initialLevel]?.nodes || []); setEdges(loadedLevelData[initialLevel]?.edges || []);
-    setHistoryLevel([]); setPast([]); setFuture([]);
+    setHistoryLevel([]); setPast([]); setFuture([]); setSelectedCells({});
   };
 
   const switchFile = (newId: string) => {
-    // 別のファイルへ移る前に、メモリ上の現在の階層データを保存
     setFiles(prev => {
         const currentFileData = prev[activeFileId];
         if (currentFileData) {
-            const updatedLevelData = {
-                ...levelData,
-                [currentLevel]: { nodes: safeCloneNodes(nodesRef.current), edges: safeCloneEdges(edgesRef.current), bgColor: levelData[currentLevel]?.bgColor, label: currentLabelRef.current }
-            };
-            return {
-                ...prev,
-                [activeFileId]: { ...currentFileData, levelData: updatedLevelData, currentLevel, currentLabel: currentLabelRef.current }
-            };
+            const updatedLevelData = { ...levelData, [currentLevel]: { nodes: safeCloneNodes(nodesRef.current), edges: safeCloneEdges(edgesRef.current), bgColor: levelData[currentLevel]?.bgColor, label: currentLabelRef.current } };
+            return { ...prev, [activeFileId]: { ...currentFileData, levelData: updatedLevelData, currentLevel, currentLabel: currentLabelRef.current } };
         }
         return prev;
     });
@@ -266,7 +223,7 @@ function FlowEditor() {
           setLevelData(nextLevelData); setCurrentLevel(nextLevel); 
           setCurrentLabel(nextLevelData[nextLevel]?.label || target.currentLabel || 'TOP層');
           setNodes(nextLevelData[nextLevel]?.nodes || []); setEdges(nextLevelData[nextLevel]?.edges || []);
-          setPast([]); setFuture([]); savedRangeRef.current = null;
+          setPast([]); setFuture([]); savedRangeRef.current = null; setSelectedCells({});
         }
         return currentFiles;
       });
@@ -298,15 +255,15 @@ function FlowEditor() {
 
   const saveSelection = () => {
     const sel = window.getSelection();
-    if (sel && sel.rangeCount > 0) {
-        savedRangeRef.current = sel.getRangeAt(0).cloneRange();
-    }
+    if (sel && sel.rangeCount > 0) savedRangeRef.current = sel.getRangeAt(0).cloneRange();
   };
 
   const applyUnifiedFormat = (type: 'fontName' | 'bold' | 'strikeThrough' | 'foreColor' | 'fontSize', value: any = '') => {
       takeSnapshot();
       const isActive = document.activeElement === editorRef.current;
       
+      const isTableEditing = primaryNode?.data?.isTable && (selectedCells[primaryNode.id]?.length || 0) > 0;
+
       if (isActive && editorRef.current) {
           const selection = window.getSelection();
           if (!selection) return;
@@ -336,30 +293,55 @@ function FlowEditor() {
           } else {
               document.execCommand(type, false, value);
           }
-          
           if (selection.rangeCount > 0) savedRangeRef.current = selection.getRangeAt(0).cloneRange();
-          updateSelectedNodes({ content: editorRef.current.innerHTML });
+          
+          if (isTableEditing) {
+              const activeCells = selectedCells[primaryNode.id];
+              setNodes(nds => nds.map(n => n.id === primaryNode.id ? {
+                  ...n, data: { ...n.data, cells: { ...n.data.cells, [activeCells[0]]: { ...n.data.cells[activeCells[0]], content: editorRef.current!.innerHTML } } }
+              } : n));
+          } else {
+              updateSelectedNodes({ content: editorRef.current.innerHTML });
+          }
       } else {
-          const styleKeyMap: any = { fontName: 'fontFamily', bold: 'fontWeight', strikeThrough: 'textDecoration', foreColor: 'color', fontSize: 'fontSize' };
-          const styleKey = styleKeyMap[type];
-          let styleVal = value;
-          if (type === 'bold') styleVal = primaryNode?.style?.fontWeight === 'bold' ? 'normal' : 'bold';
-          if (type === 'strikeThrough') styleVal = primaryNode?.style?.textDecoration === 'line-through double' ? 'none' : 'line-through double';
+          if (isTableEditing) {
+              const activeCells = selectedCells[primaryNode.id];
+              setNodes(nds => nds.map(n => {
+                  if (n.id !== primaryNode.id) return n;
+                  const newCells = { ...n.data.cells };
+                  activeCells.forEach(cId => {
+                      const cell = newCells[cId] || { content: '', style: {} };
+                      let newStyle = { ...cell.style };
+                      if (type === 'fontSize') newStyle.fontSize = value;
+                      if (type === 'foreColor') newStyle.color = value;
+                      if (type === 'fontName') newStyle.fontFamily = value;
+                      if (type === 'bold') newStyle.fontWeight = newStyle.fontWeight === 'bold' ? 'normal' : 'bold';
+                      if (type === 'strikeThrough') newStyle.textDecoration = newStyle.textDecoration === 'line-through' ? 'none' : 'line-through';
+                      newCells[cId] = { ...cell, style: newStyle };
+                  });
+                  return { ...n, data: { ...n.data, cells: newCells } };
+              }));
+          } else {
+              const styleKeyMap: any = { fontName: 'fontFamily', bold: 'fontWeight', strikeThrough: 'textDecoration', foreColor: 'color', fontSize: 'fontSize' };
+              const styleKey = styleKeyMap[type];
+              let styleVal = value;
+              if (type === 'bold') styleVal = primaryNode?.style?.fontWeight === 'bold' ? 'normal' : 'bold';
+              if (type === 'strikeThrough') styleVal = primaryNode?.style?.textDecoration === 'line-through double' ? 'none' : 'line-through double';
 
-          setNodes((nds: any[]) => nds.map((n: any) => {
-              if (!n.selected) return n;
-              const tempDiv = document.createElement('div');
-              tempDiv.innerHTML = n.data?.content || '';
-              tempDiv.querySelectorAll('*').forEach(el => {
-                  const e = el as HTMLElement;
-                  if (type === 'fontSize') { if(e.style.fontSize) e.style.fontSize = ''; if(e.tagName==='FONT') e.removeAttribute('size'); }
-                  if (type === 'foreColor') { if(e.style.color) e.style.color = ''; if(e.tagName==='FONT') e.removeAttribute('color'); }
-                  if (type === 'fontName') { if(e.style.fontFamily) e.style.fontFamily = ''; if(e.tagName==='FONT') e.removeAttribute('face'); }
-                  if (type === 'bold') { if(e.style.fontWeight) e.style.fontWeight = ''; if(e.tagName==='B'||e.tagName==='STRONG') e.style.fontWeight = 'normal'; }
-                  if (type === 'strikeThrough') { if(e.style.textDecoration) e.style.textDecoration = ''; if(e.tagName==='STRIKE') e.style.textDecoration = 'none'; }
-              });
-              return { ...n, data: { ...n.data, content: tempDiv.innerHTML }, style: { ...n.style, [styleKey]: styleVal } };
-          }));
+              setNodes((nds: any[]) => nds.map((n: any) => {
+                  if (!n.selected) return n;
+                  const tempDiv = document.createElement('div'); tempDiv.innerHTML = n.data?.content || '';
+                  tempDiv.querySelectorAll('*').forEach(el => {
+                      const e = el as HTMLElement;
+                      if (type === 'fontSize') { if(e.style.fontSize) e.style.fontSize = ''; if(e.tagName==='FONT') e.removeAttribute('size'); }
+                      if (type === 'foreColor') { if(e.style.color) e.style.color = ''; if(e.tagName==='FONT') e.removeAttribute('color'); }
+                      if (type === 'fontName') { if(e.style.fontFamily) e.style.fontFamily = ''; if(e.tagName==='FONT') e.removeAttribute('face'); }
+                      if (type === 'bold') { if(e.style.fontWeight) e.style.fontWeight = ''; if(e.tagName==='B'||e.tagName==='STRONG') e.style.fontWeight = 'normal'; }
+                      if (type === 'strikeThrough') { if(e.style.textDecoration) e.style.textDecoration = ''; if(e.tagName==='STRIKE') e.style.textDecoration = 'none'; }
+                  });
+                  return { ...n, data: { ...n.data, content: tempDiv.innerHTML }, style: { ...n.style, [styleKey]: styleVal } };
+              }));
+          }
       }
   };
 
@@ -367,6 +349,7 @@ function FlowEditor() {
       takeSnapshot();
       setPartialFontSize(14);
       const isActive = document.activeElement === editorRef.current;
+      const isTableEditing = primaryNode?.data?.isTable && (selectedCells[primaryNode.id]?.length || 0) > 0;
       
       if (isActive && editorRef.current) {
           editorRef.current.focus();
@@ -395,27 +378,90 @@ function FlowEditor() {
               }
               savedRangeRef.current = selection.getRangeAt(0).cloneRange();
           }
-          updateSelectedNodes({ content: editorRef.current.innerHTML });
+          if (isTableEditing) {
+              const activeCells = selectedCells[primaryNode.id];
+              setNodes(nds => nds.map(n => n.id === primaryNode.id ? {
+                  ...n, data: { ...n.data, cells: { ...n.data.cells, [activeCells[0]]: { ...n.data.cells[activeCells[0]], content: editorRef.current!.innerHTML } } }
+              } : n));
+          } else {
+              updateSelectedNodes({ content: editorRef.current.innerHTML });
+          }
       } else {
-          setNodes((nds: any[]) => nds.map((n: any) => {
-              if (!n.selected) return n;
-              const tempDiv = document.createElement('div');
-              tempDiv.innerHTML = n.data?.content || '';
-              tempDiv.querySelectorAll('*').forEach(el => {
-                  const e = el as HTMLElement;
-                  e.style.fontSize = ''; e.style.color = ''; e.style.fontFamily = ''; e.style.fontWeight = ''; e.style.textDecoration = '';
-                  if (e.tagName==='FONT' || e.tagName==='B' || e.tagName==='STRONG' || e.tagName==='STRIKE') e.outerHTML = e.innerHTML;
-              });
-              return { ...n, data: { ...n.data, content: tempDiv.innerHTML }, style: { ...n.style, fontSize: '14px', color: '#000000', fontFamily: 'sans-serif', fontWeight: 'normal', textDecoration: 'none' } };
-          }));
+          if (isTableEditing) {
+              const activeCells = selectedCells[primaryNode.id];
+              setNodes(nds => nds.map(n => {
+                  if (n.id !== primaryNode.id) return n;
+                  const newCells = { ...n.data.cells };
+                  activeCells.forEach(cId => {
+                      newCells[cId] = { ...newCells[cId], style: { border: newCells[cId]?.style?.border || '1px solid #ccc' } };
+                  });
+                  return { ...n, data: { ...n.data, cells: newCells } };
+              }));
+          } else {
+              setNodes((nds: any[]) => nds.map((n: any) => {
+                  if (!n.selected) return n;
+                  const tempDiv = document.createElement('div'); tempDiv.innerHTML = n.data?.content || '';
+                  tempDiv.querySelectorAll('*').forEach(el => {
+                      const e = el as HTMLElement;
+                      e.style.fontSize = ''; e.style.color = ''; e.style.fontFamily = ''; e.style.fontWeight = ''; e.style.textDecoration = '';
+                      if (e.tagName==='FONT' || e.tagName==='B' || e.tagName==='STRONG' || e.tagName==='STRIKE') e.outerHTML = e.innerHTML;
+                  });
+                  return { ...n, data: { ...n.data, content: tempDiv.innerHTML }, style: { ...n.style, fontSize: '14px', color: '#000000', fontFamily: 'sans-serif', fontWeight: 'normal', textDecoration: 'none' } };
+              }));
+          }
       }
+  };
+
+  const handleLayout = (hAlign?: string, vAlign?: string) => {
+      takeSnapshot();
+      if (primaryNode?.data?.isTable && (selectedCells[primaryNode.id]?.length || 0) > 0) {
+          const activeCells = selectedCells[primaryNode.id];
+          setNodes(nds => nds.map(n => {
+              if (n.id !== primaryNode.id) return n;
+              const newCells = { ...n.data.cells };
+              activeCells.forEach(cId => {
+                  const cell = newCells[cId] || { content: '', style: {} };
+                  let newStyle = { ...cell.style };
+                  if (hAlign) newStyle.textAlign = hAlign;
+                  if (vAlign) newStyle.verticalAlign = vAlign;
+                  newCells[cId] = { ...cell, style: newStyle };
+              });
+              return { ...n, data: { ...n.data, cells: newCells } };
+          }));
+      } else {
+          let styleUpdate: any = {};
+          if (hAlign) {
+              styleUpdate.textAlign = hAlign;
+              styleUpdate.justifyContent = hAlign === 'left' ? 'flex-start' : hAlign === 'right' ? 'flex-end' : 'center';
+          }
+          if (vAlign) {
+              styleUpdate.alignItems = vAlign === 'top' ? 'flex-start' : vAlign === 'bottom' ? 'flex-end' : 'center';
+          }
+          updateSelectedNodes({}, styleUpdate);
+      }
+  };
+
+  const applyTableBorder = () => {
+      takeSnapshot();
+      if (!primaryNode || !primaryNode.data.isTable) return;
+      const activeCells = selectedCells[primaryNode.id] || [];
+      if (activeCells.length === 0) return;
+      setNodes(nds => nds.map(n => {
+          if (n.id !== primaryNode.id) return n;
+          const newCells = { ...n.data.cells };
+          activeCells.forEach(cId => {
+              newCells[cId] = {
+                  ...newCells[cId],
+                  style: { ...newCells[cId]?.style, border: `${tableBorderWidth} ${tableBorderStyle} ${tableBorderColor}` }
+              };
+          });
+          return { ...n, data: { ...n.data, cells: newCells } };
+      }));
   };
 
   const handleCopy = useCallback(() => {
     const selected = nodesRef.current.filter(n => n.selected);
-    if (selected.length > 0) {
-        copiedNodesRef.current = safeCloneNodes(selected);
-    }
+    if (selected.length > 0) copiedNodesRef.current = safeCloneNodes(selected);
   }, []);
 
   const handlePaste = useCallback(() => {
@@ -437,7 +483,6 @@ function FlowEditor() {
       handleCopy(); setTimeout(handlePaste, 10);
   }, [handleCopy, handlePaste]);
 
-  // ★ 階層に入るとき、移動前に状態を確実に保存
   const enterLevel = useCallback((id: string, defaultLabel: string) => {
     setLevelData(prev => ({ 
         ...prev, 
@@ -446,10 +491,10 @@ function FlowEditor() {
 
     setNodes((nds: any[]) => {
       const target = nds.find((n: any) => n.id === id);
-      if (target?.data?.isShape || target?.data?.isImage) return nds;
+      if (target?.data?.isShape || target?.data?.isImage || target?.data?.isTable) return nds;
       
       setHistoryLevel(prev => [...prev, currentLevel]);
-      setCurrentLevel(id); savedRangeRef.current = null;
+      setCurrentLevel(id); savedRangeRef.current = null; setSelectedCells({});
       
       const nextData = levelData[id] || { nodes: [], edges: [] };
       setCurrentLabel(nextData.label && nextData.label !== '階層中' ? nextData.label : defaultLabel || '階層中');
@@ -463,17 +508,10 @@ function FlowEditor() {
   const goBack = () => {
     if (historyLevel.length === 0) return;
     const newHist = [...historyLevel]; const prevLevel = newHist.pop()!;
-    
-    setLevelData(prev => ({ 
-        ...prev, 
-        [currentLevel]: { nodes: safeCloneNodes(nodesRef.current), edges: safeCloneEdges(edgesRef.current), bgColor: prev[currentLevel]?.bgColor, label: currentLabelRef.current } 
-    }));
-    
-    setCurrentLevel(prevLevel); setHistoryLevel(newHist); savedRangeRef.current = null;
-    
+    setLevelData(prev => ({ ...prev, [currentLevel]: { nodes: safeCloneNodes(nodesRef.current), edges: safeCloneEdges(edgesRef.current), bgColor: prev[currentLevel]?.bgColor, label: currentLabelRef.current } }));
+    setCurrentLevel(prevLevel); setHistoryLevel(newHist); savedRangeRef.current = null; setSelectedCells({});
     const prevData = levelData[prevLevel] || { nodes: [], edges: [] };
     setCurrentLabel(prevData.label || (prevLevel === 'root' ? 'TOP層' : '階層中'));
-    
     setNodes((prevData.nodes || []).map((n:any) => ({...n, selected: false})));
     setEdges((prevData.edges || []).map((e:any) => ({...e, selected: false})));
     setPast([]); setFuture([]);
@@ -481,65 +519,82 @@ function FlowEditor() {
 
   const goTop = () => {
     if (historyLevel.length === 0) return;
-    
-    setLevelData(prev => ({ 
-        ...prev, 
-        [currentLevel]: { nodes: safeCloneNodes(nodesRef.current), edges: safeCloneEdges(edgesRef.current), bgColor: prev[currentLevel]?.bgColor, label: currentLabelRef.current } 
-    }));
-    
-    setCurrentLevel('root'); setHistoryLevel([]); savedRangeRef.current = null;
-    
+    setLevelData(prev => ({ ...prev, [currentLevel]: { nodes: safeCloneNodes(nodesRef.current), edges: safeCloneEdges(edgesRef.current), bgColor: prev[currentLevel]?.bgColor, label: currentLabelRef.current } }));
+    setCurrentLevel('root'); setHistoryLevel([]); savedRangeRef.current = null; setSelectedCells({});
     const rootData = levelData['root'] || { nodes: [], edges: [] };
     setCurrentLabel(rootData.label || 'TOP層');
-    
     setNodes((rootData.nodes || []).map((n:any) => ({...n, selected: false})));
     setEdges((rootData.edges || []).map((e:any) => ({...e, selected: false})));
     setPast([]); setFuture([]);
   };
 
-  const addNode = useCallback((type: 'text' | 'image' | 'shape') => {
+  const addNode = useCallback((type: 'text' | 'image' | 'shape' | 'table') => {
     takeSnapshot();
     const id = `node-${Date.now()}`;
-    let data: any = { content: '項目', previewVisible: false, previewStyle: { opacity: 0.7, offsetX: 0, offsetY: -150, width: 180, height: 120 } };
+    let data: any = { content: '項目', previewVisible: false, previewStyle: { opacity: 0.7, offsetX: 0, offsetY: -150, width: 180, height: 120 }, connectionDir: 'vertical' };
     let style: any = { backgroundColor: '#ffffff', color: '#000', borderRadius: '12px', fontSize: '14px', width: 200, height: 100, display: 'flex', alignItems: 'center', justifyContent: 'center', textAlign: 'center' };
     
+    // ★ ここにあった handleFileChange は上で正しく定義してあります！
     if (type === 'image') { fileInputRef.current?.click(); return; }
+    
     if (type === 'shape') {
-      data = { content: '', isShape: true, shapeType: 'rect', keepRatio: false };
+      data = { content: '', isShape: true, shapeType: 'rect', keepRatio: false, connectionDir: 'vertical' };
       style = { ...style, backgroundColor: '#eee', borderRadius: '4px', border: '3px solid #333' };
+    }
+    if (type === 'table') {
+      data = { 
+          isTable: true, rows: 2, cols: 2, connectionDir: 'vertical',
+          cells: {
+              "0-0": { content: "セル", style: { border: '1px solid #ccc' } }, "0-1": { content: "セル", style: { border: '1px solid #ccc' } },
+              "1-0": { content: "セル", style: { border: '1px solid #333' } }, "1-1": { content: "セル", style: { border: '1px solid #333' } }
+          } 
+      };
+      style = { ...style, width: 300, height: 150, padding: 0, backgroundColor: '#fff', display: 'block', borderRadius: '8px', border: '2px solid #ccc' };
     }
 
     const selNodes = nodesRef.current.filter(n => n.selected);
     const parent = selNodes.length === 1 ? selNodes[0] : null;
 
-    if (parent && type === 'text') {
+    if (parent && (type === 'text' || type === 'table')) {
         const edgeId = `e-${parent.id}-${id}`;
         setEdges((eds: any[]) => [...eds.map((e: any) => ({...e, selected:false})), { id: edgeId, source: parent.id, target: id, type: 'default', style: { strokeWidth: 2 } }]);
         
         setNodes((nds: any[]) => {
             const maxZ = Math.max(0, ...nds.map((n: any) => Number(n.zIndex) || 0));
-            const newNode = { 
-                id, selected: true,
-                position: { x: parent.position.x, y: parent.position.y + Number(parent.style?.height || 100) + 80 }, 
-                data, style, zIndex: maxZ + 1 
-            };
+            const isHorizontal = parent.data?.connectionDir === 'horizontal';
             
+            const parentW = Number(parent.style?.width || 200);
+            const parentH = Number(parent.style?.height || 100);
+            let newX, newY;
+            if (isHorizontal) {
+                newX = parent.position.x + parentW + 80;
+                newY = parent.position.y;
+            } else {
+                newX = parent.position.x;
+                newY = parent.position.y + parentH + 80;
+            }
+
+            const newNode = { id, selected: true, position: { x: newX, y: newY }, data, style, zIndex: maxZ + 1 };
             let updatedNodes = [...nds.map((n: any) => ({...n, selected: false})), newNode];
 
             const childIds = edgesRef.current.filter(e => e.source === parent.id).map(e => e.target).concat(id);
             const children = updatedNodes.filter(n => childIds.includes(n.id));
             
             if (children.length > 0) {
-                const Px = parent.position.x + (Number(parent.style?.width || 200) / 2);
-                const spacing = 240; 
-                const totalWidth = (children.length - 1) * spacing;
-                const startX = Px - totalWidth / 2;
+                const spacing = isHorizontal ? 120 : 240; 
+                const totalSpan = (children.length - 1) * spacing;
+                const startPos = (isHorizontal ? parent.position.y + parentH/2 : parent.position.x + parentW/2) - totalSpan / 2;
                 
                 children.forEach((child, index) => {
                     const childNode = updatedNodes.find(n => n.id === child.id);
                     if (childNode) {
                         const childW = Number(childNode.style?.width || 200);
-                        childNode.position = { x: startX + index * spacing - (childW / 2), y: parent.position.y + Number(parent.style?.height || 100) + 80 };
+                        const childH = Number(childNode.style?.height || 100);
+                        if (isHorizontal) {
+                            childNode.position = { x: newX, y: startPos + index * spacing - (childH / 2) };
+                        } else {
+                            childNode.position = { x: startPos + index * spacing - (childW / 2), y: newY };
+                        }
                     }
                 });
             }
@@ -553,26 +608,16 @@ function FlowEditor() {
     }
   }, [takeSnapshot]);
 
-  // ★ キーボードショートカット（保存 Cmd+S を追加）
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       const activeEl = document.activeElement as HTMLElement;
       const isEditing = activeEl?.tagName === 'INPUT' || activeEl?.tagName === 'TEXTAREA' || activeEl?.isContentEditable;
       
-      if ((e.ctrlKey || e.metaKey) && e.key === 's') {
-          e.preventDefault();
-          handleManualSave();
-          return;
-      }
-
+      if ((e.ctrlKey || e.metaKey) && e.key === 's') { e.preventDefault(); handleManualSave(); return; }
       if ((e.ctrlKey || e.metaKey) && e.key === 'z') {
-          if (e.shiftKey) { e.preventDefault(); redo(); } 
-          else { e.preventDefault(); undo(); }
-          return;
+          if (e.shiftKey) { e.preventDefault(); redo(); } else { e.preventDefault(); undo(); } return;
       }
-      if ((e.ctrlKey || e.metaKey) && e.key === 'y') {
-          e.preventDefault(); redo(); return;
-      }
+      if ((e.ctrlKey || e.metaKey) && e.key === 'y') { e.preventDefault(); redo(); return; }
 
       if (isEditing) return;
 
@@ -587,6 +632,7 @@ function FlowEditor() {
         const selIds = nodesRef.current.filter(n => n.selected).map(n => n.id);
         setNodes((nds: any[]) => nds.filter((n: any) => !n.selected));
         setEdges((eds: any[]) => eds.filter((e: any) => !e.selected && !selIds.includes(e.source) && !selIds.includes(e.target)));
+        setSelectedCells({});
       }
     };
     window.addEventListener('keydown', handleKeyDown);
@@ -598,15 +644,13 @@ function FlowEditor() {
       const zoom = getZoom();
       const drag = previewDragRef.current;
       if (drag) {
-        const dx = (e.clientX - drag.startX) / zoom;
-        const dy = (e.clientY - drag.startY) / zoom;
+        const dx = (e.clientX - drag.startX) / zoom; const dy = (e.clientY - drag.startY) / zoom;
         if (Math.abs(dx) > 3 || Math.abs(dy) > 3) drag.moved = true;
         setNodes((nds: any[]) => nds.map((n: any) => n.id === drag.id ? { ...n, data: { ...(n.data || {}), previewStyle: { ...(n.data?.previewStyle || {}), offsetX: drag.initX + dx, offsetY: drag.initY + dy } } } : n));
       }
       const imgDrag = imageCropDragRef.current;
       if (imgDrag) {
-        const dx = (e.clientX - imgDrag.startX) / zoom;
-        const dy = (e.clientY - imgDrag.startY) / zoom;
+        const dx = (e.clientX - imgDrag.startX) / zoom; const dy = (e.clientY - imgDrag.startY) / zoom;
         setNodes((nds: any[]) => nds.map((n: any) => n.id === imgDrag.id ? { ...n, data: { ...(n.data || {}), imgPosX: imgDrag.initX + dx, imgPosY: imgDrag.initY + dy } } : n));
       }
     };
@@ -616,6 +660,7 @@ function FlowEditor() {
     return () => { window.removeEventListener('mousemove', onMouseMove); window.removeEventListener('mouseup', onMouseUp); };
   }, [getZoom]);
 
+  // ★ 復活させた画像アップロード関数
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
@@ -626,7 +671,7 @@ function FlowEditor() {
           const maxZ = Math.max(0, ...nds.map((n: any) => Number(n.zIndex) || 0));
           return [...nds.map((n: any) => ({...n, selected: false})), { 
             id: `img-${Date.now()}`, position: { x: 50, y: 50 }, zIndex: maxZ + 1, selected: true,
-            data: { isImage: true, imageUrl: ev.target?.result, imgPosX: 0, imgPosY: 0, imgZoom: 1, isCropping: false, cropBaseW: 300, cropBaseH: 200, cropOffsetX: 0, cropOffsetY: 0 }, 
+            data: { isImage: true, imageUrl: ev.target?.result, imgPosX: 0, imgPosY: 0, imgZoom: 1, isCropping: false, cropBaseW: 300, cropBaseH: 200, cropOffsetX: 0, cropOffsetY: 0, connectionDir: 'vertical' }, 
             style: { width: 300, height: 200, background: '#fff', padding: 0, border: '1px solid #ccc' } 
           }];
         });
@@ -671,8 +716,10 @@ function FlowEditor() {
     };
 
     return [centerNode, ...nodes.map(n => {
-      const isPreview = Boolean(n.data?.previewVisible && !n.data?.isShape && !n.data?.isImage);
+      const isPreview = Boolean(n.data?.previewVisible && !n.data?.isShape && !n.data?.isImage && !n.data?.isTable);
       let previewElement: React.ReactNode = null;
+      
+      const dir = n.data?.connectionDir || 'vertical';
 
       if (isPreview) {
         const w1 = Number(n.style?.width) || 200; const h1 = Number(n.style?.height) || 100;
@@ -688,7 +735,7 @@ function FlowEditor() {
               <line x1={p1.x} y1={p1.y} x2={p2.x} y2={p2.y} stroke="#999" strokeWidth="2" strokeDasharray="4 2" />
             </svg>
             <div className="nodrag"
-              onMouseDown={(e) => { e.stopPropagation(); previewDragRef.current = { id: n.id, startX: e.clientX, startY: e.clientY, initX: offsetX, initY: offsetY, moved: false }; }}
+              onMouseDown={(e) => { e.stopPropagation(); takeSnapshot(); previewDragRef.current = { id: n.id, startX: e.clientX, startY: e.clientY, initX: offsetX, initY: offsetY, moved: false }; }}
               onClick={(e) => { e.stopPropagation(); if (!previewDragRef.current?.moved) enterLevel(n.id, extractFirstLineText(n.data?.content)); }}
               style={{ position:'absolute', left: offsetX, top: offsetY, width: `${w2}px`, height: `${h2}px`, backgroundColor:`rgba(255,255,255,${n.data?.previewStyle?.opacity || 0.7})`, borderRadius: '12px', border: '1px solid #ccc', zIndex: -1, cursor: 'grab', overflow: 'hidden', boxShadow: '0 8px 12px rgba(0,0,0,0.1)' }}
             >
@@ -704,6 +751,51 @@ function FlowEditor() {
             </div>
           </React.Fragment>
         );
+      } else if (n.data?.isTable) {
+        previewElement = (
+            <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column' }}>
+                <div className="custom-drag-handle" style={{ height: '20px', background: '#e2e8f0', cursor: 'grab', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '10px', color: '#64748b' }}>≡ 表を移動 ≡</div>
+                <div className="nodrag" style={{ flex: 1, overflow: 'auto', padding: '10px' }}>
+                    <table style={{ width: '100%', height: '100%', borderCollapse: 'collapse', tableLayout: 'fixed' }}>
+                        <tbody>
+                            {Array.from({length: n.data.rows || 2}).map((_, r) => (
+                                <tr key={r}>
+                                    {Array.from({length: n.data.cols || 2}).map((_, c) => {
+                                        const cellId = `${r}-${c}`;
+                                        const cellData = n.data.cells?.[cellId] || { content: '', style: { border: '1px solid #ccc' } };
+                                        const isSel = selectedCells[n.id]?.includes(cellId);
+                                        return (
+                                            <td
+                                                key={c}
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    setSelectedCells(prev => {
+                                                        const current = prev[n.id] || [];
+                                                        if (e.shiftKey || e.metaKey || e.ctrlKey) {
+                                                            return { ...prev, [n.id]: current.includes(cellId) ? current.filter(id => id !== cellId) : [...current, cellId] };
+                                                        } else {
+                                                            return { ...prev, [n.id]: [cellId] };
+                                                        }
+                                                    });
+                                                    if (!n.selected) setNodes((nds: any[]) => nds.map((node: any) => node.id === n.id ? { ...node, selected: true } : { ...node, selected: false }));
+                                                }}
+                                                style={{
+                                                    ...cellData.style,
+                                                    position: 'relative', cursor: 'cell', padding: '8px', wordBreak: 'break-all',
+                                                    outline: isSel ? '2px solid #3b82f6' : 'none', outlineOffset: '-2px'
+                                                }}
+                                            >
+                                                <div className="html-content" dangerouslySetInnerHTML={{ __html: renderHTMLWithMath(cellData.content) }} />
+                                            </td>
+                                        );
+                                    })}
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        );
       }
 
       const baseW = n.data?.cropBaseW ?? (Number(n.style?.width) || 300);
@@ -714,6 +806,8 @@ function FlowEditor() {
       return {
         ...n,
         draggable: n.data?.isImage && n.data?.isCropping ? false : true,
+        sourcePosition: dir === 'horizontal' ? Position.Right : Position.Bottom,
+        targetPosition: dir === 'horizontal' ? Position.Left : Position.Top,
         data: {
           ...n.data,
           label: (
@@ -738,7 +832,7 @@ function FlowEditor() {
                   }} alt="img" />
                   <div className="html-content" style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: n.style?.alignItems || 'center', justifyContent: n.style?.justifyContent || 'center', pointerEvents: 'none', color: n.style?.color || '#000', fontFamily: n.style?.fontFamily || 'sans-serif', fontSize: n.style?.fontSize || '14px', fontWeight: n.style?.fontWeight || 'normal', textDecoration: n.style?.textDecoration || 'none', whiteSpace: 'pre-wrap', lineHeight: '1.2' }} dangerouslySetInnerHTML={{ __html: renderHTMLWithMath(n.data?.content) }} />
                 </div>
-              ) : n.id !== 'center-mark' ? (
+              ) : n.id !== 'center-mark' && !n.data?.isTable ? (
                 <div className="html-content" style={{ pointerEvents: 'none', width: '100%', color: n.style?.color || '#000', fontFamily: n.style?.fontFamily || 'sans-serif', fontSize: n.style?.fontSize || '14px', fontWeight: n.style?.fontWeight || 'normal', textDecoration: n.style?.textDecoration || 'none', whiteSpace: 'pre-wrap', lineHeight: '1.2', textAlign: n.style?.textAlign || 'center' }} dangerouslySetInnerHTML={{ __html: renderHTMLWithMath(n.data?.content) }} />
               ) : null}
 
@@ -767,7 +861,7 @@ function FlowEditor() {
         }
       };
     })];
-  }, [nodes, enterLevel, levelData]);
+  }, [nodes, enterLevel, levelData, takeSnapshot, selectedCells]);
 
   const updateEdgeDesign = (config: any) => {
     takeSnapshot();
@@ -787,6 +881,36 @@ function FlowEditor() {
       position: 'fixed' as const, top: '20px', right: '20px', width: '450px', maxHeight: '90vh', backgroundColor: '#fff', zIndex: 10000,
       padding: '20px', borderRadius: '12px', boxShadow: '0 15px 40px rgba(0,0,0,0.3)', overflowY: 'auto' as const, border: '2px solid #3b82f6'
   } : { marginTop: '10px' };
+
+  const addTableRowCol = (type: 'row' | 'col') => {
+      takeSnapshot();
+      if (!primaryNode || !primaryNode.data.isTable) return;
+      setNodes(nds => nds.map(n => {
+          if (n.id !== primaryNode.id) return n;
+          const newRows = type === 'row' ? n.data.rows + 1 : n.data.rows;
+          const newCols = type === 'col' ? n.data.cols + 1 : n.data.cols;
+          const newCells = { ...n.data.cells };
+          if (type === 'row') for(let c=0; c<newCols; c++) newCells[`${newRows-1}-${c}`] = { content: '', style: { border: '1px solid #ccc'} };
+          if (type === 'col') for(let r=0; r<newRows; r++) newCells[`${r}-${newCols-1}`] = { content: '', style: { border: '1px solid #ccc'} };
+          return { ...n, data: { ...n.data, rows: newRows, cols: newCols, cells: newCells } };
+      }));
+  };
+
+  const isTableEditing = primaryNode?.data?.isTable && (selectedCells[primaryNode.id]?.length || 0) > 0;
+  
+  useEffect(() => {
+      if (editorRef.current && primaryNode?.data?.isTable) {
+          const activeCells = selectedCells[primaryNode.id] || [];
+          if (activeCells.length === 1) {
+              const cellContent = primaryNode.data.cells[activeCells[0]]?.content || '';
+              if (editorRef.current.innerHTML !== cellContent) editorRef.current.innerHTML = cellContent;
+          } else if (activeCells.length > 1) {
+              editorRef.current.innerHTML = '<span style="color:#999">複数セル選択中 (※入力すると全セル上書きされます)</span>';
+          } else {
+              editorRef.current.innerHTML = '';
+          }
+      }
+  }, [primaryNode?.id, primaryNode?.data?.cells, selectedCells]);
 
   return (
     <div style={{ width: '100vw', height: '100vh', display: 'flex', flexDirection: 'row', overflow: 'hidden' }}>
@@ -823,7 +947,6 @@ function FlowEditor() {
         <div style={{ padding: '10px 15px', backgroundColor: 'rgba(255,255,255,0.8)', borderBottom: '1px solid #eee', display: 'flex', alignItems: 'center', zIndex: 100 }}>
           <button onClick={() => setIsSidebarOpen(!isSidebarOpen)} style={{ background: 'none', border: 'none', fontSize: '24px', cursor: 'pointer', marginRight: '15px', padding: '0 5px' }}>☰</button>
           
-          {/* ★ 階層名を入力可能なフォームにしました！ */}
           <div style={{ flex: 1, display: 'flex', justifyContent: 'center', alignItems: 'center', fontWeight: 'bold', fontSize: '16px' }}>
             階層: 
             <input 
@@ -845,7 +968,6 @@ function FlowEditor() {
              onConnect={p => { takeSnapshot(); setEdges((eds: any[]) => addEdge({...p, type:'default', style: {strokeWidth: 2}}, eds)); }} 
              onNodeDragStart={() => takeSnapshot()}
              onNodeDoubleClick={(_, n) => {
-                // ★ 階層に入るときは、HTMLを綺麗に剥がした「1行目」をタイトルとして渡す
                 enterLevel(n.id, extractFirstLineText(n.data?.content));
              }} 
              onNodeDrag={onNodeDrag} onNodeDragStop={onNodeDragStop} fitView
@@ -856,14 +978,52 @@ function FlowEditor() {
           {selectedNodes.length > 0 && primaryNode && (
             <div style={{ position:'absolute', right:0, top:0, bottom:0, width:'340px', borderLeft:'1px solid #ddd', padding:'20px', backgroundColor:'#fff', zIndex:1000, overflowY: 'auto', boxShadow: '-4px 0 10px rgba(0,0,0,0.05)' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
-                <h3 style={{fontSize:'16px', margin: 0}}>{selectedNodes.length > 1 ? `${selectedNodes.length}個の要素を一括編集` : primaryNode.data?.isImage ? '画像編集' : primaryNode.data?.isShape ? '図形設定' : 'テキスト設定'}</h3>
+                <h3 style={{fontSize:'16px', margin: 0}}>{selectedNodes.length > 1 ? `${selectedNodes.length}個の要素を一括編集` : primaryNode.data?.isTable ? '表の設定' : primaryNode.data?.isImage ? '画像編集' : primaryNode.data?.isShape ? '図形設定' : 'テキスト設定'}</h3>
                 <button onClick={clearSelection} style={{ border: 'none', background: 'none', fontSize: '20px', cursor: 'pointer', padding: '0 5px' }}>×</button>
               </div>
+
+              <label style={{fontSize: '11px', fontWeight: 'bold'}}>接続の向き (Enterキーでの追加方向)</label>
+              <div style={{ display: 'flex', gap: '5px', marginBottom: '15px', marginTop: '5px' }}>
+                <button onClick={() => { takeSnapshot(); updateSelectedNodes({ connectionDir: 'vertical' })}} style={{ flex: 1, padding: '8px', cursor: 'pointer', borderRadius: '4px', background: primaryNode.data?.connectionDir !== 'horizontal' ? '#cbd5e1' : '#fff', border: '1px solid #ccc', fontWeight: 'bold' }}>↓ 縦に繋ぐ</button>
+                <button onClick={() => { takeSnapshot(); updateSelectedNodes({ connectionDir: 'horizontal' })}} style={{ flex: 1, padding: '8px', cursor: 'pointer', borderRadius: '4px', background: primaryNode.data?.connectionDir === 'horizontal' ? '#cbd5e1' : '#fff', border: '1px solid #ccc', fontWeight: 'bold' }}>→ 横に繋ぐ</button>
+              </div>
               
-              <div style={{ display:'flex', gap:'5px', marginBottom:'15px', marginTop:'10px' }}>
+              <div style={{ display:'flex', gap:'5px', marginBottom:'15px' }}>
                 <button onClick={() => { takeSnapshot(); setNodes((nds: any[]) => { const maxZ = Math.max(0, ...nds.map((n: any) => Number(n.zIndex) || 0)); return nds.map((n: any) => n.selected ? {...n, zIndex: maxZ + 1} : n); })}} style={{flex:1, padding:'8px', fontSize:'12px', fontWeight: 'bold', background: '#f0f0f0', border: '1px solid #ccc', cursor: 'pointer', borderRadius: '4px'}}>↑ 最前面へ</button>
                 <button onClick={() => { takeSnapshot(); setNodes((nds: any[]) => { const minZ = Math.min(0, ...nds.map((n: any) => Number(n.zIndex) || 0)); return nds.map((n: any) => n.selected ? {...n, zIndex: minZ - 1} : n); })}} style={{flex:1, padding:'8px', fontSize:'12px', fontWeight: 'bold', background: '#f0f0f0', border: '1px solid #ccc', cursor: 'pointer', borderRadius: '4px'}}>↓ 最背面へ</button>
               </div>
+
+              {primaryNode.data?.isTable && (
+                  <div style={{ padding: '15px', background: '#f8f9fa', borderRadius: '8px', marginBottom: '15px', border: '1px solid #ddd' }}>
+                      <label style={{fontSize: '11px', fontWeight: 'bold'}}>表の構成</label>
+                      <div style={{ display: 'flex', gap: '5px', marginTop: '5px', marginBottom: '15px' }}>
+                          <button onClick={() => addTableRowCol('row')} style={{ flex:1, padding: '5px', cursor: 'pointer', borderRadius: '4px', border: '1px solid #ccc', background: '#fff' }}>行を追加</button>
+                          <button onClick={() => addTableRowCol('col')} style={{ flex:1, padding: '5px', cursor: 'pointer', borderRadius: '4px', border: '1px solid #ccc', background: '#fff' }}>列を追加</button>
+                      </div>
+
+                      <label style={{fontSize: '11px', fontWeight: 'bold', color: '#b91c1c'}}>選択セル枠線のデザイン</label>
+                      {isTableEditing ? (
+                          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '5px', marginTop: '5px' }}>
+                              <select value={tableBorderWidth} onChange={(e) => setTableBorderWidth(e.target.value)} style={{ padding: '5px', borderRadius: '4px', border: '1px solid #ccc', background: '#fff' }}>
+                                  <option value="1px">細線 (1px)</option>
+                                  <option value="2px">中線 (2px)</option>
+                                  <option value="4px">太線 (4px)</option>
+                                  <option value="0px">線なし</option>
+                              </select>
+                              <select value={tableBorderStyle} onChange={(e) => setTableBorderStyle(e.target.value)} style={{ padding: '5px', borderRadius: '4px', border: '1px solid #ccc', background: '#fff' }}>
+                                  <option value="solid">単線 (Solid)</option>
+                                  <option value="dashed">破線 (Dashed)</option>
+                                  <option value="dotted">点線 (Dotted)</option>
+                                  <option value="double">二重線 (Double)</option>
+                              </select>
+                              <input type="color" value={tableBorderColor} onChange={(e) => setTableBorderColor(e.target.value)} style={{ width: '100%', height: '30px', border: 'none', cursor: 'pointer', background: 'transparent' }} />
+                              <button onClick={applyTableBorder} style={{ background: '#3b82f6', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}>適用</button>
+                          </div>
+                      ) : (
+                          <p style={{fontSize: '10px', color: '#666', marginTop: '5px'}}>※表の中のセルをクリックして選択してください<br/>(Shiftキーで複数選択)</p>
+                      )}
+                  </div>
+              )}
 
               {primaryNode.data?.isImage && selectedNodes.length === 1 && (
                 <div style={{ marginBottom: '20px', padding: '10px', border: '1px solid #eee', borderRadius: '8px' }}>
@@ -901,7 +1061,7 @@ function FlowEditor() {
 
               <div style={editorPanelStyle}>
                   <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'5px' }}>
-                      <label style={{fontSize: '11px', fontWeight: 'bold'}}>文字内容</label>
+                      <label style={{fontSize: '11px', fontWeight: 'bold'}}>{primaryNode.data?.isTable ? (isTableEditing ? '選択セルの文字内容' : '文字内容 (※セルを選択してください)') : '文字内容'}</label>
                       <button onClick={() => setIsExpandedEditor(!isExpandedEditor)} style={{ fontSize: '10px', padding: '4px 8px', borderRadius: '4px', border: '1px solid #3b82f6', background: isExpandedEditor ? '#3b82f6' : '#eff6ff', color: isExpandedEditor ? '#fff' : '#3b82f6', fontWeight: 'bold', cursor: 'pointer', transition: '0.2s' }}>
                           {isExpandedEditor ? '↙️ パネルを戻す' : '↗️ 大きく開く'}
                       </button>
@@ -910,12 +1070,23 @@ function FlowEditor() {
                   <div 
                     id="node-editor" 
                     ref={editorRef}
-                    contentEditable 
-                    onInput={(e) => { updateSelectedNodes({ content: e.currentTarget.innerHTML }); saveSelection(); }}
-                    onBlur={(e) => { updateSelectedNodes({ content: e.currentTarget.innerHTML }); saveSelection(); }}
+                    contentEditable={!primaryNode.data?.isTable || isTableEditing}
+                    onInput={(e) => { 
+                        if (isTableEditing) {
+                            const activeCells = selectedCells[primaryNode.id];
+                            setNodes(nds => nds.map(n => n.id === primaryNode.id ? { ...n, data: { ...n.data, cells: { ...n.data.cells, [activeCells[0]]: { ...n.data.cells[activeCells[0]], content: e.currentTarget.innerHTML } } } } : n));
+                        } else {
+                            updateSelectedNodes({ content: e.currentTarget.innerHTML }); 
+                        }
+                        saveSelection(); 
+                    }}
+                    onBlur={(e) => { 
+                        if (!isTableEditing) updateSelectedNodes({ content: e.currentTarget.innerHTML }); 
+                        saveSelection(); 
+                    }}
                     onKeyUp={saveSelection}
                     onMouseUp={saveSelection}
-                    style={{ width:'100%', minHeight: isExpandedEditor ? '200px' : '80px', marginBottom: '10px', padding: '12px', border: '1px solid #ddd', borderRadius: '4px', outline: 'none', backgroundColor: '#fff', cursor: 'text', overflowY: 'auto', fontSize: isExpandedEditor ? '18px' : 'inherit' }}
+                    style={{ width:'100%', minHeight: isExpandedEditor ? '200px' : '80px', marginBottom: '10px', padding: '12px', border: '1px solid #ddd', borderRadius: '4px', outline: 'none', backgroundColor: (!primaryNode.data?.isTable || isTableEditing) ? '#fff' : '#f1f5f9', cursor: 'text', overflowY: 'auto', fontSize: isExpandedEditor ? '18px' : 'inherit' }}
                   />
                   
                   <label style={{fontSize: '10px', color: '#666', fontWeight: 'bold'}}>文字装飾 (※フォーカス有無で自動切替)</label>
@@ -941,17 +1112,17 @@ function FlowEditor() {
               </div>
 
               <hr style={{margin: '15px 0', border: 'none', borderTop: '1px solid #eee'}} />
-              <label style={{fontSize: '10px', color: '#666', fontWeight: 'bold'}}>レイアウト (図形全体にのみ適用)</label>
+              <label style={{fontSize: '10px', color: '#666', fontWeight: 'bold'}}>{primaryNode.data?.isTable ? 'レイアウト (選択セルのみ)' : 'レイアウト (図形全体にのみ適用)'}</label>
 
               <div style={{ display:'flex', gap:'5px', marginBottom:'5px', marginTop: '5px' }}>
-                <button onClick={() => { takeSnapshot(); updateSelectedNodes({}, { justifyContent: 'flex-start', textAlign: 'left' }); }} style={{flex:1, cursor:'pointer', border:'1px solid #ccc', padding: '5px', borderRadius: '4px'}}>左</button>
-                <button onClick={() => { takeSnapshot(); updateSelectedNodes({}, { justifyContent: 'center', textAlign: 'center' }); }} style={{flex:1, cursor:'pointer', border:'1px solid #ccc', padding: '5px', borderRadius: '4px'}}>中央</button>
-                <button onClick={() => { takeSnapshot(); updateSelectedNodes({}, { justifyContent: 'flex-end', textAlign: 'right' }); }} style={{flex:1, cursor:'pointer', border:'1px solid #ccc', padding: '5px', borderRadius: '4px'}}>右</button>
+                <button onClick={() => handleLayout('left', undefined)} style={{flex:1, cursor:'pointer', border:'1px solid #ccc', padding: '5px', borderRadius: '4px'}}>左</button>
+                <button onClick={() => handleLayout('center', undefined)} style={{flex:1, cursor:'pointer', border:'1px solid #ccc', padding: '5px', borderRadius: '4px'}}>中央</button>
+                <button onClick={() => handleLayout('right', undefined)} style={{flex:1, cursor:'pointer', border:'1px solid #ccc', padding: '5px', borderRadius: '4px'}}>右</button>
               </div>
               <div style={{ display:'flex', gap:'5px', marginBottom:'15px' }}>
-                <button onClick={() => { takeSnapshot(); updateSelectedNodes({}, { alignItems: 'flex-start' }); }} style={{flex:1, cursor:'pointer', border:'1px solid #ccc', padding: '5px', borderRadius: '4px'}}>上</button>
-                <button onClick={() => { takeSnapshot(); updateSelectedNodes({}, { alignItems: 'center' }); }} style={{flex:1, cursor:'pointer', border:'1px solid #ccc', padding: '5px', borderRadius: '4px'}}>中</button>
-                <button onClick={() => { takeSnapshot(); updateSelectedNodes({}, { alignItems: 'flex-end' }); }} style={{flex:1, cursor:'pointer', border:'1px solid #ccc', padding: '5px', borderRadius: '4px'}}>下</button>
+                <button onClick={() => handleLayout(undefined, 'top')} style={{flex:1, cursor:'pointer', border:'1px solid #ccc', padding: '5px', borderRadius: '4px'}}>上</button>
+                <button onClick={() => handleLayout(undefined, 'middle')} style={{flex:1, cursor:'pointer', border:'1px solid #ccc', padding: '5px', borderRadius: '4px'}}>中</button>
+                <button onClick={() => handleLayout(undefined, 'bottom')} style={{flex:1, cursor:'pointer', border:'1px solid #ccc', padding: '5px', borderRadius: '4px'}}>下</button>
               </div>
 
               <label style={{fontSize:'11px', fontWeight: 'bold'}}>全体の透明度</label>
@@ -963,7 +1134,7 @@ function FlowEditor() {
                 <input type="color" value={String(primaryNode.style?.backgroundColor || '#ffffff')} onChange={(e) => { takeSnapshot(); updateSelectedNodes({}, { backgroundColor: e.target.value })}} style={{width:'100%', aspectRatio:'1', cursor: 'pointer', border: 'none', padding: 0}} />
               </div>
 
-              {!primaryNode.data?.isShape && !primaryNode.data?.isImage && (
+              {!primaryNode.data?.isShape && !primaryNode.data?.isImage && !primaryNode.data?.isTable && (
                 <>
                   <button onClick={() => { takeSnapshot(); updateSelectedNodes((n: any) => ({ previewVisible: !n.previewVisible }))}} style={{ width:'100%', marginTop:'10px', padding:'10px', background: primaryNode.data?.previewVisible ? '#3b82f6' : '#fff', color: primaryNode.data?.previewVisible ? '#fff' : '#333', border: '1px solid #ccc', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', transition: 'all 0.2s' }}>
                     {primaryNode.data?.previewVisible ? '💬 吹き出しを消す' : '💬 吹き出しを追加'}
@@ -990,6 +1161,7 @@ function FlowEditor() {
                     const selIds = nodesRef.current.filter((n: any) => n.selected).map((n: any) => n.id);
                     setNodes((nds: any[]) => nds.filter((n: any) => !n.selected)); 
                     setEdges((eds: any[]) => eds.filter((e: any) => !e.selected && !selIds.includes(e.source) && !selIds.includes(e.target)));
+                    setSelectedCells({});
                 }} style={{ flex:1, color: 'red', border: '1px solid red', padding: '10px', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold', background: '#fffcfc' }}>🗑️ 削除</button>
               </div>
             </div>
@@ -1020,10 +1192,7 @@ function FlowEditor() {
           <button onClick={undo} disabled={past.length === 0} style={{ ...actionBtnStyle, opacity: past.length === 0 ? 0.4 : 1, cursor: past.length === 0 ? 'default' : 'pointer' }}>↩️ 戻る</button>
           <button onClick={redo} disabled={future.length === 0} style={{ ...actionBtnStyle, opacity: future.length === 0 ? 0.4 : 1, cursor: future.length === 0 ? 'default' : 'pointer' }}>↪️ やり直し</button>
           <div style={{ width: '1px', height: '30px', backgroundColor: '#ddd', margin: '0 5px' }} />
-          
-          {/* ★ 手動保存ボタンを追加 */}
           <button onClick={handleManualSave} style={{ ...primaryBtnStyle, backgroundColor: '#059669', boxShadow: '0 4px 6px rgba(5, 150, 105, 0.3)' }}>💾 手動保存</button>
-          
           <div style={{ width: '1px', height: '30px', backgroundColor: '#ddd', margin: '0 5px' }} />
           <button onClick={goBack} disabled={isRoot} style={{ ...actionBtnStyle, opacity: isRoot ? 0.4 : 1, cursor: isRoot ? 'default' : 'pointer' }}>🔙 1つ前へ</button>
           <button onClick={goTop} disabled={isRoot} style={{ ...actionBtnStyle, opacity: isRoot ? 0.4 : 1, cursor: isRoot ? 'default' : 'pointer' }}>🏠 TOP層へ</button>
@@ -1032,6 +1201,7 @@ function FlowEditor() {
           <button onClick={() => addNode('text')} style={primaryBtnStyle}>📝 テキスト</button>
           <button onClick={() => addNode('image')} style={{ ...primaryBtnStyle, backgroundColor: '#10b981', boxShadow: '0 4px 6px rgba(16, 185, 129, 0.3)' }}>📸 画像</button>
           <button onClick={() => addNode('shape')} style={{ ...primaryBtnStyle, backgroundColor: '#f59e0b', boxShadow: '0 4px 6px rgba(245, 158, 11, 0.3)' }}>🟦 図形</button>
+          <button onClick={() => addNode('table')} style={{ ...primaryBtnStyle, backgroundColor: '#6366f1', boxShadow: '0 4px 6px rgba(99, 102, 241, 0.3)' }}>🧮 表</button>
           <div style={{ width: '1px', height: '30px', backgroundColor: '#ddd', margin: '0 5px' }} />
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', fontWeight: 'bold', color: '#555', backgroundColor: '#fff', padding: '6px 12px', borderRadius: '8px', border: '1px solid #ccc' }}>
             <span>🎨 階層の背景色</span>
