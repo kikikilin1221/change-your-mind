@@ -2,7 +2,7 @@
 import React, { useState, useCallback, useMemo, useRef, useEffect } from 'react';
 import { 
   ReactFlow, Background, Controls, applyNodeChanges, applyEdgeChanges, addEdge,
-  NodeResizer, ReactFlowProvider, useStore, MarkerType, getBezierPath, EdgeProps, BaseEdge, EdgeLabelRenderer, useReactFlow, Position, Handle, ConnectionMode
+  NodeResizer, ReactFlowProvider, useStore, MarkerType, getBezierPath, EdgeProps, BaseEdge, EdgeLabelRenderer, useReactFlow, Position, ConnectionMode
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import katex from 'katex';
@@ -531,7 +531,6 @@ function FlowEditor() {
     takeSnapshot();
     const id = `node-${Date.now()}`;
     
-    // ★ 親が選択されている場合、その設定（縦/横）を引き継ぐ
     const selNodes = nodesRef.current.filter(n => n.selected);
     const parent = selNodes.length === 1 ? selNodes[0] : null;
     let connectionDir = 'vertical';
@@ -561,12 +560,11 @@ function FlowEditor() {
 
     if (parent && (type === 'text' || type === 'table')) {
         const isHorizontal = connectionDir === 'horizontal';
-        const sourceHandle = isHorizontal ? 'right' : 'bottom';
-        const targetHandle = isHorizontal ? 'left' : 'top';
 
         const edgeId = `e-${parent.id}-${id}`;
+        // ★ 手動で繋ぐ時と同じように、極力シンプルに接続する
         setEdges((eds: any[]) => [...eds.map((e: any) => ({...e, selected:false})), { 
-            id: edgeId, source: parent.id, target: id, sourceHandle, targetHandle, type: 'default', style: { strokeWidth: 2 } 
+            id: edgeId, source: parent.id, target: id, type: 'default', style: { strokeWidth: 2 } 
         }]);
         
         setNodes((nds: any[]) => {
@@ -811,6 +809,7 @@ function FlowEditor() {
       const offX = n.data?.cropOffsetX || 0;
       const offY = n.data?.cropOffsetY || 0;
 
+      // ★ デフォルトの機能をそのまま使い、接続点を向きに応じて2つにする
       return {
         ...n,
         draggable: n.data?.isImage && n.data?.isCropping ? false : true,
@@ -821,23 +820,6 @@ function FlowEditor() {
           label: (
             <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: n.style?.alignItems || 'center', justifyContent: n.style?.justifyContent || 'center', position: 'relative' }}>
               
-              {/* ★ 向きに応じて接続ポイントを2つだけに制限してスッキリさせる */}
-              {n.id !== 'center-mark' && (
-                <>
-                  {dir === 'horizontal' ? (
-                    <>
-                      <Handle type="source" position={Position.Left} id="left" />
-                      <Handle type="source" position={Position.Right} id="right" />
-                    </>
-                  ) : (
-                    <>
-                      <Handle type="source" position={Position.Top} id="top" />
-                      <Handle type="source" position={Position.Bottom} id="bottom" />
-                    </>
-                  )}
-                </>
-              )}
-
               {previewElement}
               
               {n.data?.isImage ? (
@@ -958,7 +940,6 @@ function FlowEditor() {
         .html-content *, #node-editor * { line-height: 1.2 !important; vertical-align: baseline !important; }
         #node-editor:empty:before { content: "テキストを入力..."; color: #aaa; pointer-events: none; }
         
-        /* ★ ハンドル（黒い点）のデザイン調整 */
         .react-flow__handle { width: 10px !important; height: 10px !important; background: #333 !important; border: 2px solid #fff !important; transition: all 0.2s !important; box-shadow: 0 1px 3px rgba(0,0,0,0.2) !important; cursor: crosshair !important; z-index: 10 !important; }
         .react-flow__handle::after { content: ""; position: absolute; top: -12px; left: -12px; right: -12px; bottom: -12px; background: transparent; }
         .react-flow__handle:hover { transform: scale(2.2) !important; background: #3b82f6 !important; border-color: #fff !important; }
