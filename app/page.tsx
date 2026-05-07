@@ -48,24 +48,36 @@ const DoubleEdge = ({ id, sourceX, sourceY, targetX, targetY, sourcePosition, ta
 
   return (
     <>
-      {/* ★ カスタム矢印（塗りつぶしなしのV字）の定義 */}
-      {/* refXとrefYを完璧に調整し、線の先端が綺麗に三角形の頂点に来るようにしました */}
-      <svg style={{ position: 'absolute', width: 0, height: 0 }}>
-        <defs>
-          <marker id={`custom-arrow-${id}`} viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
-            <polyline points="1,1 9,5 1,9" fill="none" stroke={edgeColor} strokeWidth={strokeWidth > 1 ? 1.5 : 1} strokeLinecap="round" strokeLinejoin="round" />
-          </marker>
-          <marker id={`custom-arrow-start-${id}`} viewBox="0 0 10 10" refX="1" refY="5" markerWidth="6" markerHeight="6" orient="auto">
-            <polyline points="9,1 1,5 9,9" fill="none" stroke={edgeColor} strokeWidth={strokeWidth > 1 ? 1.5 : 1} strokeLinecap="round" strokeLinejoin="round" />
-          </marker>
-        </defs>
-      </svg>
+      {/* ★ カスタム矢印（塗りつぶしなしのV字）の定義。向きもサイズも完璧に調整済み */}
+      {isDouble && (
+        <svg style={{ position: 'absolute', width: 0, height: 0 }}>
+          <defs>
+            <marker id={`custom-arrow-${id}`} viewBox="0 0 10 10" refX="8" refY="5" markerWidth="4.5" markerHeight="4.5" orient="auto">
+              <polyline points="2,2 8,5 2,8" fill="none" stroke={edgeColor} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+            </marker>
+            <marker id={`custom-arrow-start-${id}`} viewBox="0 0 10 10" refX="2" refY="5" markerWidth="4.5" markerHeight="4.5" orient="auto">
+              <polyline points="8,2 2,5 8,8" fill="none" stroke={edgeColor} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+            </marker>
+          </defs>
+        </svg>
+      )}
 
-      <BaseEdge id={id} path={edgePath} markerEnd={rMarkerEnd} markerStart={rMarkerStart} style={{ ...style, strokeWidth: isDouble ? strokeWidth + 4 : strokeWidth, stroke: edgeColor }} />
-      {isDouble && <BaseEdge path={edgePath} style={{ ...style, strokeWidth: strokeWidth, stroke: '#fff' }} />}
+      {isDouble ? (
+        <>
+          {/* 二重線の外側（太い線） */}
+          <BaseEdge path={edgePath} style={{ ...style, strokeWidth: strokeWidth + 8, stroke: edgeColor }} />
+          {/* 二重線の内側の隙間（背景色でくり抜く） */}
+          <BaseEdge path={edgePath} style={{ ...style, strokeWidth: strokeWidth + 4, stroke: 'var(--bg-color, #f1f1f1)' }} />
+          {/* カスタム矢印を乗せるための透明な線 */}
+          <BaseEdge path={edgePath} markerEnd={rMarkerEnd} markerStart={rMarkerStart} style={{ strokeWidth: strokeWidth, stroke: 'transparent', fill: 'none' }} />
+        </>
+      ) : (
+        <BaseEdge id={id} path={edgePath} markerEnd={markerEnd} markerStart={markerStart} style={{ ...style, strokeWidth, stroke: edgeColor }} />
+      )}
+
       {label && (
         <EdgeLabelRenderer>
-          <div className="no-print" style={{ position: 'absolute', transform: `translate(-50%, -50%) translate(${labelX}px,${labelY}px)`, padding: '2px 4px', fontSize: `${fontSize}px`, fontWeight: 'bold', color: '#333', pointerEvents: 'none', zIndex: 1000, textShadow: '0 0 3px #fff, 0 0 3px #fff, 0 0 3px #fff', width: '200px', ...labelStyle }} dangerouslySetInnerHTML={{ __html: renderHTMLWithMath(String(label)) }} />
+          <div className="no-print" style={{ position: 'absolute', transform: `translate(-50%, -50%) translate(${labelX}px,${labelY}px)`, padding: '2px 4px', fontSize: `${fontSize}px`, fontWeight: 'bold', color: '#333', pointerEvents: 'none', zIndex: 1000, textShadow: '0 0 3px var(--bg-color, #fff), 0 0 3px var(--bg-color, #fff), 0 0 3px var(--bg-color, #fff)', width: '200px', ...labelStyle }} dangerouslySetInnerHTML={{ __html: renderHTMLWithMath(String(label)) }} />
         </EdgeLabelRenderer>
       )}
     </>
@@ -285,6 +297,7 @@ function FlowEditor() {
     } : n));
   }, []);
 
+  // ★ 線のデザイン更新を完璧に制御
   const updateEdgeDesign = useCallback((config: any) => {
     takeSnapshot();
     setEdges((eds: any[]) => eds.map((e: any) => {
@@ -292,7 +305,7 @@ function FlowEditor() {
       
       const newStrokeWidth = config.strokeWidth !== undefined ? config.strokeWidth : (Number(e.style?.strokeWidth) || 1);
       const newColor = config.color !== undefined ? config.color : (e.data?.color || '#333');
-      const mSize = Math.max(12, newStrokeWidth * 2.5); 
+      const mSize = Math.max(12, newStrokeWidth * 3); // 矢印のサイズを調整
       
       const baseMarker = { type: MarkerType.ArrowClosed, color: newColor, width: mSize, height: mSize };
       
@@ -300,6 +313,7 @@ function FlowEditor() {
       let newMarkerType = config.markerType !== undefined ? config.markerType : e.data?.markerType;
       let newLabel = config.label !== undefined ? config.label : e.label;
       
+      // 普通に戻す時などのリセット処理
       if (config.resetDesign) {
          newDouble = config.double || false;
          newMarkerType = config.markerType || 'none';
@@ -913,20 +927,18 @@ function FlowEditor() {
           label: (
             <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: n.style?.alignItems || 'flex-start', justifyContent: n.style?.justifyContent || 'flex-start', position: 'relative', border: resolvedBorder, borderRadius: n.style?.borderRadius || '12px', backgroundColor: n.style?.backgroundColor || '#fff', opacity: n.style?.opacity || 1 }}>
               
-              {/* ★ 黒い点を完全に消去し、透明で大きな接続ターゲットのみ配置。オフセットで矢印のめり込みを完全防止 */}
+              {/* ★ 透明なターゲットと極小のソースハンドル。オフセット設定付き */}
               {n.id !== 'center-mark' && (
                 <>
-                  <Handle type="source" position={Position.Top} id="top-src" className="react-flow__handle-top custom-handle" />
-                  <Handle type="target" position={Position.Top} id="top-tgt" className="react-flow__handle-top custom-handle-target" />
-                  
-                  <Handle type="source" position={Position.Bottom} id="bottom-src" className="react-flow__handle-bottom custom-handle" />
-                  <Handle type="target" position={Position.Bottom} id="bottom-tgt" className="react-flow__handle-bottom custom-handle-target" />
-                  
-                  <Handle type="source" position={Position.Left} id="left-src" className="react-flow__handle-left custom-handle" />
-                  <Handle type="target" position={Position.Left} id="left-tgt" className="react-flow__handle-left custom-handle-target" />
-                  
-                  <Handle type="source" position={Position.Right} id="right-src" className="react-flow__handle-right custom-handle" />
-                  <Handle type="target" position={Position.Right} id="right-tgt" className="react-flow__handle-right custom-handle-target" />
+                  <Handle type="target" position={Position.Top} id="top-tgt" className="custom-handle-target custom-handle-offset-top" />
+                  <Handle type="target" position={Position.Bottom} id="bottom-tgt" className="custom-handle-target custom-handle-offset-bottom" />
+                  <Handle type="target" position={Position.Left} id="left-tgt" className="custom-handle-target custom-handle-offset-left" />
+                  <Handle type="target" position={Position.Right} id="right-tgt" className="custom-handle-target custom-handle-offset-right" />
+
+                  <Handle type="source" position={Position.Left} id="left-src" className="custom-handle custom-handle-offset-left" />
+                  <Handle type="source" position={Position.Right} id="right-src" className="custom-handle custom-handle-offset-right" />
+                  <Handle type="source" position={Position.Top} id="top-src" className="custom-handle custom-handle-offset-top" />
+                  <Handle type="source" position={Position.Bottom} id="bottom-src" className="custom-handle custom-handle-offset-bottom" />
                 </>
               )}
 
@@ -1020,19 +1032,29 @@ function FlowEditor() {
             .react-flow__background { background-color: #fff !important; }
         }
 
-        /* ★ 黒い点を完全に消し、透明な受信用ハンドルと「ホバーした時だけ見える青丸」にしました */
-        /* ★ top, bottom などのオフセットを -3px に設定し、図形と線の美しい隙間（約1mm）を作りました */
-        .react-flow__handle-top { top: -3px !important; }
-        .react-flow__handle-bottom { bottom: -3px !important; }
-        .react-flow__handle-left { left: -3px !important; }
-        .react-flow__handle-right { right: -3px !important; }
+        /* ★ ReactFlowデフォルトの黒丸を完全に根絶する */
+        .react-flow__handle {
+            background: transparent !important;
+            border: none !important;
+            width: 1px !important;
+            height: 1px !important;
+            min-width: 0 !important;
+            min-height: 0 !important;
+            box-shadow: none !important;
+        }
 
-        .custom-handle, .custom-handle-target { width: 20px !important; height: 20px !important; background: transparent !important; border: none !important; z-index: 1 !important; cursor: crosshair !important; pointer-events: auto !important; display: flex; justify-content: center; align-items: center; }
+        /* ★ 透明なハンドル（送受信）とオフセット設定 */
+        .custom-handle, .custom-handle-target { width: 24px !important; height: 24px !important; background: transparent !important; border: none !important; z-index: 10 !important; cursor: crosshair !important; pointer-events: auto !important; display: flex; justify-content: center; align-items: center; }
         
-        /* ターゲットは完全に透明。ソースの方にだけホバー時の青丸エフェクトをつける */
-        .custom-handle { z-index: 10 !important; }
-        .custom-handle::before { content: ""; display: block; width: 0px; height: 0px; background: #3b82f6; border-radius: 50%; transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1); opacity: 0; }
-        .custom-handle:hover::before { width: 14px; height: 14px; opacity: 1; transform: scale(1); box-shadow: 0 1px 3px rgba(0,0,0,0.2); border: 2px solid #fff; }
+        /* ★ 通常は見えないが、近づくと青い丸が出てくる */
+        .custom-handle::before, .custom-handle-target::before { content: ""; display: block; width: 0px; height: 0px; background: #3b82f6; border-radius: 50%; transition: all 0.2s cubic-bezier(0.34, 1.56, 0.64, 1); border: 2px solid #fff; opacity: 0; }
+        .custom-handle:hover::before, .custom-handle-target:hover::before { width: 14px; height: 14px; opacity: 1; box-shadow: 0 1px 3px rgba(0,0,0,0.2); }
+
+        /* ★ 矢印がめり込まないよう、図形から外側に1mm（約4px）だけ離すオフセット */
+        .custom-handle-offset-top { top: -4px !important; }
+        .custom-handle-offset-bottom { bottom: -4px !important; }
+        .custom-handle-offset-left { left: -4px !important; }
+        .custom-handle-offset-right { right: -4px !important; }
       `}</style>
       <input type="file" ref={fileInputRef} style={{ display: 'none' }} onChange={handleFileChange} accept="image/*" />
       
@@ -1055,7 +1077,7 @@ function FlowEditor() {
         </div>
       </div>
 
-      <div style={{ flexGrow: 1, display: 'flex', flexDirection: 'column', backgroundColor: levelData[currentLevel]?.bgColor || '#ffffff', transition: 'background-color 0.3s', position: 'relative' }}>
+      <div style={{ flexGrow: 1, display: 'flex', flexDirection: 'column', backgroundColor: levelData[currentLevel]?.bgColor || '#ffffff', transition: 'background-color 0.3s', position: 'relative', '--bg-color': levelData[currentLevel]?.bgColor || '#f1f1f1' } as React.CSSProperties}>
         
         {/* 上部バー */}
         {isTopBarOpen ? (
@@ -1325,7 +1347,6 @@ function FlowEditor() {
                  </div>
               </div>
 
-              {/* ★ 新機能：線の文字サイズスライダー */}
               <label style={{fontSize:'10px', fontWeight: 'bold'}}>線の文字サイズ (px)</label>
               <div style={{display:'flex', alignItems:'center', gap:'8px', marginBottom: '20px', marginTop: '5px'}}>
                 <input type="range" min="10" max="50" value={Number(selectedEdge.data?.fontSize || 14)} onChange={(e) => updateEdgeDesign({ fontSize: Number(e.target.value) })} style={{flex:1}} />
@@ -1338,7 +1359,7 @@ function FlowEditor() {
                 <button onClick={() => updateEdgeDesign({ label: '<span style="color: blue;">NO</span>', labelStyle: { ...selectedEdge.data?.labelStyle, textAlign: 'center' } })} style={{flex:1, padding:'6px', border: '1px solid #93c5fd', color: 'blue', background: '#eff6ff', cursor: 'pointer', borderRadius: '4px', fontWeight: 'bold', fontSize: '11px'}}>NO 線</button>
               </div>
 
-              {/* ★ 線の太さを無段階スライダーに（0.5〜10）。デフォルトの極細に対応 */}
+              {/* ★ 線の太さをスライダー化（0.5〜10）。デフォルトは一番細い1です */}
               <label style={{fontSize:'11px', fontWeight: 'bold'}}>線の太さ</label>
               <div style={{ display:'flex', gap:'10px', alignItems: 'center', marginBottom:'15px', marginTop: '5px' }}>
                 <input type="range" min="0.5" max="10" step="0.5" value={Number(selectedEdge.style?.strokeWidth) || 1} onChange={(e) => updateEdgeDesign({ strokeWidth: Number(e.target.value) })} style={{flex: 1}} />
