@@ -114,7 +114,7 @@ const extractFirstLineText = (html: string) => {
   return firstLine.length > 15 ? firstLine.substring(0, 15) + '...' : firstLine;
 };
 
-const safeCloneNodes = (nds: any[]) => nds.map(n => ({ ...n, data: { ...n.data }, style: { ...n.style }, position: { ...n.position } }));
+const safeCloneNodes = (nds: any[]) => nds.map(n => ({ ...n, data: { ...n.data }, style: { ...n.style }, position: { ...n.position }, width: n.width, height: n.height }));
 const safeCloneEdges = (eds: any[]) => eds.map(e => ({ ...e, data: { ...e.data }, style: { ...e.style }, zIndex: e.zIndex }));
 
 const edgeTypes = { default: DoubleEdge };
@@ -290,6 +290,7 @@ function FlowEditor() {
                       id: newId, type: 'printZone', position: { x: 0, y: 0 },
                       data: { label: '印刷範囲 1' },
                       style: { width: 800, height: 1130 },
+                      width: 800, height: 1130, // 初期サイズを明確にセット
                       zIndex: 99999
                   }];
               });
@@ -307,20 +308,21 @@ function FlowEditor() {
               id: `print-zone-${Date.now()}`, type: 'printZone', position: { x: count * 50, y: count * 50 },
               data: { label: `印刷範囲 ${count + 1}` },
               style: { width: 800, height: 1130 },
+              width: 800, height: 1130,
               zIndex: 99999
           }];
       });
   }, []);
 
-  // ★ 修正：印刷実行時に React Flow のレンダリングとフィットを確実に行うための待機処理
+  // ★ 印刷実行（絶対座標強制ロック機能を追加し、完璧にフィットさせます）
   const executePrint = useCallback(() => {
       clearSelection();
       setIsExecutingPrint(true);
-      // React Flowが各ページのフィット処理を完了するのを待つ（少し余裕を持たせて1.2秒）
+      // React Flowが完全に再描画し、座標ロックが完了するのを待つ
       setTimeout(() => {
           window.print();
           setIsExecutingPrint(false);
-      }, 1200); 
+      }, 1500); 
   }, [clearSelection]);
 
   const loadFileInitial = (id: string, allFiles = files) => {
@@ -922,7 +924,20 @@ function FlowEditor() {
                 <div style={{ position: 'absolute', top: 0, left: 0, background: '#3b82f6', color: '#fff', padding: '4px 12px', fontSize: '14px', fontWeight: 'bold' }}>
                   {n.data.label}
                 </div>
-                <NodeResizer isVisible={true} minWidth={200} minHeight={200} handleStyle={{ width: 12, height: 12, background: '#3b82f6' }} lineStyle={{ border: 'none' }} />
+                <NodeResizer 
+                    isVisible={true} minWidth={200} minHeight={200} 
+                    handleStyle={{ width: 12, height: 12, background: '#3b82f6' }} 
+                    lineStyle={{ border: 'none' }} 
+                    onResize={(_, params) => {
+                        setNodes((nds: any[]) => nds.map((node: any) => node.id === n.id ? {
+                            ...node,
+                            position: { x: params.x, y: params.y },
+                            width: params.width,
+                            height: params.height,
+                            style: { ...node.style, width: params.width, height: params.height }
+                        } : node));
+                    }}
+                />
               </div>
             )
           },
@@ -1121,41 +1136,43 @@ function FlowEditor() {
 
   const isTableEditing = primaryNode?.data?.isTable && (selectedCells[primaryNode.id]?.length || 0) > 0;
   
-  // ★ 印刷時の処理：指定された青枠（printZone）に完全にフィットさせる
+  // ★ 印刷実行中：オートフォーカスを完全排除し、絶対座標でロックオンします
   if (isExecutingPrint) {
       const printBoxes = nodes.filter(n => n.type === 'printZone');
-      // 印刷用ノードからは printZone 枠自体を除外する（青点線を印刷しないため）
       const printableNodes = flowNodes.filter(n => n.type !== 'printZone' && n.id !== 'center-mark');
       return (
           <div style={{ backgroundColor: '#fff', width: '100%', minHeight: '100vh' }}>
-              {/* ★ ブラウザの強制白黒化を防ぐ CSS */}
               <style>{`
                   @page { size: auto; margin: 0; }
                   body { background: #fff !important; margin: 0; padding: 0; }
                   * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
-                  .print-page-wrapper { width: 100vw; height: 100vh; page-break-after: always; position: relative; overflow: hidden; }
+                  .print-page-wrapper { page-break-after: always; position: relative; overflow: hidden; margin: 0 auto; }
               `}</style>
-              {printBoxes.map((box, i) => {
-                  // ★ fitViewを完璧に動作させるため、対象の箱と同じサイズ・位置の「透明なノード」を一時的に仕込む
-                  const targetBoxNode = { 
-                      id: `target-${box.id}`, 
-                      position: box.position, 
-                      style: { width: box.style?.width, height: box.style?.height, opacity: 0, pointerEvents: 'none' }, 
-                      data: { label: '' } 
-                  };
-                  const pageNodes = [...printableNodes, targetBoxNode];
+              
+              <div className="no-print" style={{position: 'fixed', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: 'rgba(255,255,255,0.95)', zIndex: 99999}}>
+                  <h2 style={{color: '#10b981', fontSize: '24px', marginBottom: '10px'}}>🖨️ 印刷データを精密生成中...</h2>
+                  <p style={{color: '#666', fontWeight: 'bold'}}>ダイアログが開くまで、このままお待ちください（約1〜2秒）</p>
+              </div>
+
+              {printBoxes.map((box) => {
+                  // ★ 青枠のリアルタイムなサイズと座標をミリ単位で取得
+                  // `box.width` や `box.measured?.width` が確実に存在するようにフォールバックを設定し、エラーを防ぎます。
+                  const boxW = (box.width ?? box.measured?.width ?? Number(box.style?.width)) || 800;
+                  const boxH = (box.height ?? box.measured?.height ?? Number(box.style?.height)) || 1130;
+                  const boxX = box.position.x;
+                  const boxY = box.position.y;
                   
                   return (
-                      <div key={box.id} className="print-page-wrapper" style={{ backgroundColor: levelData[currentLevel]?.bgColor || '#ffffff' }}>
+                      // 印刷コンテナを青枠と全く同じサイズにする
+                      <div key={box.id} className="print-page-wrapper" style={{ width: `${boxW}px`, height: `${boxH}px`, backgroundColor: levelData[currentLevel]?.bgColor || '#ffffff' }}>
                           <ReactFlowProvider>
                               <ReactFlow 
-                                  nodes={pageNodes} 
+                                  nodes={printableNodes} 
                                   edges={edges} 
                                   edgeTypes={edgeTypes} 
-                                  fitView 
-                                  // ★ padding: 0 と minZoom: 0.01 により、どんなサイズの枠でも紙いっぱいにピタッと合わせる
-                                  fitViewOptions={{ padding: 0, nodes: [{ id: targetBoxNode.id }], minZoom: 0.01, maxZoom: 10 }}
-                                  panOnDrag={false} zoomOnScroll={false} nodesDraggable={false} elementsSelectable={false}
+                                  // ★ 最重要：ここでカメラの位置を青枠の左上に「強制ロック」する
+                                  defaultViewport={{ x: -boxX, y: -boxY, zoom: 1 }}
+                                  panOnDrag={false} zoomOnScroll={false} nodesDraggable={false} elementsSelectable={false} preventScrolling={false}
                               >
                                   <Background color="#f1f1f1" />
                               </ReactFlow>
