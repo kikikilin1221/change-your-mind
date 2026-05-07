@@ -36,7 +36,8 @@ const DoubleEdge = ({ id, sourceX, sourceY, targetX, targetY, sourcePosition, ta
       {isDouble && <BaseEdge path={edgePath} style={{ ...style, strokeWidth: strokeWidth, stroke: '#fff' }} />}
       {label && (
         <EdgeLabelRenderer>
-          <div className="no-print" style={{ position: 'absolute', transform: `translate(-50%, -50%) translate(${labelX}px,${labelY}px)`, background: 'white', padding: '2px 5px', borderRadius: '5px', fontSize: '16px', fontWeight: 'bold', pointerEvents: 'none', border: '1px solid #ccc', zIndex: 1000 }}>{String(label)}</div>
+          {/* ★ 線の文字の背景(background)や枠線を消し、シンプルなテキストのみにしました */}
+          <div className="no-print" style={{ position: 'absolute', transform: `translate(-50%, -50%) translate(${labelX}px,${labelY}px)`, padding: '2px 4px', fontSize: '14px', fontWeight: 'bold', color: '#333', pointerEvents: 'none', zIndex: 1000 }}>{String(label)}</div>
         </EdgeLabelRenderer>
       )}
     </>
@@ -533,25 +534,19 @@ function FlowEditor() {
     takeSnapshot();
     const id = `node-${Date.now()}`;
     
-    const selNodes = nodesRef.current.filter(n => n.selected);
-    const parent = selNodes.length === 1 ? selNodes[0] : null;
-    let connectionDir = 'vertical';
-    if (parent && parent.data?.connectionDir) {
-        connectionDir = parent.data.connectionDir;
-    }
-
-    let data: any = { content: '項目', previewVisible: false, previewStyle: { opacity: 0.7, offsetX: 0, offsetY: -150, width: 180, height: 120 }, connectionDir };
-    let style: any = { backgroundColor: '#ffffff', color: '#000', borderRadius: '12px', fontSize: '14px', width: 200, height: 100, display: 'flex', alignItems: 'flex-start', justifyContent: 'flex-start', textAlign: 'left', padding: '10px' };
+    // ★ 追加する図形の設定（デフォルトを左上に。パディングを2pxにして余白を削る）
+    let data: any = { content: '項目', previewVisible: false, previewStyle: { opacity: 0.7, offsetX: 0, offsetY: -150, width: 180, height: 120 }, textOffsetX: 0, textOffsetY: 0 };
+    let style: any = { backgroundColor: '#ffffff', color: '#000', borderRadius: '12px', fontSize: '14px', width: 200, height: 100, display: 'flex', alignItems: 'flex-start', justifyContent: 'flex-start', textAlign: 'left', padding: '2px' };
     
     if (type === 'image') { fileInputRef.current?.click(); return; }
     
     if (type === 'shape') {
-      data = { content: '', isShape: true, shapeType: 'rect', keepRatio: false, connectionDir };
+      data = { content: '', isShape: true, shapeType: 'rect', keepRatio: false, textOffsetX: 0, textOffsetY: 0 };
       style = { ...style, backgroundColor: '#eee', borderRadius: '4px', border: '3px solid #333' };
     }
     if (type === 'table') {
       data = { 
-          isTable: true, rows: 2, cols: 2, connectionDir,
+          isTable: true, rows: 2, cols: 2, textOffsetX: 0, textOffsetY: 0,
           cells: {
               "0-0": { content: "セル", style: { border: '1px solid #ccc' } }, "0-1": { content: "セル", style: { border: '1px solid #ccc' } },
               "1-0": { content: "セル", style: { border: '1px solid #333' } }, "1-1": { content: "セル", style: { border: '1px solid #333' } }
@@ -560,10 +555,13 @@ function FlowEditor() {
       style = { ...style, width: 300, height: 150, padding: 0, backgroundColor: '#fff', display: 'block', borderRadius: '8px', border: '2px solid #ccc' };
     }
 
+    const selNodes = nodesRef.current.filter(n => n.selected);
+    const parent = selNodes.length === 1 ? selNodes[0] : null;
+
     if (parent && (type === 'text' || type === 'table')) {
-        const isHorizontal = connectionDir === 'horizontal';
-        const sourceHandle = isHorizontal ? 'right-src' : 'bottom-src';
-        const targetHandle = isHorizontal ? 'left-tgt' : 'top-tgt';
+        // 「接続の向き」設定を廃止したので、Enterキーでの追加は常に「下（縦）」に統一。
+        const sourceHandle = 'bottom-src';
+        const targetHandle = 'top-tgt';
 
         const edgeId = `e-${parent.id}-${id}`;
         setEdges((eds: any[]) => [...eds.map((e: any) => ({...e, selected:false})), { 
@@ -572,17 +570,12 @@ function FlowEditor() {
         
         setNodes((nds: any[]) => {
             const maxZ = Math.max(0, ...nds.map((n: any) => Number(n.zIndex) || 0));
-            
             const parentW = Number(parent.style?.width || 200);
             const parentH = Number(parent.style?.height || 100);
-            let newX, newY;
-            if (isHorizontal) {
-                newX = parent.position.x + parentW + 80;
-                newY = parent.position.y;
-            } else {
-                newX = parent.position.x;
-                newY = parent.position.y + parentH + 80;
-            }
+            
+            // 下方向に追加
+            const newX = parent.position.x;
+            const newY = parent.position.y + parentH + 80;
 
             const newNode = { id, selected: true, position: { x: newX, y: newY }, data, style, zIndex: maxZ + 1 };
             let updatedNodes = [...nds.map((n: any) => ({...n, selected: false})), newNode];
@@ -591,20 +584,15 @@ function FlowEditor() {
             const children = updatedNodes.filter(n => childIds.includes(n.id));
             
             if (children.length > 0) {
-                const spacing = isHorizontal ? 120 : 240; 
+                const spacing = 240; 
                 const totalSpan = (children.length - 1) * spacing;
-                const startPos = (isHorizontal ? parent.position.y + parentH/2 : parent.position.x + parentW/2) - totalSpan / 2;
+                const startPos = (parent.position.x + parentW/2) - totalSpan / 2;
                 
                 children.forEach((child, index) => {
                     const childNode = updatedNodes.find(n => n.id === child.id);
                     if (childNode) {
                         const childW = Number(childNode.style?.width || 200);
-                        const childH = Number(childNode.style?.height || 100);
-                        if (isHorizontal) {
-                            childNode.position = { x: newX, y: startPos + index * spacing - (childH / 2) };
-                        } else {
-                            childNode.position = { x: startPos + index * spacing - (childW / 2), y: newY };
-                        }
+                        childNode.position = { x: startPos + index * spacing - (childW / 2), y: newY };
                     }
                 });
             }
@@ -695,7 +683,7 @@ function FlowEditor() {
           const maxZ = Math.max(0, ...nds.map((n: any) => Number(n.zIndex) || 0));
           return [...nds.map((n: any) => ({...n, selected: false})), { 
             id: `img-${Date.now()}`, position: { x: 50, y: 50 }, zIndex: maxZ + 1, selected: true,
-            data: { isImage: true, imageUrl: ev.target?.result, imgPosX: 0, imgPosY: 0, imgZoom: 1, isCropping: false, cropBaseW: 300, cropBaseH: 200, cropOffsetX: 0, cropOffsetY: 0, connectionDir: 'vertical', keepRatio: false }, 
+            data: { isImage: true, imageUrl: ev.target?.result, imgPosX: 0, imgPosY: 0, imgZoom: 1, isCropping: false, cropBaseW: 300, cropBaseH: 200, cropOffsetX: 0, cropOffsetY: 0, textOffsetX: 0, textOffsetY: 0 }, 
             style: { width: 300, height: 200, background: '#fff', padding: 0, border: '1px solid #ccc' } 
           }];
         });
@@ -743,7 +731,8 @@ function FlowEditor() {
       const isPreview = Boolean(n.data?.previewVisible && !n.data?.isShape && !n.data?.isImage && !n.data?.isTable);
       let previewElement: React.ReactNode = null;
       
-      const dir = n.data?.connectionDir || 'vertical';
+      const textOffX = Number(n.data?.textOffsetX || 0);
+      const textOffY = Number(n.data?.textOffsetY || 0);
 
       if (isPreview) {
         const w1 = Number(n.style?.width) || 200; const h1 = Number(n.style?.height) || 100;
@@ -833,9 +822,9 @@ function FlowEditor() {
         data: {
           ...n.data,
           label: (
-            <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: n.style?.alignItems || 'center', justifyContent: n.style?.justifyContent || 'center', position: 'relative' }}>
+            <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: n.style?.alignItems || 'flex-start', justifyContent: n.style?.justifyContent || 'flex-start', position: 'relative' }}>
               
-              {/* ★ 常に4方向に「透明な受信用の的(Target)」を置くことで、どこからでもピッタリ線が吸い付くようにする */}
+              {/* ★ 全方位に「透明な受信用の的(Target)」と「小さな黒い点(Source)」を配置！これでどこからでも自由に繋げます */}
               {n.id !== 'center-mark' && (
                 <>
                   <Handle type="target" position={Position.Top} id="top-tgt" className="custom-handle-target" />
@@ -843,18 +832,10 @@ function FlowEditor() {
                   <Handle type="target" position={Position.Left} id="left-tgt" className="custom-handle-target" />
                   <Handle type="target" position={Position.Right} id="right-tgt" className="custom-handle-target" />
 
-                  {/* 黒い点(Source)は見た目通り2つだけ */}
-                  {dir === 'horizontal' ? (
-                    <>
-                      <Handle type="source" position={Position.Left} id="left-src" className="custom-handle" />
-                      <Handle type="source" position={Position.Right} id="right-src" className="custom-handle" />
-                    </>
-                  ) : (
-                    <>
-                      <Handle type="source" position={Position.Top} id="top-src" className="custom-handle" />
-                      <Handle type="source" position={Position.Bottom} id="bottom-src" className="custom-handle" />
-                    </>
-                  )}
+                  <Handle type="source" position={Position.Left} id="left-src" className="custom-handle" />
+                  <Handle type="source" position={Position.Right} id="right-src" className="custom-handle" />
+                  <Handle type="source" position={Position.Top} id="top-src" className="custom-handle" />
+                  <Handle type="source" position={Position.Bottom} id="bottom-src" className="custom-handle" />
                 </>
               )}
 
@@ -876,10 +857,12 @@ function FlowEditor() {
                       maxWidth: 'none', maxHeight: 'none', left: n.data?.isCropping ? `${offX}px` : 0, top: n.data?.isCropping ? `${offY}px` : 0,
                       transform: `translate(${n.data.imgPosX || 0}px, ${n.data.imgPosY || 0}px) scale(${n.data.imgZoom || 1})`, transformOrigin: 'center center', pointerEvents: 'none' 
                   }} alt="img" />
-                  <div className="html-content" style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: n.style?.alignItems || 'flex-start', justifyContent: n.style?.justifyContent || 'flex-start', pointerEvents: 'none', color: n.style?.color || '#000', fontFamily: n.style?.fontFamily || 'sans-serif', fontSize: n.style?.fontSize || '14px', fontWeight: n.style?.fontWeight || 'normal', textDecoration: n.style?.textDecoration || 'none', whiteSpace: 'pre-wrap', lineHeight: '1.2', textAlign: n.style?.textAlign || 'left', padding: '10px' }} dangerouslySetInnerHTML={{ __html: renderHTMLWithMath(n.data?.content) }} />
+                  {/* 画像のテキスト */}
+                  <div className="html-content" style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: n.style?.alignItems || 'flex-start', justifyContent: n.style?.justifyContent || 'flex-start', pointerEvents: 'none', color: n.style?.color || '#000', fontFamily: n.style?.fontFamily || 'sans-serif', fontSize: n.style?.fontSize || '14px', fontWeight: n.style?.fontWeight || 'normal', textDecoration: n.style?.textDecoration || 'none', whiteSpace: 'pre-wrap', lineHeight: '1.2', textAlign: n.style?.textAlign || 'left', padding: n.style?.padding || '2px', transform: `translate(${textOffX}px, ${textOffY}px)` }} dangerouslySetInnerHTML={{ __html: renderHTMLWithMath(n.data?.content) }} />
                 </div>
               ) : n.id !== 'center-mark' && !n.data?.isTable ? (
-                <div className="html-content" style={{ pointerEvents: 'none', width: '100%', color: n.style?.color || '#000', fontFamily: n.style?.fontFamily || 'sans-serif', fontSize: n.style?.fontSize || '14px', fontWeight: n.style?.fontWeight || 'normal', textDecoration: n.style?.textDecoration || 'none', whiteSpace: 'pre-wrap', lineHeight: '1.2', textAlign: n.style?.textAlign || 'left', padding: '10px' }} dangerouslySetInnerHTML={{ __html: renderHTMLWithMath(n.data?.content) }} />
+                // ★ 通常テキスト・図形のテキスト (パディングを削り、textOffsetで位置を微調整できるようにしました)
+                <div className="html-content" style={{ pointerEvents: 'none', width: '100%', height: '100%', display: 'flex', flexDirection: 'column', justifyContent: n.style?.justifyContent || 'flex-start', color: n.style?.color || '#000', fontFamily: n.style?.fontFamily || 'sans-serif', fontSize: n.style?.fontSize || '14px', fontWeight: n.style?.fontWeight || 'normal', textDecoration: n.style?.textDecoration || 'none', whiteSpace: 'pre-wrap', lineHeight: '1.2', textAlign: n.style?.textAlign || 'left', padding: n.style?.padding || '2px', transform: `translate(${textOffX}px, ${textOffY}px)` }} dangerouslySetInnerHTML={{ __html: renderHTMLWithMath(n.data?.content) }} />
               ) : null}
 
               {n.id !== 'center-mark' ? (
@@ -915,7 +898,7 @@ function FlowEditor() {
       if (!e.selected) return e;
       const mSize = Math.max(8, (Number(e.style?.strokeWidth) || 2) * 1.5);
       const m = { type: MarkerType.ArrowClosed, color: '#333', width: mSize, height: mSize };
-      return { ...e, data: { ...(e.data || {}), double: config.double }, markerEnd: config.arrow || config.both ? m : undefined, markerStart: config.both ? m : undefined, label: config.label || '' };
+      return { ...e, data: { ...(e.data || {}), double: config.double }, markerEnd: config.arrow || config.both ? m : undefined, markerStart: config.both ? m : undefined, label: config.label !== undefined ? config.label : e.label };
     }));
   };
 
@@ -984,11 +967,12 @@ function FlowEditor() {
             .react-flow__background { background-color: #fff !important; }
         }
 
-        .custom-handle { width: 10px !important; height: 10px !important; background: #333 !important; border: 2px solid #fff !important; transition: all 0.2s !important; box-shadow: 0 1px 3px rgba(0,0,0,0.2) !important; cursor: crosshair !important; z-index: 10 !important; }
+        /* ★ ハンドル（黒い点）を6pxの極小にし、近づいた時(hover)に大きくするように修正 */
+        .custom-handle { width: 6px !important; height: 6px !important; background: #333 !important; border: 1px solid #fff !important; transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1) !important; box-shadow: 0 1px 2px rgba(0,0,0,0.2) !important; cursor: crosshair !important; z-index: 10 !important; }
         .custom-handle::after { content: ""; position: absolute; top: -12px; left: -12px; right: -12px; bottom: -12px; background: transparent; }
-        .custom-handle:hover { transform: scale(2.2) !important; background: #3b82f6 !important; border-color: #fff !important; }
+        .custom-handle:hover { transform: scale(2.5) !important; background: #3b82f6 !important; border-color: #fff !important; }
 
-        /* ★ 透明なターゲット(受信用)ハンドル。これを大きく見えないように置くことで磁石のように吸い付く */
+        /* 透明なターゲット(受信用)ハンドル。線をピタッと吸い付ける磁石の役割 */
         .custom-handle-target { width: 30px !important; height: 30px !important; background: transparent !important; border: none !important; z-index: 1 !important; cursor: crosshair !important; pointer-events: auto !important; }
       `}</style>
       <input type="file" ref={fileInputRef} style={{ display: 'none' }} onChange={handleFileChange} accept="image/*" />
@@ -1014,7 +998,7 @@ function FlowEditor() {
 
       <div style={{ flexGrow: 1, display: 'flex', flexDirection: 'column', backgroundColor: levelData[currentLevel]?.bgColor || '#ffffff', transition: 'background-color 0.3s', position: 'relative' }}>
         
-        {/* ★ 上部バー（折りたたみ可能） */}
+        {/* 上部バー（折りたたみ可能） */}
         {isTopBarOpen ? (
           <div className="no-print" style={{ padding: '8px 15px', backgroundColor: 'rgba(255,255,255,0.9)', borderBottom: '1px solid #eee', display: 'flex', alignItems: 'center', zIndex: 100, backdropFilter: 'blur(4px)' }}>
             <button onClick={() => setIsSidebarOpen(!isSidebarOpen)} style={{ background: 'none', border: 'none', fontSize: '20px', cursor: 'pointer', marginRight: '15px', padding: '0 5px' }}>☰</button>
@@ -1055,12 +1039,6 @@ function FlowEditor() {
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
                 <h3 style={{fontSize:'14px', margin: 0}}>{selectedNodes.length > 1 ? `${selectedNodes.length}個の要素を一括編集` : primaryNode.data?.isTable ? '表の設定' : primaryNode.data?.isImage ? '画像編集' : primaryNode.data?.isShape ? '図形設定' : 'テキスト設定'}</h3>
                 <button onClick={clearSelection} style={{ border: 'none', background: 'none', fontSize: '18px', cursor: 'pointer', padding: '0 5px' }}>×</button>
-              </div>
-
-              <label style={{fontSize: '11px', fontWeight: 'bold'}}>接続の向き (Enterキーでの追加方向)</label>
-              <div style={{ display: 'flex', gap: '5px', marginBottom: '15px', marginTop: '5px' }}>
-                <button onClick={() => { takeSnapshot(); updateSelectedNodes({ connectionDir: 'vertical' })}} style={{ flex: 1, padding: '6px', cursor: 'pointer', borderRadius: '4px', background: primaryNode.data?.connectionDir !== 'horizontal' ? '#cbd5e1' : '#fff', border: '1px solid #ccc', fontWeight: 'bold', fontSize: '12px' }}>↓ 縦に繋ぐ</button>
-                <button onClick={() => { takeSnapshot(); updateSelectedNodes({ connectionDir: 'horizontal' })}} style={{ flex: 1, padding: '6px', cursor: 'pointer', borderRadius: '4px', background: primaryNode.data?.connectionDir === 'horizontal' ? '#cbd5e1' : '#fff', border: '1px solid #ccc', fontWeight: 'bold', fontSize: '12px' }}>→ 横に繋ぐ</button>
               </div>
               
               <div style={{ display:'flex', gap:'5px', marginBottom:'15px' }}>
@@ -1136,7 +1114,7 @@ function FlowEditor() {
 
               <div style={editorPanelStyle}>
                   <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'5px' }}>
-                      <label style={{fontSize: '11px', fontWeight: 'bold'}}>{primaryNode.data?.isTable ? (isTableEditing ? '選択セルの文字内容' : '文字内容 (※セルを選択してください)') : '文字内容 (Tabキーですぐ入力)'}</label>
+                      <label style={{fontSize: '11px', fontWeight: 'bold'}}>{primaryNode.data?.isTable ? (isTableEditing ? '選択セルの文字内容' : '文字内容 (※セルを選択してください)') : '文字内容 (Tabキーで即入力)'}</label>
                       <button onClick={() => setIsExpandedEditor(!isExpandedEditor)} style={{ fontSize: '10px', padding: '4px 8px', borderRadius: '4px', border: '1px solid #3b82f6', background: isExpandedEditor ? '#3b82f6' : '#eff6ff', color: isExpandedEditor ? '#fff' : '#3b82f6', fontWeight: 'bold', cursor: 'pointer', transition: '0.2s' }}>
                           {isExpandedEditor ? '↙️ パネルを戻す' : '↗️ 大きく開く'}
                       </button>
@@ -1195,10 +1173,19 @@ function FlowEditor() {
                 <button onClick={() => handleLayout('right', undefined)} style={{flex:1, cursor:'pointer', border:'1px solid #ccc', padding: '4px', fontSize:'11px', borderRadius: '4px'}}>右</button>
               </div>
               <div style={{ display:'flex', gap:'5px', marginBottom:'15px' }}>
-                <button onClick={() => handleLayout(undefined, 'top')} style={{flex:1, cursor:'pointer', border:'1px solid #ccc', padding: '4px', fontSize:'11px', borderRadius: '4px'}}>上</button>
-                <button onClick={() => handleLayout(undefined, 'middle')} style={{flex:1, cursor:'pointer', border:'1px solid #ccc', padding: '4px', fontSize:'11px', borderRadius: '4px'}}>中</button>
-                <button onClick={() => handleLayout(undefined, 'bottom')} style={{flex:1, cursor:'pointer', border:'1px solid #ccc', padding: '4px', fontSize:'11px', borderRadius: '4px'}}>下</button>
+                <button onClick={() => handleLayout(undefined, 'flex-start')} style={{flex:1, cursor:'pointer', border:'1px solid #ccc', padding: '4px', fontSize:'11px', borderRadius: '4px'}}>上</button>
+                <button onClick={() => handleLayout(undefined, 'center')} style={{flex:1, cursor:'pointer', border:'1px solid #ccc', padding: '4px', fontSize:'11px', borderRadius: '4px'}}>中</button>
+                <button onClick={() => handleLayout(undefined, 'flex-end')} style={{flex:1, cursor:'pointer', border:'1px solid #ccc', padding: '4px', fontSize:'11px', borderRadius: '4px'}}>下</button>
               </div>
+
+              {/* ★ 新機能：文字の微調整スライダー（X / Y） */}
+              {!primaryNode.data?.isTable && (
+                  <div style={{ marginBottom: '15px' }}>
+                      <label style={{fontSize: '10px', fontWeight: 'bold'}}>文字位置の微調整 (X / Y)</label>
+                      <input type="range" min="-100" max="100" value={Number(primaryNode.data?.textOffsetX || 0)} onChange={(e) => updateSelectedNodes({ textOffsetX: parseInt(e.target.value) })} style={{width:'100%', marginBottom: '5px'}} />
+                      <input type="range" min="-100" max="100" value={Number(primaryNode.data?.textOffsetY || 0)} onChange={(e) => updateSelectedNodes({ textOffsetY: parseInt(e.target.value) })} style={{width:'100%'}} />
+                  </div>
+              )}
 
               <label style={{fontSize:'10px', fontWeight: 'bold'}}>全体の透明度</label>
               <input type="range" min="0.1" max="1" step="0.1" value={Number(primaryNode.style?.opacity ?? 1)} onChange={(e) => { takeSnapshot(); updateSelectedNodes({}, { opacity: parseFloat(e.target.value) })}} style={{width:'100%', marginBottom:'10px'}} />
@@ -1248,6 +1235,18 @@ function FlowEditor() {
                 <h3 style={{fontSize:'14px', margin: 0}}>線のデザイン</h3>
                 <button onClick={clearSelection} style={{ border: 'none', background: 'none', fontSize: '18px', cursor: 'pointer', padding: '0 5px' }}>×</button>
               </div>
+
+              {/* ★ 新機能：線の中に文字を入力 */}
+              <label style={{fontSize:'11px', fontWeight: 'bold'}}>線の文字</label>
+              <input type="text" value={selectedEdge.label || ''} onChange={(e) => updateEdgeDesign({ label: e.target.value })} style={{width:'100%', padding:'6px', border:'1px solid #ccc', borderRadius:'4px', marginBottom:'15px', fontSize:'12px'}} placeholder="線に文字を入れる..." />
+
+              {/* ★ 新機能：YES / NO 線のワンタッチ追加 */}
+              <label style={{fontSize:'11px', fontWeight: 'bold'}}>文字入り線 (クイック)</label>
+              <div style={{ display:'flex', gap:'5px', marginTop: '5px', marginBottom: '20px' }}>
+                <button onClick={() => updateEdgeDesign({ label: 'YES' })} style={{flex:1, padding:'6px', border: '1px solid #ccc', background: '#f9f9f9', cursor: 'pointer', borderRadius: '4px', fontWeight: 'bold', fontSize: '11px'}}>YES 線</button>
+                <button onClick={() => updateEdgeDesign({ label: 'NO' })} style={{flex:1, padding:'6px', border: '1px solid #ccc', background: '#f9f9f9', cursor: 'pointer', borderRadius: '4px', fontWeight: 'bold', fontSize: '11px'}}>NO 線</button>
+              </div>
+
               <label style={{fontSize:'11px', fontWeight: 'bold'}}>太さ</label>
               <div style={{ display:'flex', gap:'5px', marginBottom:'20px', marginTop: '5px' }}>
                 {[2, 6, 12].map(w => <button key={w} onClick={() => { takeSnapshot(); setEdges((eds: any[]) => eds.map((e: any) => e.selected ? { ...e, style: { ...e.style, strokeWidth: w } } : e)); }} style={{flex:1, padding:'6px', fontSize:'12px', cursor: 'pointer', border: '1px solid #ccc', borderRadius: '4px', background: selectedEdge.style?.strokeWidth === w ? '#ddd' : '#fff'}}>{w === 2 ? '細' : w === 6 ? '中' : '太'}</button>)}
@@ -1263,7 +1262,6 @@ function FlowEditor() {
           )}
         </div>
 
-        {/* ★ 下部メニュー（開閉可能＆1行に最適化＆印刷ボタン追加） */}
         {isBottomBarOpen ? (
           <div className="no-print" style={{ padding: '8px 10px', backgroundColor: 'rgba(255,255,255,0.95)', borderTop: '1px solid #eee', display: 'flex', flexWrap: 'nowrap', overflowX: 'auto', justifyContent: 'center', alignItems: 'center', gap: '6px', zIndex: 1001, boxShadow: '0 -4px 10px rgba(0,0,0,0.03)', backdropFilter: 'blur(4px)' }}>
             <button onClick={undo} disabled={past.length === 0} style={{ ...actionBtnStyle, opacity: past.length === 0 ? 0.4 : 1, cursor: past.length === 0 ? 'default' : 'pointer' }}>↩️ 戻る</button>
@@ -1289,7 +1287,6 @@ function FlowEditor() {
                 setLevelData(prev => ({ ...prev, [currentLevel]: { ...(prev[currentLevel] || {}), bgColor: newColor } }));
               }} style={{width:'16px', height:'16px', cursor:'pointer', border: 'none', padding: 0, borderRadius: '4px'}} />
             </div>
-            {/* 下部バーを隠すボタン */}
             <button onClick={() => setIsBottomBarOpen(false)} style={{ padding: '4px 8px', marginLeft: 'auto', fontSize: '10px', background: '#e2e8f0', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold', color: '#475569' }}>▼ 隠す</button>
           </div>
         ) : (
