@@ -10,9 +10,8 @@ import 'katex/dist/katex.min.css';
 
 const GLOBAL_CSS = `
   .html-content p { margin: 0; }
-  .html-content strike, #node-editor strike, #edge-editor strike { text-decoration: line-through double !important; }
-  .html-content *, #node-editor *, #edge-editor * { line-height: 1.2 !important; vertical-align: baseline !important; }
-  #node-editor:empty:before, #edge-editor:empty:before { content: attr(data-placeholder); color: #aaa; pointer-events: none; }
+  .html-content strike { text-decoration: line-through double !important; }
+  .html-content * { line-height: 1.2 !important; vertical-align: baseline !important; }
   
   @media print {
       .no-print { display: none !important; }
@@ -33,16 +32,16 @@ const GLOBAL_CSS = `
   }
 
   .custom-handle, .custom-handle-target { width: 24px !important; height: 24px !important; background: transparent !important; border: none !important; z-index: 10 !important; cursor: crosshair !important; pointer-events: auto !important; display: flex; justify-content: center; align-items: center; }
-  
   .custom-handle::before, .custom-handle-target::before { content: ""; display: block; width: 0px; height: 0px; background: #3b82f6; border-radius: 50%; transition: all 0.2s cubic-bezier(0.34, 1.56, 0.64, 1); border: 2px solid #fff; opacity: 0; }
   .custom-handle:hover::before, .custom-handle-target:hover::before { width: 14px; height: 14px; opacity: 1; box-shadow: 0 1px 3px rgba(0,0,0,0.2); }
-
   .custom-handle-offset-top { top: -4px !important; }
   .custom-handle-offset-bottom { bottom: -4px !important; }
   .custom-handle-offset-left { left: -4px !important; }
   .custom-handle-offset-right { right: -4px !important; }
   
   .print-page-wrapper { page-break-after: always; position: relative; overflow: hidden; margin: 0 auto; border: none !important; outline: none !important; }
+  
+  .editing-mode { outline: 2px solid #3b82f6 !important; border-radius: 4px; padding: 2px; }
 `;
 
 const getEdgePoint = (cx: number, cy: number, w: number, h: number, tx: number, ty: number) => {
@@ -65,6 +64,7 @@ const DoubleEdge = ({ id, sourceX, sourceY, targetX, targetY, sourcePosition, ta
   const [edgePath, labelX, labelY] = getBezierPath({ sourceX, sourceY, sourcePosition, targetX, targetY, targetPosition });
   
   const isDouble = (data as any)?.double;
+  const isEditing = Boolean((data as any)?.isEditing);
   const strokeWidth = Number(style?.strokeWidth) || 1;
   const edgeColor = (data as any)?.color || '#333';
   const labelStyle = (data as any)?.labelStyle || { textAlign: 'center' };
@@ -73,13 +73,8 @@ const DoubleEdge = ({ id, sourceX, sourceY, targetX, targetY, sourcePosition, ta
 
   let rMarkerEnd = markerEnd;
   let rMarkerStart = markerStart;
-  if (mType === 'custom-double-arrow' || mType === 'custom-double-both') {
-    rMarkerEnd = `url(#custom-arrow-${id})`;
-  }
-  if (mType === 'custom-double-both') {
-    rMarkerStart = `url(#custom-arrow-start-${id})`;
-  }
-
+  if (mType === 'custom-double-arrow' || mType === 'custom-double-both') { rMarkerEnd = `url(#custom-arrow-${id})`; }
+  if (mType === 'custom-double-both') { rMarkerStart = `url(#custom-arrow-start-${id})`; }
   const customArrowSize = strokeWidth * 1.5 + 16; 
 
   return (
@@ -107,11 +102,35 @@ const DoubleEdge = ({ id, sourceX, sourceY, targetX, targetY, sourcePosition, ta
         <BaseEdge id={id} path={edgePath} markerEnd={markerEnd} markerStart={markerStart} style={{ ...style, strokeWidth, stroke: edgeColor }} />
       )}
 
-      {label && (
-        <EdgeLabelRenderer>
-          <div className="no-print" style={{ position: 'absolute', transform: `translate(-50%, -50%) translate(${labelX}px,${labelY}px)`, padding: '2px 4px', fontSize: `${fontSize}px`, fontWeight: 'bold', color: '#333', pointerEvents: 'none', zIndex: 1000, textShadow: '0 0 3px var(--bg-color, #fff), 0 0 3px var(--bg-color, #fff), 0 0 3px var(--bg-color, #fff)', width: '200px', ...labelStyle }} dangerouslySetInnerHTML={{ __html: renderHTMLWithMath(String(label)) }} />
-        </EdgeLabelRenderer>
-      )}
+      <EdgeLabelRenderer>
+        <div className="no-print" style={{ position: 'absolute', transform: `translate(-50%, -50%) translate(${labelX}px,${labelY}px)`, zIndex: 1000, pointerEvents: 'auto' }}>
+            <div
+                id={`edit-edge-${id}`}
+                className={isEditing ? "nodrag html-content editing-mode" : "nodrag html-content"}
+                contentEditable={isEditing}
+                suppressContentEditableWarning
+                onBlur={(e) => window.dispatchEvent(new CustomEvent('custom-edge-blur', { detail: { id, html: e.currentTarget.innerHTML } }))}
+                style={{
+                    padding: '2px 4px', fontSize: `${fontSize}px`, fontWeight: 'bold', color: '#333',
+                    textShadow: '0 0 3px var(--bg-color, #fff), 0 0 3px var(--bg-color, #fff), 0 0 3px var(--bg-color, #fff)',
+                    width: '200px', cursor: isEditing ? 'text' : 'pointer', minHeight: '1.2em', outline: 'none',
+                    ...labelStyle
+                }}
+                ref={el => {
+                    if (el && isEditing && document.activeElement !== el) {
+                        setTimeout(() => {
+                            el.focus();
+                            if (typeof window.getSelection !== 'undefined') {
+                                const range = document.createRange(); const sel = window.getSelection();
+                                range.selectNodeContents(el); range.collapse(false); sel?.removeAllRanges(); sel?.addRange(range);
+                            }
+                        }, 10);
+                    }
+                }}
+                dangerouslySetInnerHTML={{ __html: isEditing ? String(label) : renderHTMLWithMath(String(label)) }}
+            />
+        </div>
+      </EdgeLabelRenderer>
     </>
   );
 };
@@ -133,9 +152,7 @@ const renderHTMLWithMath = (html: string) => {
       let parsed = html.replace(/\$\$(.*?)\$\$/g, (_, math) => katex.renderToString(math, {displayMode: true, throwOnError: false}));
       parsed = parsed.replace(/\$(.*?)\$/g, (_, math) => katex.renderToString(math, {displayMode: false, throwOnError: false}));
       return parsed;
-  } catch(e) {
-      return html;
-  }
+  } catch(e) { return html; }
 };
 
 const extractFirstLineText = (html: string) => {
@@ -150,7 +167,6 @@ const extractFirstLineText = (html: string) => {
 
 const safeCloneNodes = (nds: any[]) => nds.map(n => ({ ...n, data: { ...n.data }, style: { ...n.style }, position: { ...n.position }, width: n.width, height: n.height }));
 const safeCloneEdges = (eds: any[]) => eds.map(e => ({ ...e, data: { ...e.data }, style: { ...e.style }, zIndex: e.zIndex }));
-
 const edgeTypes = { default: DoubleEdge };
 const PASTEL_COLORS = ['#FFB7B2', '#FFDAC1', '#E2F0CB', '#B5EAD7', '#C7CEEA', '#F3E5F5', '#E1F5FE', '#FFF9C4', '#FCE4EC', '#E8F5E9'];
 const QUICK_TEXT_COLORS = ['#000000', '#FF0000', '#008000', '#0000FF', '#FFF000'];
@@ -161,7 +177,6 @@ function FlowEditor() {
   const jsonImportRef = useRef<HTMLInputElement>(null);
   
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
-  const [isExpandedEditor, setIsExpandedEditor] = useState(false);
   const [isTopBarOpen, setIsTopBarOpen] = useState(true);
   const [isBottomBarOpen, setIsBottomBarOpen] = useState(true);
   
@@ -181,7 +196,6 @@ function FlowEditor() {
   const [guides, setGuides] = useState<{ lineX?: number, lineY?: number }>({});
   
   const [partialFontSize, setPartialFontSize] = useState<number>(14);
-  
   const [selectedCells, setSelectedCells] = useState<Record<string, string[]>>({});
   const [tableBorderWidth, setTableBorderWidth] = useState('1px');
   const [tableBorderStyle, setTableBorderStyle] = useState('solid');
@@ -189,10 +203,6 @@ function FlowEditor() {
   
   const previewDragRef = useRef<{ id: string, startX: number, startY: number, initX: number, initY: number, moved: boolean } | null>(null);
   const imageCropDragRef = useRef<{ id: string, startX: number, startY: number, initX: number, initY: number } | null>(null);
-  
-  const editorRef = useRef<HTMLDivElement>(null);
-  const edgeEditorRef = useRef<HTMLDivElement>(null);
-  const savedRangeRef = useRef<Range | null>(null);
 
   const nodesRef = useRef<any[]>([]);
   const edgesRef = useRef<any[]>([]);
@@ -210,9 +220,12 @@ function FlowEditor() {
   const primaryNode = selectedNodes.length > 0 ? selectedNodes[0] : null;
   const selectedEdge = useMemo(() => edges.find((e: any) => e.selected) || null, [edges]);
 
+  // ★ここで確実に関数を定義します
+  const isTableEditing = primaryNode?.data?.isTable && (selectedCells[primaryNode.id]?.length || 0) > 0;
+
   const clearSelection = useCallback(() => {
-    setNodes((nds: any[]) => nds.map((n: any) => ({...n, selected: false})));
-    setEdges((eds: any[]) => eds.map((e: any) => ({...e, selected: false})));
+    setNodes((nds: any[]) => nds.map((n: any) => ({...n, selected: false, data: { ...n.data, isEditing: false, editingCell: null }})));
+    setEdges((eds: any[]) => eds.map((e: any) => ({...e, selected: false, data: { ...e.data, isEditing: false }})));
     setSelectedCells({});
   }, []);
 
@@ -238,6 +251,21 @@ function FlowEditor() {
       setNodes(safeCloneNodes(next.nodes));
       setEdges(safeCloneEdges(next.edges));
   }, [future]);
+
+  // ★ 表の行・列追加関数を確実に定義します
+  const addTableRowCol = (type: 'row' | 'col') => {
+      takeSnapshot();
+      if (!primaryNode || !primaryNode.data.isTable) return;
+      setNodes(nds => nds.map(n => {
+          if (n.id !== primaryNode.id) return n;
+          const newRows = type === 'row' ? n.data.rows + 1 : n.data.rows;
+          const newCols = type === 'col' ? n.data.cols + 1 : n.data.cols;
+          const newCells = { ...n.data.cells };
+          if (type === 'row') for(let c=0; c<newCols; c++) newCells[`${newRows-1}-${c}`] = { content: '', style: { border: '1px solid #ccc'} };
+          if (type === 'col') for(let r=0; r<newRows; r++) newCells[`${r}-${newCols-1}`] = { content: '', style: { border: '1px solid #ccc'} };
+          return { ...n, data: { ...n.data, rows: newRows, cols: newCols, cells: newCells } };
+      }));
+  };
 
   useEffect(() => {
     if (primaryNode && !primaryNode.data?.isTable) {
@@ -306,9 +334,7 @@ function FlowEditor() {
                   }
                   alert('🎉 データを正常に読み込みました！');
               }
-          } catch(err) {
-              alert('❌ ファイルの読み込みに失敗しました。正しいバックアップファイルを選択してください。');
-          }
+          } catch(err) { alert('❌ ファイルの読み込みに失敗しました。'); }
       };
       reader.readAsText(file);
       if (jsonImportRef.current) jsonImportRef.current.value = ''; 
@@ -320,14 +346,7 @@ function FlowEditor() {
           if (next) {
               setNodes(nds => {
                   if (nds.some(n => n.type === 'printZone')) return nds;
-                  const newId = `print-zone-${Date.now()}`;
-                  return [...nds, {
-                      id: newId, type: 'printZone', position: { x: 0, y: 0 },
-                      data: { label: '印刷範囲 1' },
-                      style: { width: 800, height: 1130 },
-                      width: 800, height: 1130,
-                      zIndex: 99999
-                  }];
+                  return [...nds, { id: `print-zone-${Date.now()}`, type: 'printZone', position: { x: 0, y: 0 }, data: { label: '印刷範囲 1' }, style: { width: 800, height: 1130 }, width: 800, height: 1130, zIndex: 99999 }];
               });
           } else {
               setNodes(nds => nds.filter(n => n.type !== 'printZone'));
@@ -339,25 +358,14 @@ function FlowEditor() {
   const addPrintZone = useCallback(() => {
       setNodes(nds => {
           const count = nds.filter(n => n.type === 'printZone').length;
-          return [...nds, {
-              id: `print-zone-${Date.now()}`, type: 'printZone', position: { x: count * 50, y: count * 50 },
-              data: { label: `印刷範囲 ${count + 1}` },
-              style: { width: 800, height: 1130 },
-              width: 800, height: 1130,
-              zIndex: 99999
-          }];
+          return [...nds, { id: `print-zone-${Date.now()}`, type: 'printZone', position: { x: count * 50, y: count * 50 }, data: { label: `印刷範囲 ${count + 1}` }, style: { width: 800, height: 1130 }, width: 800, height: 1130, zIndex: 99999 }];
       });
   }, []);
 
   const executePrint = useCallback(() => {
       clearSelection();
       setIsExecutingPrint(true);
-      setTimeout(() => {
-          window.print();
-          setTimeout(() => {
-              setIsExecutingPrint(false);
-          }, 500); 
-      }, 1000); 
+      setTimeout(() => { window.print(); setTimeout(() => { setIsExecutingPrint(false); }, 500); }, 1500); 
   }, [clearSelection]);
 
   const loadFileInitial = (id: string, allFiles = files) => {
@@ -390,7 +398,7 @@ function FlowEditor() {
           setLevelData(nextLevelData); setCurrentLevel(nextLevel); 
           setCurrentLabel(nextLevelData[nextLevel]?.label || target.currentLabel || 'TOP層');
           setNodes(nextLevelData[nextLevel]?.nodes || []); setEdges(nextLevelData[nextLevel]?.edges || []);
-          setPast([]); setFuture([]); savedRangeRef.current = null; setSelectedCells({});
+          setPast([]); setFuture([]); setSelectedCells({});
         }
         return currentFiles;
       });
@@ -424,26 +432,17 @@ function FlowEditor() {
     takeSnapshot();
     setEdges((eds: any[]) => eds.map((e: any) => {
       if (!e.selected) return e;
-      
       const newStrokeWidth = config.strokeWidth !== undefined ? config.strokeWidth : (Number(e.style?.strokeWidth) || 1);
       const newColor = config.color !== undefined ? config.color : (e.data?.color || '#333');
       const mSize = Math.max(12, newStrokeWidth * 3); 
-      
       const baseMarker = { type: MarkerType.ArrowClosed, color: newColor, width: mSize, height: mSize };
       
       let newDouble = config.double !== undefined ? config.double : e.data?.double;
       let newMarkerType = config.markerType !== undefined ? config.markerType : e.data?.markerType;
       let newLabel = config.label !== undefined ? config.label : e.label;
-      
-      if (config.resetDesign) {
-         newDouble = config.double || false;
-         newMarkerType = config.markerType || 'none';
-         if(config.label !== undefined) newLabel = config.label;
-      }
+      if (config.resetDesign) { newDouble = config.double || false; newMarkerType = config.markerType || 'none'; if(config.label !== undefined) newLabel = config.label; }
 
-      let mEnd = undefined;
-      let mStart = undefined;
-
+      let mEnd = undefined; let mStart = undefined;
       if (newMarkerType === 'arrow') { mEnd = baseMarker; }
       if (newMarkerType === 'both') { mEnd = baseMarker; mStart = baseMarker; }
 
@@ -451,186 +450,56 @@ function FlowEditor() {
       const newFontSize = config.fontSize !== undefined ? config.fontSize : (e.data?.fontSize || 14);
 
       return { 
-          ...e, 
-          style: { ...e.style, strokeWidth: newStrokeWidth, stroke: newColor },
+          ...e, style: { ...e.style, strokeWidth: newStrokeWidth, stroke: newColor },
           data: { ...(e.data || {}), double: newDouble, color: newColor, labelStyle: newLabelStyle, fontSize: newFontSize, markerType: newMarkerType }, 
-          markerEnd: mEnd, 
-          markerStart: mStart, 
-          label: newLabel 
+          markerEnd: mEnd, markerStart: mStart, label: newLabel 
       };
     }));
   }, [takeSnapshot]);
 
-  const saveSelection = () => {
-    const sel = window.getSelection();
-    if (sel && sel.rangeCount > 0) savedRangeRef.current = sel.getRangeAt(0).cloneRange();
-  };
-
-  const applyUnifiedFormat = (type: 'fontName' | 'bold' | 'strikeThrough' | 'foreColor' | 'fontSize', value: any = '') => {
-      takeSnapshot();
-      
-      if (document.activeElement === edgeEditorRef.current && edgeEditorRef.current && selectedEdge) {
-          const selection = window.getSelection();
-          if (!selection) return;
-          if (savedRangeRef.current) { selection.removeAllRanges(); selection.addRange(savedRangeRef.current); }
-          document.execCommand(type, false, value);
-          if (selection.rangeCount > 0) savedRangeRef.current = selection.getRangeAt(0).cloneRange();
-          updateEdgeDesign({ label: edgeEditorRef.current.innerHTML });
+  const applyUnifiedFormat = (type: string, value: any = '') => {
+      const activeEl = document.activeElement as HTMLElement;
+      if (!activeEl || (!activeEl.isContentEditable && activeEl.tagName !== 'DIV')) {
+          alert('文字を選択してから実行してください。\n（図形をクリック → Tabキーで編集モードにする → 文字をなぞる）');
           return;
       }
-
-      const isActive = document.activeElement === editorRef.current;
-      const isTableEditing = primaryNode?.data?.isTable && (selectedCells[primaryNode.id]?.length || 0) > 0;
-
-      if (isActive && editorRef.current) {
-          const selection = window.getSelection();
-          if (!selection) return;
-          if (savedRangeRef.current) { selection.removeAllRanges(); selection.addRange(savedRangeRef.current); }
-
-          if (type === 'fontSize') {
-              if (selection.rangeCount === 0) return;
-              const range = selection.getRangeAt(0);
-              if (range.collapsed) {
-                  let currentNode = range.startContainer as Node | null;
-                  if (currentNode && currentNode.nodeType === Node.TEXT_NODE) currentNode = currentNode.parentNode;
-                  if (currentNode && currentNode.nodeName === 'SPAN' && (currentNode.textContent === '\u200B' || currentNode.textContent === '')) {
-                      (currentNode as HTMLElement).style.fontSize = value;
-                  } else {
-                      const span = document.createElement('span');
-                      span.style.fontSize = value; span.style.lineHeight = '1.2'; span.innerHTML = '\u200B'; 
-                      range.insertNode(span); range.setStart(span.firstChild!, 1); range.collapse(true);
-                      selection.removeAllRanges(); selection.addRange(range);
-                  }
-              } else {
-                  document.execCommand('fontSize', false, '7');
-                  const fonts = editorRef.current.querySelectorAll('font[size="7"]');
-                  fonts.forEach((f) => {
-                      const el = f as HTMLElement; el.removeAttribute('size'); el.style.fontSize = value; el.style.lineHeight = '1.2';
-                  });
-              }
-          } else {
-              document.execCommand(type, false, value);
-          }
-          if (selection.rangeCount > 0) savedRangeRef.current = selection.getRangeAt(0).cloneRange();
-          
-          if (isTableEditing) {
-              const activeCells = selectedCells[primaryNode.id];
-              setNodes(nds => nds.map(n => n.id === primaryNode.id ? {
-                  ...n, data: { ...n.data, cells: { ...n.data.cells, [activeCells[0]]: { ...n.data.cells[activeCells[0]], content: editorRef.current!.innerHTML } } }
-              } : n));
-          } else {
-              updateSelectedNodes({ content: editorRef.current.innerHTML });
-          }
+      takeSnapshot();
+      if (type === 'fontSize') {
+          document.execCommand('fontSize', false, '7');
+          const fonts = activeEl.querySelectorAll('font[size="7"]');
+          fonts.forEach((f) => {
+              const element = f as HTMLElement;
+              element.removeAttribute('size');
+              element.style.fontSize = value;
+              element.style.lineHeight = '1.2';
+          });
       } else {
-          if (isTableEditing) {
-              const activeCells = selectedCells[primaryNode.id];
-              setNodes(nds => nds.map(n => {
-                  if (n.id !== primaryNode.id) return n;
-                  const newCells = { ...n.data.cells };
-                  activeCells.forEach(cId => {
-                      const cell = newCells[cId] || { content: '', style: {} };
-                      let newStyle = { ...cell.style };
-                      if (type === 'fontSize') newStyle.fontSize = value;
-                      if (type === 'foreColor') newStyle.color = value;
-                      if (type === 'fontName') newStyle.fontFamily = value;
-                      if (type === 'bold') newStyle.fontWeight = newStyle.fontWeight === 'bold' ? 'normal' : 'bold';
-                      if (type === 'strikeThrough') newStyle.textDecoration = newStyle.textDecoration === 'line-through' ? 'none' : 'line-through';
-                      newCells[cId] = { ...cell, style: newStyle };
-                  });
-                  return { ...n, data: { ...n.data, cells: newCells } };
-              }));
-          } else {
-              const styleKeyMap: any = { fontName: 'fontFamily', bold: 'fontWeight', strikeThrough: 'textDecoration', foreColor: 'color', fontSize: 'fontSize' };
-              const styleKey = styleKeyMap[type];
-              let styleVal = value;
-              if (type === 'bold') styleVal = primaryNode?.style?.fontWeight === 'bold' ? 'normal' : 'bold';
-              if (type === 'strikeThrough') styleVal = primaryNode?.style?.textDecoration === 'line-through double' ? 'none' : 'line-through double';
-
-              setNodes((nds: any[]) => nds.map((n: any) => {
-                  if (!n.selected) return n;
-                  const tempDiv = document.createElement('div'); tempDiv.innerHTML = n.data?.content || '';
-                  tempDiv.querySelectorAll('*').forEach(el => {
-                      const e = el as HTMLElement;
-                      if (type === 'fontSize') { if(e.style.fontSize) e.style.fontSize = ''; if(e.tagName==='FONT') e.removeAttribute('size'); }
-                      if (type === 'foreColor') { if(e.style.color) e.style.color = ''; if(e.tagName==='FONT') e.removeAttribute('color'); }
-                      if (type === 'fontName') { if(e.style.fontFamily) e.style.fontFamily = ''; if(e.tagName==='FONT') e.removeAttribute('face'); }
-                      if (type === 'bold') { if(e.style.fontWeight) e.style.fontWeight = ''; if(e.tagName==='B'||e.tagName==='STRONG') e.style.fontWeight = 'normal'; }
-                      if (type === 'strikeThrough') { if(e.style.textDecoration) e.style.textDecoration = ''; if(e.tagName==='STRIKE') e.style.textDecoration = 'none'; }
-                  });
-                  return { ...n, data: { ...n.data, content: tempDiv.innerHTML }, style: { ...n.style, [styleKey]: styleVal } };
-              }));
-          }
+          document.execCommand(type, false, value);
       }
   };
 
   const handleResetFormat = () => {
-      takeSnapshot();
-      setPartialFontSize(14);
-      const isActive = document.activeElement === editorRef.current;
-      const isTableEditing = primaryNode?.data?.isTable && (selectedCells[primaryNode.id]?.length || 0) > 0;
-      
-      if (isActive && editorRef.current) {
-          editorRef.current.focus();
-          const selection = window.getSelection();
-          if (!selection) return;
-          if (savedRangeRef.current) { selection.removeAllRanges(); selection.addRange(savedRangeRef.current); }
-
-          if (selection.rangeCount > 0) {
-              const range = selection.getRangeAt(0);
-              if (range.collapsed) {
-                  if (document.queryCommandState('bold')) document.execCommand('bold');
-                  if (document.queryCommandState('strikeThrough')) document.execCommand('strikeThrough');
-                  document.execCommand('foreColor', false, '#000000');
-                  document.execCommand('fontName', false, 'sans-serif');
-                  const span = document.createElement('span');
-                  span.style.fontSize = '14px'; span.style.color = '#000000'; span.style.fontWeight = 'normal'; span.style.textDecoration = 'none'; span.style.fontFamily = 'sans-serif'; span.innerHTML = '&#8203;'; 
-                  range.insertNode(span); range.setStart(span.firstChild!, 1); range.collapse(true);
-                  selection.removeAllRanges(); selection.addRange(range);
-              } else {
-                  document.execCommand('removeFormat');
-                  document.execCommand('fontSize', false, '7');
-                  const fonts = editorRef.current.querySelectorAll('font[size="7"]');
-                  fonts.forEach((f) => {
-                      const el = f as HTMLElement; el.removeAttribute('size'); el.style.fontSize = '14px'; el.style.color = '#000000'; el.style.fontWeight = 'normal'; el.style.textDecoration = 'none'; el.style.fontFamily = 'sans-serif'; el.style.lineHeight = '1.2';
-                  });
-              }
-              savedRangeRef.current = selection.getRangeAt(0).cloneRange();
-          }
-          if (isTableEditing) {
-              const activeCells = selectedCells[primaryNode.id];
-              setNodes(nds => nds.map(n => n.id === primaryNode.id ? {
-                  ...n, data: { ...n.data, cells: { ...n.data.cells, [activeCells[0]]: { ...n.data.cells[activeCells[0]], content: editorRef.current!.innerHTML } } }
-              } : n));
-          } else {
-              updateSelectedNodes({ content: editorRef.current.innerHTML });
-          }
-      } else {
-          if (isTableEditing) {
-              const activeCells = selectedCells[primaryNode.id];
-              setNodes(nds => nds.map(n => {
-                  if (n.id !== primaryNode.id) return n;
-                  const newCells = { ...n.data.cells };
-                  activeCells.forEach(cId => {
-                      newCells[cId] = { ...newCells[cId], style: { border: newCells[cId]?.style?.border || '1px solid #ccc' } };
-                  });
-                  return { ...n, data: { ...n.data, cells: newCells } };
-              }));
-          } else {
-              setNodes((nds: any[]) => nds.map((n: any) => {
-                  if (!n.selected) return n;
-                  const tempDiv = document.createElement('div'); tempDiv.innerHTML = n.data?.content || '';
-                  tempDiv.querySelectorAll('*').forEach(el => {
-                      const e = el as HTMLElement;
-                      e.style.fontSize = ''; e.style.color = ''; e.style.fontFamily = ''; e.style.fontWeight = ''; e.style.textDecoration = '';
-                      if (e.tagName==='FONT' || e.tagName==='B' || e.tagName==='STRONG' || e.tagName==='STRIKE') e.outerHTML = e.innerHTML;
-                  });
-                  return { ...n, data: { ...n.data, content: tempDiv.innerHTML }, style: { ...n.style, fontSize: '14px', color: '#000000', fontFamily: 'sans-serif', fontWeight: 'normal', textDecoration: 'none' } };
-              }));
-          }
+      const activeEl = document.activeElement as HTMLElement;
+      if (!activeEl || (!activeEl.isContentEditable && activeEl.tagName !== 'DIV')) {
+         alert('文字を選択してから実行してください。\n（図形をクリック → Tabキーで編集モードにする → 文字をなぞる）');
+         return;
       }
+      takeSnapshot();
+      document.execCommand('removeFormat');
+      document.execCommand('fontSize', false, '7');
+      const fonts = activeEl.querySelectorAll('font[size="7"]');
+      fonts.forEach((f) => {
+          const element = f as HTMLElement;
+          element.removeAttribute('size');
+          element.style.fontSize = '14px';
+          element.style.color = '#000000';
+          element.style.fontWeight = 'normal';
+          element.style.textDecoration = 'none';
+          element.style.fontFamily = 'sans-serif';
+          element.style.lineHeight = '1.2';
+      });
   };
 
-  // ★修正箇所：外側の箱を外したため、縦横の解釈が素直になりました。
   const handleLayout = (hAlign?: string, vAlign?: string) => {
       takeSnapshot();
       if (primaryNode?.data?.isTable && (selectedCells[primaryNode.id]?.length || 0) > 0) {
@@ -650,12 +519,10 @@ function FlowEditor() {
       } else {
           let styleUpdate: any = {};
           if (hAlign) {
-              styleUpdate.textAlign = hAlign;
-              // 横方向の配置（Columnの中での横）
+              styleUpdate.textAlign = hAlign; 
               styleUpdate.alignItems = hAlign === 'left' ? 'flex-start' : hAlign === 'right' ? 'flex-end' : 'center';
           }
           if (vAlign) {
-              // 縦方向の配置（Columnの中での縦）
               styleUpdate.justifyContent = vAlign === 'top' ? 'flex-start' : vAlign === 'bottom' ? 'flex-end' : 'center';
           }
           updateSelectedNodes({}, styleUpdate);
@@ -671,10 +538,7 @@ function FlowEditor() {
           if (n.id !== primaryNode.id) return n;
           const newCells = { ...n.data.cells };
           activeCells.forEach(cId => {
-              newCells[cId] = {
-                  ...newCells[cId],
-                  style: { ...newCells[cId]?.style, border: `${tableBorderWidth} ${tableBorderStyle} ${tableBorderColor}` }
-              };
+              newCells[cId] = { ...newCells[cId], style: { ...newCells[cId]?.style, border: `${tableBorderWidth} ${tableBorderStyle} ${tableBorderColor}` } };
           });
           return { ...n, data: { ...n.data, cells: newCells } };
       }));
@@ -690,19 +554,13 @@ function FlowEditor() {
         takeSnapshot();
         const newNodes = copiedNodesRef.current.map(original => {
             const newId = `node-${Date.now()}-${Math.random()}`;
-            return {
-                ...original, id: newId, selected: true,
-                position: { x: original.position.x + 30, y: original.position.y + 30 },
-                zIndex: Math.max(0, ...nodesRef.current.map(n => Number(n.zIndex) || 0)) + 1
-            };
+            return { ...original, id: newId, selected: true, position: { x: original.position.x + 30, y: original.position.y + 30 }, zIndex: Math.max(0, ...nodesRef.current.map(n => Number(n.zIndex) || 0)) + 1 };
         });
         setNodes((nds: any[]) => [...nds.map((n: any) => ({...n, selected: false})), ...newNodes]);
     }
   }, [takeSnapshot]);
 
-  const handleDuplicate = useCallback(() => {
-      handleCopy(); setTimeout(handlePaste, 10);
-  }, [handleCopy, handlePaste]);
+  const handleDuplicate = useCallback(() => { handleCopy(); setTimeout(handlePaste, 10); }, [handleCopy, handlePaste]);
 
   const enterLevel = useCallback((id: string, defaultLabel: string) => {
     setLevelData(prev => ({ 
@@ -715,7 +573,7 @@ function FlowEditor() {
       if (target?.data?.isShape || target?.data?.isImage || target?.data?.isTable) return nds;
       
       setHistoryLevel(prev => [...prev, currentLevel]);
-      setCurrentLevel(id); savedRangeRef.current = null; setSelectedCells({});
+      setCurrentLevel(id); setSelectedCells({});
       
       const nextData = levelData[id] || { nodes: [], edges: [] };
       setCurrentLabel(nextData.label && nextData.label !== '階層中' ? nextData.label : defaultLabel || '階層中');
@@ -730,7 +588,7 @@ function FlowEditor() {
     if (historyLevel.length === 0) return;
     const newHist = [...historyLevel]; const prevLevel = newHist.pop()!;
     setLevelData(prev => ({ ...prev, [currentLevel]: { nodes: safeCloneNodes(nodesRef.current), edges: safeCloneEdges(edgesRef.current), bgColor: prev[currentLevel]?.bgColor, label: currentLabelRef.current } }));
-    setCurrentLevel(prevLevel); setHistoryLevel(newHist); savedRangeRef.current = null; setSelectedCells({});
+    setCurrentLevel(prevLevel); setHistoryLevel(newHist); setSelectedCells({});
     const prevData = levelData[prevLevel] || { nodes: [], edges: [] };
     setCurrentLabel(prevData.label || (prevLevel === 'root' ? 'TOP層' : '階層中'));
     setNodes((prevData.nodes || []).map((n:any) => ({...n, selected: false})));
@@ -741,7 +599,7 @@ function FlowEditor() {
   const goTop = () => {
     if (historyLevel.length === 0) return;
     setLevelData(prev => ({ ...prev, [currentLevel]: { nodes: safeCloneNodes(nodesRef.current), edges: safeCloneEdges(edgesRef.current), bgColor: prev[currentLevel]?.bgColor, label: currentLabelRef.current } }));
-    setCurrentLevel('root'); setHistoryLevel([]); savedRangeRef.current = null; setSelectedCells({});
+    setCurrentLevel('root'); setHistoryLevel([]); setSelectedCells({});
     const rootData = levelData['root'] || { nodes: [], edges: [] };
     setCurrentLabel(rootData.label || 'TOP層');
     setNodes((rootData.nodes || []).map((n:any) => ({...n, selected: false})));
@@ -752,23 +610,20 @@ function FlowEditor() {
   const addNode = useCallback((type: 'text' | 'image' | 'shape' | 'table') => {
     takeSnapshot();
     const id = `node-${Date.now()}`;
-    
     const selNodes = nodesRef.current.filter(n => n.selected);
     const parent = selNodes.length === 1 ? selNodes[0] : null;
 
-    let data: any = { content: '項目', previewVisible: false, previewStyle: { opacity: 0.7, offsetX: 0, offsetY: -150, width: 180, height: 120 }, textOffsetX: 0, textOffsetY: 0 };
-    // ★ 修正箇所：デフォルト設定を「左上ギリギリ」に変更（alignItems と justifyContent を flex-startにし、paddingを詰める）
-    let style: any = { backgroundColor: '#ffffff', color: '#000', borderRadius: '12px', fontSize: '14px', width: 200, height: 100, alignItems: 'flex-start', justifyContent: 'flex-start', textAlign: 'left', padding: '4px', borderColor: 'transparent' };
+    let data: any = { content: '項目', previewVisible: false, previewStyle: { opacity: 0.7, offsetX: 0, offsetY: -150, width: 180, height: 120 }, textOffsetX: 0, textOffsetY: 0, isEditing: false };
+    let style: any = { backgroundColor: '#ffffff', color: '#000000', borderRadius: '12px', fontSize: '14px', fontFamily: 'sans-serif', width: 200, height: 100, alignItems: 'flex-start', justifyContent: 'flex-start', textAlign: 'left', padding: '4px', borderColor: 'transparent' };
     
     if (type === 'image') { fileInputRef.current?.click(); return; }
-    
     if (type === 'shape') {
-      data = { content: '', isShape: true, shapeType: 'rect', keepRatio: false, textOffsetX: 0, textOffsetY: 0 };
+      data = { content: '', isShape: true, shapeType: 'rect', keepRatio: false, textOffsetX: 0, textOffsetY: 0, isEditing: false };
       style = { ...style, backgroundColor: '#eee', borderRadius: '4px', border: '3px solid #333', borderColor: '#333' };
     }
     if (type === 'table') {
       data = { 
-          isTable: true, rows: 2, cols: 2, textOffsetX: 0, textOffsetY: 0,
+          isTable: true, rows: 2, cols: 2, textOffsetX: 0, textOffsetY: 0, editingCell: null,
           cells: {
               "0-0": { content: "セル", style: { border: '1px solid #ccc' } }, "0-1": { content: "セル", style: { border: '1px solid #ccc' } },
               "1-0": { content: "セル", style: { border: '1px solid #333' } }, "1-1": { content: "セル", style: { border: '1px solid #333' } }
@@ -778,33 +633,20 @@ function FlowEditor() {
     }
 
     if (parent && (type === 'text' || type === 'table')) {
-        const sourceHandle = 'bottom-src';
-        const targetHandle = 'top-tgt';
-
+        const sourceHandle = 'bottom-src'; const targetHandle = 'top-tgt';
         const edgeId = `e-${parent.id}-${id}`;
-        setEdges((eds: any[]) => [...eds.map((e: any) => ({...e, selected:false})), { 
-            id: edgeId, source: parent.id, target: id, sourceHandle, targetHandle, type: 'default', style: { strokeWidth: 1 }, zIndex: 0 
-        }]);
-        
+        setEdges((eds: any[]) => [...eds.map((e: any) => ({...e, selected:false})), { id: edgeId, source: parent.id, target: id, sourceHandle, targetHandle, type: 'default', style: { strokeWidth: 1 }, zIndex: 0 }]);
         setNodes((nds: any[]) => {
             const maxZ = Math.max(0, ...nds.map((n: any) => Number(n.zIndex) || 0));
-            const parentW = Number(parent.style?.width || 200);
-            const parentH = Number(parent.style?.height || 100);
-            
-            const newX = parent.position.x;
-            const newY = parent.position.y + parentH + 80;
-
+            const parentW = Number(parent.style?.width || 200); const parentH = Number(parent.style?.height || 100);
+            const newX = parent.position.x; const newY = parent.position.y + parentH + 80;
             const newNode = { id, selected: true, position: { x: newX, y: newY }, data, style, zIndex: maxZ + 1 };
             let updatedNodes = [...nds.map((n: any) => ({...n, selected: false})), newNode];
-
             const childIds = edgesRef.current.filter(e => e.source === parent.id).map(e => e.target).concat(id);
             const children = updatedNodes.filter(n => childIds.includes(n.id));
-            
             if (children.length > 0) {
-                const spacing = 240; 
-                const totalSpan = (children.length - 1) * spacing;
+                const spacing = 240; const totalSpan = (children.length - 1) * spacing;
                 const startPos = (parent.position.x + parentW/2) - totalSpan / 2;
-                
                 children.forEach((child, index) => {
                     const childNode = updatedNodes.find(n => n.id === child.id);
                     if (childNode) {
@@ -826,26 +668,27 @@ function FlowEditor() {
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       const activeEl = document.activeElement as HTMLElement;
-      const isEditing = activeEl?.tagName === 'INPUT' || activeEl?.tagName === 'TEXTAREA' || activeEl?.isContentEditable;
+      const isContentEditing = activeEl?.tagName === 'INPUT' || activeEl?.tagName === 'TEXTAREA' || activeEl?.isContentEditable;
       
-      if (e.key === 'Tab' && !isEditing) {
-          e.preventDefault();
-          if (selectedNodes.length === 1 && editorRef.current) {
-              editorRef.current.focus();
-              const sel = window.getSelection();
-              const range = document.createRange();
-              range.selectNodeContents(editorRef.current);
-              range.collapse(false);
-              sel?.removeAllRanges();
-              sel?.addRange(range);
-          } else if (selectedEdge && edgeEditorRef.current) {
-              edgeEditorRef.current.focus();
-              const sel = window.getSelection();
-              const range = document.createRange();
-              range.selectNodeContents(edgeEditorRef.current);
-              range.collapse(false);
-              sel?.removeAllRanges();
-              sel?.addRange(range);
+      if (e.key === 'Tab') {
+          const isNodeEditing = nodesRef.current.some(n => n.data?.isEditing || n.data?.editingCell);
+          const isEdgeEditing = edgesRef.current.some(edge => edge.data?.isEditing);
+          
+          if (!isNodeEditing && !isEdgeEditing) {
+              e.preventDefault();
+              if (selectedNodes.length === 1) {
+                  const node = selectedNodes[0];
+                  if (node.data?.isTable) {
+                      const activeCells = selectedCells[node.id] || [];
+                      if (activeCells.length > 0) {
+                          setNodes(nds => nds.map(n => n.id === node.id ? { ...n, data: { ...n.data, editingCell: activeCells[0] } } : n));
+                      }
+                  } else {
+                      setNodes(nds => nds.map(n => n.id === node.id ? { ...n, data: { ...n.data, isEditing: true } } : n));
+                  }
+              } else if (selectedEdge) {
+                  setEdges(eds => eds.map(edge => edge.id === selectedEdge.id ? { ...edge, data: { ...edge.data, isEditing: true } } : edge));
+              }
           }
           return;
       }
@@ -856,15 +699,12 @@ function FlowEditor() {
       }
       if ((e.ctrlKey || e.metaKey) && e.key === 'y') { e.preventDefault(); redo(); return; }
 
-      if (isEditing) return;
+      if (isContentEditing) return;
 
-      if (e.key === 'Enter') {
-        e.preventDefault(); addNode('text');
-      } else if ((e.ctrlKey || e.metaKey) && e.key === 'c') {
-        e.preventDefault(); handleCopy();
-      } else if ((e.ctrlKey || e.metaKey) && e.key === 'v') {
-        e.preventDefault(); handlePaste();
-      } else if (e.key === 'Backspace' || e.key === 'Delete') {
+      if (e.key === 'Enter') { e.preventDefault(); addNode('text'); }
+      else if ((e.ctrlKey || e.metaKey) && e.key === 'c') { e.preventDefault(); handleCopy(); }
+      else if ((e.ctrlKey || e.metaKey) && e.key === 'v') { e.preventDefault(); handlePaste(); }
+      else if (e.key === 'Backspace' || e.key === 'Delete') {
         e.preventDefault(); takeSnapshot();
         const selIds = nodesRef.current.filter(n => n.selected).map(n => n.id);
         setNodes((nds: any[]) => nds.filter((n: any) => !n.selected));
@@ -874,7 +714,16 @@ function FlowEditor() {
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [addNode, handleCopy, handlePaste, undo, redo, takeSnapshot, handleManualSave, selectedNodes.length, selectedEdge]);
+  }, [addNode, handleCopy, handlePaste, undo, redo, takeSnapshot, handleManualSave, selectedNodes.length, selectedEdge, selectedCells]);
+
+  useEffect(() => {
+      const handleEdgeBlur = (e: any) => {
+          const { id, html } = e.detail;
+          setEdges(eds => eds.map(edge => edge.id === id ? { ...edge, label: html, data: { ...edge.data, isEditing: false } } : edge));
+      };
+      window.addEventListener('custom-edge-blur', handleEdgeBlur);
+      return () => window.removeEventListener('custom-edge-blur', handleEdgeBlur);
+  }, []);
 
   useEffect(() => {
     const onMouseMove = (e: MouseEvent) => {
@@ -894,7 +743,7 @@ function FlowEditor() {
     const onMouseUp = () => { setTimeout(() => { previewDragRef.current = null; }, 50); imageCropDragRef.current = null; };
     window.addEventListener('mousemove', onMouseMove);
     window.addEventListener('mouseup', onMouseUp);
-    return () => { window.removeEventListener('mousemove', onMouseMove); window.removeEventListener('mousemove', onMouseUp); };
+    return () => { window.removeEventListener('mousemove', onMouseMove); window.removeEventListener('mouseup', onMouseUp); };
   }, [getZoom]);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -954,25 +803,16 @@ function FlowEditor() {
     return [centerNode, ...nodes.map(n => {
       if (n.type === 'printZone') {
         return {
-          ...n,
-          draggable: true,
+          ...n, draggable: true,
           data: {
             label: (
               <div style={{ width: '100%', height: '100%', border: '4px dashed #3b82f6', backgroundColor: 'rgba(59, 130, 246, 0.05)', position: 'relative' }}>
-                <div style={{ position: 'absolute', top: 0, left: 0, background: '#3b82f6', color: '#fff', padding: '4px 12px', fontSize: '14px', fontWeight: 'bold' }}>
-                  {n.data.label}
-                </div>
+                <div style={{ position: 'absolute', top: 0, left: 0, background: '#3b82f6', color: '#fff', padding: '4px 12px', fontSize: '14px', fontWeight: 'bold' }}>{n.data.label}</div>
                 <NodeResizer 
-                    isVisible={true} minWidth={200} minHeight={200} 
-                    handleStyle={{ width: 12, height: 12, background: '#3b82f6' }} 
-                    lineStyle={{ border: 'none' }} 
+                    isVisible={true} minWidth={200} minHeight={200} handleStyle={{ width: 12, height: 12, background: '#3b82f6' }} lineStyle={{ border: 'none' }} 
                     onResize={(_, params) => {
                         setNodes((nds: any[]) => nds.map((node: any) => node.id === n.id ? {
-                            ...node,
-                            position: { x: params.x, y: params.y },
-                            width: params.width,
-                            height: params.height,
-                            style: { ...node.style, width: params.width, height: params.height }
+                            ...node, position: { x: params.x, y: params.y }, width: params.width, height: params.height, style: { ...node.style, width: params.width, height: params.height }
                         } : node));
                     }}
                 />
@@ -982,6 +822,9 @@ function FlowEditor() {
           style: { ...n.style, border: 'none', backgroundColor: 'transparent', padding: 0 }
         };
       }
+
+      const isEditingNode = Boolean(n.data?.isEditing);
+      const editingCellId = n.data?.editingCell;
 
       const isPreview = Boolean(n.data?.previewVisible && !n.data?.isShape && !n.data?.isImage && !n.data?.isTable);
       let previewElement: React.ReactNode = null;
@@ -1032,6 +875,7 @@ function FlowEditor() {
                                         const cellId = `${r}-${c}`;
                                         const cellData = n.data.cells?.[cellId] || { content: '', style: { border: '1px solid #ccc' } };
                                         const isSel = selectedCells[n.id]?.includes(cellId);
+                                        const isCellEditing = editingCellId === cellId;
                                         return (
                                             <td
                                                 key={c}
@@ -1039,21 +883,35 @@ function FlowEditor() {
                                                     e.stopPropagation();
                                                     setSelectedCells(prev => {
                                                         const current = prev[n.id] || [];
-                                                        if (e.shiftKey || e.metaKey || e.ctrlKey) {
-                                                            return { ...prev, [n.id]: current.includes(cellId) ? current.filter(id => id !== cellId) : [...current, cellId] };
-                                                        } else {
-                                                            return { ...prev, [n.id]: [cellId] };
-                                                        }
+                                                        if (e.shiftKey || e.metaKey || e.ctrlKey) { return { ...prev, [n.id]: current.includes(cellId) ? current.filter(id => id !== cellId) : [...current, cellId] }; } 
+                                                        else { return { ...prev, [n.id]: [cellId] }; }
                                                     });
                                                     if (!n.selected) setNodes((nds: any[]) => nds.map((node: any) => node.id === n.id ? { ...node, selected: true } : { ...node, selected: false }));
                                                 }}
                                                 style={{
-                                                    ...cellData.style,
-                                                    position: 'relative', cursor: 'cell', padding: '8px', wordBreak: 'break-all',
-                                                    outline: isSel ? '2px solid #3b82f6' : 'none', outlineOffset: '-2px'
+                                                    ...cellData.style, position: 'relative', cursor: isCellEditing ? 'text' : 'cell', padding: '8px', wordBreak: 'break-all',
+                                                    outline: isSel && !isCellEditing ? '2px solid #3b82f6' : 'none', outlineOffset: '-2px'
                                                 }}
                                             >
-                                                <div className="html-content" dangerouslySetInnerHTML={{ __html: renderHTMLWithMath(cellData.content) }} />
+                                                <div 
+                                                    className={isCellEditing ? "nodrag html-content editing-mode" : "nodrag html-content"}
+                                                    contentEditable={isCellEditing} suppressContentEditableWarning
+                                                    onBlur={(e) => {
+                                                        setNodes(nds => nds.map(node => node.id === n.id ? { ...node, data: { ...node.data, editingCell: null, cells: { ...node.data.cells, [cellId]: { ...node.data.cells[cellId], content: e.currentTarget.innerHTML } } } } : node));
+                                                    }}
+                                                    ref={el => {
+                                                        if (el && isCellEditing && document.activeElement !== el) {
+                                                            setTimeout(() => {
+                                                                el.focus();
+                                                                if (typeof window.getSelection !== 'undefined') {
+                                                                    const range = document.createRange(); const sel = window.getSelection();
+                                                                    range.selectNodeContents(el); range.collapse(false); sel?.removeAllRanges(); sel?.addRange(range);
+                                                                }
+                                                            }, 10);
+                                                        }
+                                                    }}
+                                                    dangerouslySetInnerHTML={{ __html: isCellEditing ? cellData.content : renderHTMLWithMath(cellData.content) }} 
+                                                />
                                             </td>
                                         );
                                     })}
@@ -1085,8 +943,7 @@ function FlowEditor() {
         data: {
           ...n.data,
           label: (
-            // ★ 修正箇所：外側の箱から display: flex と alignItems / justifyContent を削除。干渉を完全に防ぎます。
-            <div style={{ width: '100%', height: '100%', position: 'relative', border: resolvedBorder, borderRadius: n.style?.borderRadius || '12px', backgroundColor: n.style?.backgroundColor || '#fff', opacity: n.style?.opacity || 1 }}>
+            <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', alignItems: n.style?.alignItems || 'flex-start', justifyContent: n.style?.justifyContent || 'flex-start', position: 'relative', border: resolvedBorder, borderRadius: n.style?.borderRadius || '12px', backgroundColor: n.style?.backgroundColor || '#fff', opacity: n.style?.opacity || 1, padding: n.style?.padding || '4px' }}>
               
               {n.id !== 'center-mark' && (
                 <>
@@ -1120,12 +977,55 @@ function FlowEditor() {
                       maxWidth: 'none', maxHeight: 'none', left: n.data?.isCropping ? `${offX}px` : 0, top: n.data?.isCropping ? `${offY}px` : 0,
                       transform: `translate(${n.data.imgPosX || 0}px, ${n.data.imgPosY || 0}px) scale(${n.data.imgZoom || 1})`, transformOrigin: 'center center', pointerEvents: 'none' 
                   }} alt="img" />
-                  {/* ★ 画像のテキストオーバーレイも内側の箱だけで制御 */}
-                  <div className="html-content" style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: n.style?.alignItems || 'flex-start', justifyContent: n.style?.justifyContent || 'flex-start', pointerEvents: 'none', color: n.style?.color || '#000', fontFamily: n.style?.fontFamily || 'sans-serif', fontSize: n.style?.fontSize || '14px', fontWeight: n.style?.fontWeight || 'normal', textDecoration: n.style?.textDecoration || 'none', whiteSpace: 'pre-wrap', lineHeight: '1.2', textAlign: n.style?.textAlign || 'left', padding: n.style?.padding || '4px', transform: `translate(${textOffX}px, ${textOffY}px)` }} dangerouslySetInnerHTML={{ __html: renderHTMLWithMath(n.data?.content) }} />
+                  
+                  <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', display: 'flex', flexDirection: 'column', alignItems: n.style?.alignItems || 'flex-start', justifyContent: n.style?.justifyContent || 'flex-start', padding: '4px' }}>
+                      <div 
+                          id={`edit-${n.id}`}
+                          className={isEditingNode ? "nodrag html-content editing-mode" : "html-content"}
+                          contentEditable={isEditingNode} suppressContentEditableWarning
+                          onBlur={(e) => setNodes(nds => nds.map(node => node.id === n.id ? { ...node, data: { ...node.data, isEditing: false, content: e.currentTarget.innerHTML } } : node))}
+                          style={{
+                              pointerEvents: 'auto', width: '100%', height: 'auto', outline: 'none', cursor: isEditingNode ? 'text' : 'pointer',
+                              color: n.style?.color || '#000', fontFamily: n.style?.fontFamily || 'sans-serif', fontSize: n.style?.fontSize || '14px', fontWeight: n.style?.fontWeight || 'normal', textDecoration: n.style?.textDecoration || 'none', whiteSpace: 'pre-wrap', lineHeight: '1.2', textAlign: n.style?.textAlign || 'left', transform: `translate(${textOffX}px, ${textOffY}px)`
+                          }}
+                          ref={el => {
+                              if (el && isEditingNode && document.activeElement !== el) {
+                                  setTimeout(() => {
+                                      el.focus();
+                                      if (typeof window.getSelection !== 'undefined') {
+                                          const range = document.createRange(); const sel = window.getSelection();
+                                          range.selectNodeContents(el); range.collapse(false); sel?.removeAllRanges(); sel?.addRange(range);
+                                      }
+                                  }, 10);
+                              }
+                          }}
+                          dangerouslySetInnerHTML={{ __html: isEditingNode ? n.data?.content : renderHTMLWithMath(n.data?.content) }} 
+                      />
+                  </div>
                 </div>
               ) : n.id !== 'center-mark' && !n.data?.isTable ? (
-                /* ★ テキストノード：内側の箱だけで flexDirection: column の基準で完璧に制御します */
-                <div className="html-content" style={{ pointerEvents: 'none', width: '100%', height: '100%', display: 'flex', flexDirection: 'column', alignItems: n.style?.alignItems || 'flex-start', justifyContent: n.style?.justifyContent || 'flex-start', color: n.style?.color || '#000', fontFamily: n.style?.fontFamily || 'sans-serif', fontSize: n.style?.fontSize || '14px', fontWeight: n.style?.fontWeight || 'normal', textDecoration: n.style?.textDecoration || 'none', whiteSpace: 'pre-wrap', lineHeight: '1.2', textAlign: n.style?.textAlign || 'left', padding: n.style?.padding || '4px', transform: `translate(${textOffX}px, ${textOffY}px)` }} dangerouslySetInnerHTML={{ __html: renderHTMLWithMath(n.data?.content) }} />
+                <div 
+                    id={`edit-${n.id}`}
+                    className={isEditingNode ? "nodrag html-content editing-mode" : "html-content"}
+                    contentEditable={isEditingNode} suppressContentEditableWarning
+                    onBlur={(e) => setNodes(nds => nds.map(node => node.id === n.id ? { ...node, data: { ...node.data, isEditing: false, content: e.currentTarget.innerHTML } } : node))}
+                    style={{ 
+                        pointerEvents: 'auto', width: '100%', height: 'auto', outline: 'none', cursor: isEditingNode ? 'text' : 'pointer',
+                        color: n.style?.color || '#000', fontFamily: n.style?.fontFamily || 'sans-serif', fontSize: n.style?.fontSize || '14px', fontWeight: n.style?.fontWeight || 'normal', textDecoration: n.style?.textDecoration || 'none', whiteSpace: 'pre-wrap', lineHeight: '1.2', textAlign: n.style?.textAlign || 'left', transform: `translate(${textOffX}px, ${textOffY}px)` 
+                    }}
+                    ref={el => {
+                        if (el && isEditingNode && document.activeElement !== el) {
+                            setTimeout(() => {
+                                el.focus();
+                                if (typeof window.getSelection !== 'undefined') {
+                                    const range = document.createRange(); const sel = window.getSelection();
+                                    range.selectNodeContents(el); range.collapse(false); sel?.removeAllRanges(); sel?.addRange(range);
+                                }
+                            }, 10);
+                        }
+                    }}
+                    dangerouslySetInnerHTML={{ __html: isEditingNode ? n.data?.content : renderHTMLWithMath(n.data?.content) }} 
+                />
               ) : null}
 
               {n.id !== 'center-mark' ? (
@@ -1150,7 +1050,7 @@ function FlowEditor() {
               ) : null}
             </div>
           ),
-          style: { ...n.style, border: 'none', backgroundColor: 'transparent' }
+          style: { ...n.style, border: 'none', backgroundColor: 'transparent', padding: 0 }
         }
       };
     })];
@@ -1160,27 +1060,6 @@ function FlowEditor() {
   const actionBtnStyle = { padding: '6px 10px', borderRadius: '6px', border: '1px solid #ccc', backgroundColor: '#fff', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px', boxShadow: '0 2px 4px rgba(0,0,0,0.05)', fontWeight: 'bold', fontSize: '12px', transition: 'all 0.2s', whiteSpace: 'nowrap' };
   const primaryBtnStyle = { ...actionBtnStyle, backgroundColor: '#3b82f6', color: '#fff', border: 'none', boxShadow: '0 2px 4px rgba(59, 130, 246, 0.3)' };
 
-  const editorPanelStyle = isExpandedEditor ? {
-      position: 'fixed' as const, top: '20px', right: '20px', width: '450px', maxHeight: '90vh', backgroundColor: '#fff', zIndex: 10000,
-      padding: '20px', borderRadius: '12px', boxShadow: '0 15px 40px rgba(0,0,0,0.3)', overflowY: 'auto' as const, border: '2px solid #3b82f6'
-  } : { marginTop: '10px' };
-
-  const addTableRowCol = (type: 'row' | 'col') => {
-      takeSnapshot();
-      if (!primaryNode || !primaryNode.data.isTable) return;
-      setNodes(nds => nds.map(n => {
-          if (n.id !== primaryNode.id) return n;
-          const newRows = type === 'row' ? n.data.rows + 1 : n.data.rows;
-          const newCols = type === 'col' ? n.data.cols + 1 : n.data.cols;
-          const newCells = { ...n.data.cells };
-          if (type === 'row') for(let c=0; c<newCols; c++) newCells[`${newRows-1}-${c}`] = { content: '', style: { border: '1px solid #ccc'} };
-          if (type === 'col') for(let r=0; r<newRows; r++) newCells[`${r}-${newCols-1}`] = { content: '', style: { border: '1px solid #ccc'} };
-          return { ...n, data: { ...n.data, rows: newRows, cols: newCols, cells: newCells } };
-      }));
-  };
-
-  const isTableEditing = primaryNode?.data?.isTable && (selectedCells[primaryNode.id]?.length || 0) > 0;
-  
   if (isExecutingPrint) {
       const printBoxes = nodes.filter(n => n.type === 'printZone');
       const printableNodes = flowNodes.filter(n => n.type !== 'printZone' && n.id !== 'center-mark');
@@ -1226,10 +1105,6 @@ function FlowEditor() {
       <input type="file" ref={jsonImportRef} style={{ display: 'none' }} onChange={importData} accept=".json" />
       <input type="file" ref={fileInputRef} style={{ display: 'none' }} onChange={handleFileChange} accept="image/*" />
       
-      {isExpandedEditor && (
-          <div className="no-print" onClick={() => setIsExpandedEditor(false)} style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.3)', zIndex: 990, cursor: 'pointer' }} />
-      )}
-
       {/* サイドバー */}
       <div className="no-print" style={{ width: isSidebarOpen ? '220px' : '0px', transition: 'width 0.3s ease', backgroundColor: '#f8f9fa', borderRight: isSidebarOpen ? '1px solid #ddd' : 'none', display: 'flex', flexDirection: 'column', overflow: 'hidden', zIndex: 10 }}>
         <div style={{ width: '220px', display: 'flex', flexDirection: 'column', height: '100%', padding: '15px' }}>
@@ -1360,55 +1235,29 @@ function FlowEditor() {
                 </div>
               )}
 
-              <div style={editorPanelStyle}>
-                  <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'5px' }}>
-                      <label style={{fontSize: '11px', fontWeight: 'bold'}}>{primaryNode.data?.isTable ? (isTableEditing ? '選択セルの文字内容' : '文字内容 (※セルを選択してください)') : '文字内容 (Tabキーで即入力)'}</label>
-                      <button onClick={() => setIsExpandedEditor(!isExpandedEditor)} style={{ fontSize: '10px', padding: '4px 8px', borderRadius: '4px', border: '1px solid #3b82f6', background: isExpandedEditor ? '#3b82f6' : '#eff6ff', color: isExpandedEditor ? '#fff' : '#3b82f6', fontWeight: 'bold', cursor: 'pointer', transition: '0.2s' }}>
-                          {isExpandedEditor ? '↙️ パネルを戻す' : '↗️ 大きく開く'}
-                      </button>
-                  </div>
-
-                  <div 
-                    id="node-editor" 
-                    data-placeholder="テキストを入力..."
-                    ref={editorRef}
-                    contentEditable={!primaryNode.data?.isTable || isTableEditing}
-                    onInput={(e) => { 
-                        if (isTableEditing) {
-                            const activeCells = selectedCells[primaryNode.id];
-                            setNodes(nds => nds.map(n => n.id === primaryNode.id ? { ...n, data: { ...n.data, cells: { ...n.data.cells, [activeCells[0]]: { ...n.data.cells[activeCells[0]], content: e.currentTarget.innerHTML } } } } : n));
-                        } else {
-                            updateSelectedNodes({ content: e.currentTarget.innerHTML }); 
-                        }
-                        saveSelection(); 
-                    }}
-                    onBlur={(e) => { 
-                        if (!isTableEditing) updateSelectedNodes({ content: e.currentTarget.innerHTML }); 
-                        saveSelection(); 
-                    }}
-                    onKeyUp={saveSelection}
-                    onMouseUp={saveSelection}
-                    style={{ width:'100%', minHeight: isExpandedEditor ? '200px' : '60px', marginBottom: '10px', padding: '8px', border: '1px solid #ddd', borderRadius: '4px', outline: 'none', backgroundColor: (!primaryNode.data?.isTable || isTableEditing) ? '#fff' : '#f1f5f9', cursor: 'text', overflowY: 'auto', fontSize: isExpandedEditor ? '16px' : '13px' }}
-                  />
+              <div style={{ padding: '15px', borderRadius: '12px', backgroundColor: '#f8f9fa', border: '1px solid #ddd', marginBottom: '15px' }}>
+                  <label style={{fontSize: '11px', fontWeight: 'bold', color: '#1d4ed8'}}>文字の部分装飾 (編集中のみ)</label>
+                  <p style={{fontSize: '10px', color: '#666', marginTop: '4px', marginBottom: '10px', lineHeight: '1.4'}}>
+                      ※図形を選択して<b>Tabキー</b>で編集モードに入り、<br/>
+                      <u>マウスで文字をなぞって選択してから</u>押してください。
+                  </p>
                   
-                  <label style={{fontSize: '10px', color: '#666', fontWeight: 'bold'}}>文字装飾</label>
-                  
-                  <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'5px', marginBottom:'5px', marginTop: '5px' }}>
-                    <button onMouseDown={(e) => e.preventDefault()} onClick={() => applyUnifiedFormat('fontName', 'serif')} style={{cursor:'pointer', border:'1px solid #ccc', padding: '6px', fontSize:'12px', borderRadius: '4px'}}>明朝</button>
-                    <button onMouseDown={(e) => e.preventDefault()} onClick={() => applyUnifiedFormat('fontName', 'sans-serif')} style={{cursor:'pointer', border:'1px solid #ccc', padding: '6px', fontSize:'12px', borderRadius: '4px'}}>ゴシック</button>
+                  <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'5px', marginBottom:'5px' }}>
+                    <button onMouseDown={(e) => e.preventDefault()} onClick={() => applyUnifiedFormat('fontName', 'serif')} style={{cursor:'pointer', border:'1px solid #ccc', padding: '6px', fontSize:'12px', borderRadius: '4px', background: '#fff'}}>明朝</button>
+                    <button onMouseDown={(e) => e.preventDefault()} onClick={() => applyUnifiedFormat('fontName', 'sans-serif')} style={{cursor:'pointer', border:'1px solid #ccc', padding: '6px', fontSize:'12px', borderRadius: '4px', background: '#fff'}}>ゴシック</button>
                     <button onMouseDown={(e) => e.preventDefault()} onClick={() => applyUnifiedFormat('bold')} style={{ cursor:'pointer', border:'1px solid #ccc', padding: '6px', fontSize:'12px', borderRadius: '4px', background: '#fff' }}>太字</button>
                     <button onMouseDown={(e) => e.preventDefault()} onClick={() => applyUnifiedFormat('strikeThrough')} style={{ cursor:'pointer', border:'1px solid #ccc', padding: '6px', fontSize:'12px', borderRadius: '4px', background: '#fff' }}>二重線</button>
                   </div>
 
                   <div style={{ display: 'flex', gap: '5px', marginTop: '5px', marginBottom: '15px' }}>
                     {QUICK_TEXT_COLORS.map(c => <button key={c} onMouseDown={(e) => e.preventDefault()} onClick={() => applyUnifiedFormat('foreColor', c)} style={{ width:'24px', height:'24px', backgroundColor:c, border: '1px solid #ddd', borderRadius: '4px', cursor: 'pointer' }} />)}
-                    <input type="color" onChange={(e) => applyUnifiedFormat('foreColor', e.target.value)} style={{width:'24px', height:'24px', cursor: 'pointer', border: 'none', padding: 0}} />
+                    <input type="color" onMouseDown={(e) => e.preventDefault()} onChange={(e) => applyUnifiedFormat('foreColor', e.target.value)} style={{width:'24px', height:'24px', cursor: 'pointer', border: 'none', padding: 0}} />
                   </div>
 
                   <label style={{fontSize:'10px', fontWeight: 'bold'}}>文字サイズ (px)</label>
                   <div style={{display:'flex', alignItems:'center', gap:'8px', marginBottom: '15px'}}>
-                    <input type="range" min="10" max="100" value={partialFontSize} onChange={(e) => { const val = Number(e.target.value); setPartialFontSize(val); applyUnifiedFormat('fontSize', `${val}px`); }} style={{flex:1}} />
-                    <input type="number" min="10" max="100" value={partialFontSize} onChange={(e) => { const val = Number(e.target.value); setPartialFontSize(val); applyUnifiedFormat('fontSize', `${val}px`); }} style={{width:'40px', padding:'2px', fontSize:'11px', border:'1px solid #ccc', borderRadius:'4px'}} />
+                    <input type="range" min="10" max="100" value={partialFontSize} onMouseDown={(e) => e.preventDefault()} onChange={(e) => { const val = Number(e.target.value); setPartialFontSize(val); applyUnifiedFormat('fontSize', `${val}px`); }} style={{flex:1}} />
+                    <input type="number" min="10" max="100" value={partialFontSize} onMouseDown={(e) => e.preventDefault()} onChange={(e) => { const val = Number(e.target.value); setPartialFontSize(val); applyUnifiedFormat('fontSize', `${val}px`); }} style={{width:'40px', padding:'2px', fontSize:'11px', border:'1px solid #ccc', borderRadius:'4px'}} />
                     <button onMouseDown={(e) => e.preventDefault()} onClick={handleResetFormat} style={{fontSize:'10px', padding:'4px 6px', border:'1px solid #ccc', borderRadius:'4px', cursor:'pointer', background:'#fff', fontWeight:'bold'}}>標準へ</button>
                   </div>
               </div>
@@ -1422,9 +1271,9 @@ function FlowEditor() {
                 <button onClick={() => handleLayout('right', undefined)} style={{flex:1, cursor:'pointer', border:'1px solid #ccc', padding: '4px', fontSize:'11px', borderRadius: '4px'}}>右</button>
               </div>
               <div style={{ display:'flex', gap:'5px', marginBottom:'15px' }}>
-                <button onClick={() => handleLayout(undefined, 'flex-start')} style={{flex:1, cursor:'pointer', border:'1px solid #ccc', padding: '4px', fontSize:'11px', borderRadius: '4px'}}>上</button>
+                <button onClick={() => handleLayout(undefined, 'top')} style={{flex:1, cursor:'pointer', border:'1px solid #ccc', padding: '4px', fontSize:'11px', borderRadius: '4px'}}>上</button>
                 <button onClick={() => handleLayout(undefined, 'center')} style={{flex:1, cursor:'pointer', border:'1px solid #ccc', padding: '4px', fontSize:'11px', borderRadius: '4px'}}>中</button>
-                <button onClick={() => handleLayout(undefined, 'flex-end')} style={{flex:1, cursor:'pointer', border:'1px solid #ccc', padding: '4px', fontSize:'11px', borderRadius: '4px'}}>下</button>
+                <button onClick={() => handleLayout(undefined, 'bottom')} style={{flex:1, cursor:'pointer', border:'1px solid #ccc', padding: '4px', fontSize:'11px', borderRadius: '4px'}}>下</button>
               </div>
 
               {!primaryNode.data?.isTable && (
@@ -1492,33 +1341,28 @@ function FlowEditor() {
                 <button onClick={() => { takeSnapshot(); setEdges((eds: any[]) => { const minZ = Math.min(0, ...eds.map((n: any) => Number(n.zIndex) || 0)); return eds.map((n: any) => n.selected ? {...n, zIndex: minZ - 1} : n); })}} style={{flex:1, padding:'6px', fontSize:'11px', fontWeight: 'bold', background: '#f0f0f0', border: '1px solid #ccc', cursor: 'pointer', borderRadius: '4px'}}>↓ 最背面へ</button>
               </div>
 
-              <label style={{fontSize:'11px', fontWeight: 'bold'}}>線の文字 (Tabキーで即入力)</label>
-              <div 
-                 id="edge-editor" 
-                 data-placeholder="線に文字を入れる..."
-                 ref={edgeEditorRef}
-                 contentEditable
-                 onInput={(e) => updateEdgeDesign({ label: e.currentTarget.innerHTML })}
-                 onBlur={(e) => updateEdgeDesign({ label: e.currentTarget.innerHTML })}
-                 onKeyUp={saveSelection}
-                 onMouseUp={saveSelection}
-                 style={{ width:'100%', minHeight: '40px', padding: '8px', border: '1px solid #ddd', borderRadius: '4px', outline: 'none', backgroundColor: '#fff', cursor: 'text', overflowY: 'auto', fontSize: '13px', marginBottom: '5px' }}
-              />
-              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '10px' }}>
-                 <div style={{ display:'flex', gap:'5px' }}>
-                    <button onMouseDown={(e) => e.preventDefault()} onClick={() => applyUnifiedFormat('bold')} style={{ cursor:'pointer', border:'1px solid #ccc', padding: '4px 8px', fontSize:'11px', borderRadius: '4px', background: '#fff' }}>太字</button>
-                    <input type="color" onChange={(e) => applyUnifiedFormat('foreColor', e.target.value)} style={{width:'24px', height:'24px', cursor: 'pointer', border: 'none', padding: 0}} />
-                 </div>
-                 <div style={{ display:'flex', gap:'5px' }}>
-                    <button onClick={() => updateEdgeDesign({ labelStyle: { ...selectedEdge.data?.labelStyle, textAlign: 'left' } })} style={{ cursor:'pointer', border:'1px solid #ccc', padding: '4px 8px', fontSize:'11px', borderRadius: '4px', background: '#fff' }}>左詰</button>
-                    <button onClick={() => updateEdgeDesign({ labelStyle: { ...selectedEdge.data?.labelStyle, textAlign: 'center' } })} style={{ cursor:'pointer', border:'1px solid #ccc', padding: '4px 8px', fontSize:'11px', borderRadius: '4px', background: '#fff' }}>中央</button>
-                 </div>
-              </div>
+              <div style={{ padding: '15px', borderRadius: '12px', backgroundColor: '#f8f9fa', border: '1px solid #ddd', marginBottom: '15px' }}>
+                  <label style={{fontSize: '11px', fontWeight: 'bold', color: '#1d4ed8'}}>文字の部分装飾 (編集中のみ)</label>
+                  <p style={{fontSize: '10px', color: '#666', marginTop: '4px', marginBottom: '10px', lineHeight: '1.4'}}>
+                      ※線を選択して<b>Tabキー</b>で編集モードに入り、<br/>
+                      <u>マウスで文字をなぞって選択してから</u>押してください。
+                  </p>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '10px' }}>
+                     <div style={{ display:'flex', gap:'5px' }}>
+                        <button onMouseDown={(e) => e.preventDefault()} onClick={() => applyUnifiedFormat('bold')} style={{ cursor:'pointer', border:'1px solid #ccc', padding: '4px 8px', fontSize:'11px', borderRadius: '4px', background: '#fff' }}>太字</button>
+                        <input type="color" onMouseDown={(e) => e.preventDefault()} onChange={(e) => applyUnifiedFormat('foreColor', e.target.value)} style={{width:'24px', height:'24px', cursor: 'pointer', border: 'none', padding: 0}} />
+                     </div>
+                     <div style={{ display:'flex', gap:'5px' }}>
+                        <button onClick={() => updateEdgeDesign({ labelStyle: { ...selectedEdge.data?.labelStyle, textAlign: 'left' } })} style={{ cursor:'pointer', border:'1px solid #ccc', padding: '4px 8px', fontSize:'11px', borderRadius: '4px', background: '#fff' }}>左詰</button>
+                        <button onClick={() => updateEdgeDesign({ labelStyle: { ...selectedEdge.data?.labelStyle, textAlign: 'center' } })} style={{ cursor:'pointer', border:'1px solid #ccc', padding: '4px 8px', fontSize:'11px', borderRadius: '4px', background: '#fff' }}>中央</button>
+                     </div>
+                  </div>
 
-              <label style={{fontSize:'10px', fontWeight: 'bold'}}>線の文字サイズ (px)</label>
-              <div style={{display:'flex', alignItems:'center', gap:'8px', marginBottom: '20px', marginTop: '5px'}}>
-                <input type="range" min="10" max="50" value={Number(selectedEdge.data?.fontSize || 14)} onChange={(e) => updateEdgeDesign({ fontSize: Number(e.target.value) })} style={{flex:1}} />
-                <input type="number" min="10" max="50" value={Number(selectedEdge.data?.fontSize || 14)} onChange={(e) => updateEdgeDesign({ fontSize: Number(e.target.value) })} style={{width:'40px', padding:'2px', fontSize:'11px', border:'1px solid #ccc', borderRadius:'4px'}} />
+                  <label style={{fontSize:'10px', fontWeight: 'bold'}}>線の文字サイズ (px)</label>
+                  <div style={{display:'flex', alignItems:'center', gap:'8px', marginTop: '5px'}}>
+                    <input type="range" min="10" max="50" value={Number(selectedEdge.data?.fontSize || 14)} onChange={(e) => updateEdgeDesign({ fontSize: Number(e.target.value) })} style={{flex:1}} />
+                    <input type="number" min="10" max="50" value={Number(selectedEdge.data?.fontSize || 14)} onChange={(e) => updateEdgeDesign({ fontSize: Number(e.target.value) })} style={{width:'40px', padding:'2px', fontSize:'11px', border:'1px solid #ccc', borderRadius:'4px'}} />
+                  </div>
               </div>
 
               <label style={{fontSize:'11px', fontWeight: 'bold'}}>文字入り線 (クイック)</label>
@@ -1551,7 +1395,6 @@ function FlowEditor() {
         {isBottomBarOpen ? (
           <div className="no-print" style={{ padding: '8px 10px', backgroundColor: 'rgba(255,255,255,0.95)', borderTop: '1px solid #eee', display: 'flex', flexWrap: 'nowrap', overflowX: 'auto', justifyContent: 'center', alignItems: 'center', gap: '6px', zIndex: 1001, boxShadow: '0 -4px 10px rgba(0,0,0,0.03)', backdropFilter: 'blur(4px)' }}>
             
-            {/* 印刷モードの切り替え UI */}
             {isPrintMode ? (
                <>
                  <div style={{ fontWeight: 'bold', fontSize: '12px', color: '#b91c1c', padding: '0 10px' }}>🖨️ 印刷モード</div>
