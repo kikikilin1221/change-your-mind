@@ -36,7 +36,6 @@ const DoubleEdge = ({ id, sourceX, sourceY, targetX, targetY, sourcePosition, ta
   const fontSize = (data as any)?.fontSize || 14;
   const mType = (data as any)?.markerType;
 
-  // カスタムマーカー（白抜き矢印）の指定
   let rMarkerEnd = markerEnd;
   let rMarkerStart = markerStart;
   if (mType === 'custom-double-arrow' || mType === 'custom-double-both') {
@@ -46,12 +45,10 @@ const DoubleEdge = ({ id, sourceX, sourceY, targetX, targetY, sourcePosition, ta
     rMarkerStart = `url(#custom-arrow-start-${id})`;
   }
 
-  // 矢印のサイズ調整
   const customArrowSize = strokeWidth * 1.5 + 16; 
 
   return (
     <>
-      {/* カスタム矢印（底辺のない開いた傘） */}
       {isDouble && (
         <svg style={{ position: 'absolute', width: 0, height: 0 }}>
           <defs>
@@ -134,7 +131,6 @@ function FlowEditor() {
   const [isTopBarOpen, setIsTopBarOpen] = useState(true);
   const [isBottomBarOpen, setIsBottomBarOpen] = useState(true);
   
-  // ★ 新機能：印刷モードの状態管理
   const [isPrintMode, setIsPrintMode] = useState(false);
   const [isExecutingPrint, setIsExecutingPrint] = useState(false);
 
@@ -239,12 +235,10 @@ function FlowEditor() {
         localStorage.setItem('my-logic-active-id', activeFileId);
         return updatedFiles;
     });
-    alert('💾 データを保存しました！');
   }, [activeFileId, currentLevel, levelData]);
 
-  // ★ 新機能：エクスポート（書き出し）
   const exportData = useCallback(() => {
-      handleManualSave(); // 最新を保存
+      handleManualSave(); 
       setTimeout(() => {
           const currentData = localStorage.getItem('my-logic-files');
           if (!currentData) return;
@@ -260,7 +254,6 @@ function FlowEditor() {
       }, 100);
   }, [handleManualSave]);
 
-  // ★ 新機能：インポート（読み込み）
   const importData = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0];
       if (!file) return;
@@ -283,34 +276,30 @@ function FlowEditor() {
           }
       };
       reader.readAsText(file);
-      if (jsonImportRef.current) jsonImportRef.current.value = ''; // Reset input
+      if (jsonImportRef.current) jsonImportRef.current.value = ''; 
   }, []);
 
-  // ★ 新機能：印刷モードのトグル
   const togglePrintMode = useCallback(() => {
       setIsPrintMode(prev => {
           const next = !prev;
           if (next) {
-              // 印刷モードON: トリミング枠がなければ1つ追加する
               setNodes(nds => {
                   if (nds.some(n => n.type === 'printZone')) return nds;
                   const newId = `print-zone-${Date.now()}`;
                   return [...nds, {
                       id: newId, type: 'printZone', position: { x: 0, y: 0 },
                       data: { label: '印刷範囲 1' },
-                      style: { width: 800, height: 1130 }, // A4縦の比率に近いデフォルト
+                      style: { width: 800, height: 1130 },
                       zIndex: 99999
                   }];
               });
           } else {
-              // 印刷モードOFF: トリミング枠をすべて消す
               setNodes(nds => nds.filter(n => n.type !== 'printZone'));
           }
           return next;
       });
   }, []);
 
-  // ★ 新機能：印刷範囲を追加
   const addPrintZone = useCallback(() => {
       setNodes(nds => {
           const count = nds.filter(n => n.type === 'printZone').length;
@@ -323,15 +312,13 @@ function FlowEditor() {
       });
   }, []);
 
-  // ★ 新機能：印刷の実行
   const executePrint = useCallback(() => {
       clearSelection();
       setIsExecutingPrint(true);
-      // ReactFlowがプリント用のDOMを描画するのを待ってから印刷ダイアログを呼ぶ
       setTimeout(() => {
           window.print();
           setIsExecutingPrint(false);
-      }, 800);
+      }, 1000); // 描画時間を確保するため少し長めに
   }, [clearSelection]);
 
 
@@ -915,7 +902,7 @@ function FlowEditor() {
     setGuides({});
   }, [takeSnapshot]);
 
-  // ★ 印刷モードの専用ノード（トリミング枠）を定義
+  // ★ 印刷範囲用の特殊ノードの定義
   const flowNodes = useMemo(() => {
     const centerNode: any = { 
       id: 'center-mark', type: 'default', position: { x: -10, y: -10 }, draggable: false, selectable: false, 
@@ -924,7 +911,7 @@ function FlowEditor() {
     };
 
     return [centerNode, ...nodes.map(n => {
-      // 印刷範囲用の特殊ノード
+      // 印刷範囲用の青い点線枠
       if (n.type === 'printZone') {
         return {
           ...n,
@@ -1134,24 +1121,28 @@ function FlowEditor() {
 
   const isTableEditing = primaryNode?.data?.isTable && (selectedCells[primaryNode.id]?.length || 0) > 0;
   
-  // ★ 印刷時の処理（メインUIを非表示にし、印刷用レイアウトのみにする）
+  // ★ 印刷時の処理（メインUIを非表示にし、"flowNodes"を使用して完成デザインを印刷する）
   if (isExecutingPrint) {
       const printBoxes = nodes.filter(n => n.type === 'printZone');
-      const printableNodes = nodes.filter(n => n.type !== 'printZone' && n.id !== 'center-mark');
+      // ここを `nodes` ではなく `flowNodes` に修正し、デザインや文字を正しくレンダリングさせます。
+      const printableNodes = flowNodes.filter(n => n.type !== 'printZone' && n.id !== 'center-mark');
       return (
           <div style={{ backgroundColor: '#fff', width: '100%', minHeight: '100vh' }}>
+              {/* ★ ブラウザの強制白黒化を防ぐ CSS を追加 */}
               <style>{`
                   @page { size: auto; margin: 0; }
-                  body { background: #fff !important; }
+                  body { background: #fff !important; margin: 0; padding: 0; }
+                  * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
               `}</style>
               {printBoxes.map((box, i) => (
                   <div key={box.id} style={{ width: box.style?.width || 800, height: box.style?.height || 1130, position: 'relative', overflow: 'hidden', pageBreakAfter: 'always', margin: '0 auto', backgroundColor: levelData[currentLevel]?.bgColor || '#ffffff' }}>
+                      {/* ReactFlowではなく絶対配置のDOMとしてレンダリングする方が確実なため、ReactFlowインスタンスを使用 */}
                       <ReactFlowProvider>
                           <ReactFlow 
                               nodes={printableNodes} 
                               edges={edges} 
                               edgeTypes={edgeTypes} 
-                              defaultViewport={{ x: -box.position.x, y: -box.position.y, zoom: 1 }}
+                              defaultViewport={{ x: -(box.position.x || 0), y: -(box.position.y || 0), zoom: 1 }}
                               panOnDrag={false} zoomOnScroll={false} nodesDraggable={false} elementsSelectable={false}
                           >
                               <Background color="#f1f1f1" />
@@ -1174,6 +1165,7 @@ function FlowEditor() {
         @media print {
             .no-print { display: none !important; }
             .react-flow__background { background-color: #fff !important; }
+            * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
         }
 
         .react-flow__handle {
@@ -1197,7 +1189,6 @@ function FlowEditor() {
         .custom-handle-offset-right { right: -4px !important; }
       `}</style>
       
-      {/* 隠しインポートボタン */}
       <input type="file" ref={jsonImportRef} style={{ display: 'none' }} onChange={importData} accept=".json" />
       <input type="file" ref={fileInputRef} style={{ display: 'none' }} onChange={handleFileChange} accept="image/*" />
       
@@ -1526,7 +1517,7 @@ function FlowEditor() {
         {isBottomBarOpen ? (
           <div className="no-print" style={{ padding: '8px 10px', backgroundColor: 'rgba(255,255,255,0.95)', borderTop: '1px solid #eee', display: 'flex', flexWrap: 'nowrap', overflowX: 'auto', justifyContent: 'center', alignItems: 'center', gap: '6px', zIndex: 1001, boxShadow: '0 -4px 10px rgba(0,0,0,0.03)', backdropFilter: 'blur(4px)' }}>
             
-            {/* ★ 印刷モードON時の専用メニュー */}
+            {/* 印刷モードの切り替え UI */}
             {isPrintMode ? (
                <>
                  <div style={{ fontWeight: 'bold', fontSize: '12px', color: '#b91c1c', padding: '0 10px' }}>🖨️ 印刷モード</div>
@@ -1537,7 +1528,6 @@ function FlowEditor() {
                  <button onClick={togglePrintMode} style={{ ...actionBtnStyle, color: '#4b5563' }}>❌ キャンセル</button>
                </>
             ) : (
-               /* 通常時のメニュー */
                <>
                  <button onClick={undo} disabled={past.length === 0} style={{ ...actionBtnStyle, opacity: past.length === 0 ? 0.4 : 1, cursor: past.length === 0 ? 'default' : 'pointer' }}>↩️ 戻る</button>
                  <button onClick={redo} disabled={future.length === 0} style={{ ...actionBtnStyle, opacity: future.length === 0 ? 0.4 : 1, cursor: future.length === 0 ? 'default' : 'pointer' }}>↪️ 進む</button>
