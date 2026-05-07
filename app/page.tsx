@@ -8,7 +8,6 @@ import '@xyflow/react/dist/style.css';
 import katex from 'katex';
 import 'katex/dist/katex.min.css';
 
-// --- すべての画面で共通して使う「ノイズ完全排除」の強力なCSS ---
 const GLOBAL_CSS = `
   .html-content p { margin: 0; }
   .html-content strike, #node-editor strike, #edge-editor strike { text-decoration: line-through double !important; }
@@ -19,12 +18,10 @@ const GLOBAL_CSS = `
       .no-print { display: none !important; }
       .react-flow__background { display: none !important; }
       * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
-      /* 印刷時は強制的に黒い点（ハンドル）や余計な枠線を根絶する */
       .react-flow__handle { display: none !important; }
       .react-flow__node { box-shadow: none !important; }
   }
 
-  /* ReactFlowデフォルトの黒丸を完全に消し去る */
   .react-flow__handle {
       background: transparent !important;
       border: none !important;
@@ -35,14 +32,11 @@ const GLOBAL_CSS = `
       box-shadow: none !important;
   }
 
-  /* 透明なハンドル（送受信）とオフセット設定 */
   .custom-handle, .custom-handle-target { width: 24px !important; height: 24px !important; background: transparent !important; border: none !important; z-index: 10 !important; cursor: crosshair !important; pointer-events: auto !important; display: flex; justify-content: center; align-items: center; }
   
-  /* 通常は見えないが、近づくと青い丸が出てくる */
   .custom-handle::before, .custom-handle-target::before { content: ""; display: block; width: 0px; height: 0px; background: #3b82f6; border-radius: 50%; transition: all 0.2s cubic-bezier(0.34, 1.56, 0.64, 1); border: 2px solid #fff; opacity: 0; }
   .custom-handle:hover::before, .custom-handle-target:hover::before { width: 14px; height: 14px; opacity: 1; box-shadow: 0 1px 3px rgba(0,0,0,0.2); }
 
-  /* 矢印がめり込まないよう、図形から外側に1mm（約4px）だけ離すオフセット */
   .custom-handle-offset-top { top: -4px !important; }
   .custom-handle-offset-bottom { bottom: -4px !important; }
   .custom-handle-offset-left { left: -4px !important; }
@@ -51,7 +45,6 @@ const GLOBAL_CSS = `
   .print-page-wrapper { page-break-after: always; position: relative; overflow: hidden; margin: 0 auto; border: none !important; outline: none !important; }
 `;
 
-// --- 計算関数 ---
 const getEdgePoint = (cx: number, cy: number, w: number, h: number, tx: number, ty: number) => {
   const dx = tx - cx;
   const dy = ty - cy;
@@ -68,7 +61,6 @@ const getEdgePoint = (cx: number, cy: number, w: number, h: number, tx: number, 
   return { x: px, y: py };
 };
 
-// --- 二重線・カスタム白抜き矢印対応エッジ ---
 const DoubleEdge = ({ id, sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, style = {}, markerEnd, markerStart, data, label }: EdgeProps) => {
   const [edgePath, labelX, labelY] = getBezierPath({ sourceX, sourceY, sourcePosition, targetX, targetY, targetPosition });
   
@@ -124,7 +116,6 @@ const DoubleEdge = ({ id, sourceX, sourceY, targetX, targetY, sourcePosition, ta
   );
 };
 
-// --- スマートガイド ---
 function SmartGuides({ guides }: { guides: { lineX?: number, lineY?: number } }) {
   const transform = useStore(s => s.transform);
   if (guides.lineX === undefined && guides.lineY === undefined) return null;
@@ -334,7 +325,7 @@ function FlowEditor() {
                       id: newId, type: 'printZone', position: { x: 0, y: 0 },
                       data: { label: '印刷範囲 1' },
                       style: { width: 800, height: 1130 },
-                      width: 800, height: 1130, // 初期サイズを明確にセット
+                      width: 800, height: 1130,
                       zIndex: 99999
                   }];
               });
@@ -358,7 +349,6 @@ function FlowEditor() {
       });
   }, []);
 
-  // 印刷実行
   const executePrint = useCallback(() => {
       clearSelection();
       setIsExecutingPrint(true);
@@ -640,7 +630,7 @@ function FlowEditor() {
       }
   };
 
-  // ★ 修正箇所：レイアウト（flex-direction: column）の縦横の入れ替わりバグを解消
+  // ★修正箇所：外側の箱を外したため、縦横の解釈が素直になりました。
   const handleLayout = (hAlign?: string, vAlign?: string) => {
       takeSnapshot();
       if (primaryNode?.data?.isTable && (selectedCells[primaryNode.id]?.length || 0) > 0) {
@@ -661,11 +651,11 @@ function FlowEditor() {
           let styleUpdate: any = {};
           if (hAlign) {
               styleUpdate.textAlign = hAlign;
-              // 横方向の配置は alignItems (columnベースのため)
+              // 横方向の配置（Columnの中での横）
               styleUpdate.alignItems = hAlign === 'left' ? 'flex-start' : hAlign === 'right' ? 'flex-end' : 'center';
           }
           if (vAlign) {
-              // 縦方向の配置は justifyContent (columnベースのため)
+              // 縦方向の配置（Columnの中での縦）
               styleUpdate.justifyContent = vAlign === 'top' ? 'flex-start' : vAlign === 'bottom' ? 'flex-end' : 'center';
           }
           updateSelectedNodes({}, styleUpdate);
@@ -767,7 +757,8 @@ function FlowEditor() {
     const parent = selNodes.length === 1 ? selNodes[0] : null;
 
     let data: any = { content: '項目', previewVisible: false, previewStyle: { opacity: 0.7, offsetX: 0, offsetY: -150, width: 180, height: 120 }, textOffsetX: 0, textOffsetY: 0 };
-    let style: any = { backgroundColor: '#ffffff', color: '#000', borderRadius: '12px', fontSize: '14px', width: 200, height: 100, display: 'flex', alignItems: 'center', justifyContent: 'center', textAlign: 'center', padding: '2px', borderColor: 'transparent' }; // ★ 初期値も中央揃えに見直しました
+    // ★ 修正箇所：デフォルト設定を「左上ギリギリ」に変更（alignItems と justifyContent を flex-startにし、paddingを詰める）
+    let style: any = { backgroundColor: '#ffffff', color: '#000', borderRadius: '12px', fontSize: '14px', width: 200, height: 100, alignItems: 'flex-start', justifyContent: 'flex-start', textAlign: 'left', padding: '4px', borderColor: 'transparent' };
     
     if (type === 'image') { fileInputRef.current?.click(); return; }
     
@@ -903,7 +894,7 @@ function FlowEditor() {
     const onMouseUp = () => { setTimeout(() => { previewDragRef.current = null; }, 50); imageCropDragRef.current = null; };
     window.addEventListener('mousemove', onMouseMove);
     window.addEventListener('mouseup', onMouseUp);
-    return () => { window.removeEventListener('mousemove', onMouseMove); window.removeEventListener('mouseup', onMouseUp); };
+    return () => { window.removeEventListener('mousemove', onMouseMove); window.removeEventListener('mousemove', onMouseUp); };
   }, [getZoom]);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -1019,7 +1010,7 @@ function FlowEditor() {
               {levelData[n.id]?.nodes?.length ? (
                 <div style={{ transform: 'scale(0.15)', transformOrigin: 'top left', width: '1200px', height: '800px', position: 'relative', pointerEvents: 'none' }}>
                   {levelData[n.id].nodes.map((cn: any) => cn.id !== 'center-mark' ? (
-                    <div key={cn.id} style={{ position: 'absolute', left: cn.position.x, top: cn.position.y, width: cn.style?.width || 200, height: cn.style?.height || 100, backgroundColor: cn.style?.backgroundColor || '#fff', border: cn.style?.border || '4px solid #333', borderRadius: cn.style?.borderRadius || '12px', display: 'flex', alignItems: cn.style?.alignItems || 'center', justifyContent: cn.style?.justifyContent || 'center', fontSize: '32px', color: cn.style?.color || '#000', overflow: 'hidden' }}>
+                    <div key={cn.id} style={{ position: 'absolute', left: cn.position.x, top: cn.position.y, width: cn.style?.width || 200, height: cn.style?.height || 100, backgroundColor: cn.style?.backgroundColor || '#fff', border: cn.style?.border || '4px solid #333', borderRadius: cn.style?.borderRadius || '12px', display: 'flex', flexDirection: 'column', alignItems: cn.style?.alignItems || 'flex-start', justifyContent: cn.style?.justifyContent || 'flex-start', fontSize: '32px', color: cn.style?.color || '#000', overflow: 'hidden' }}>
                       {cn.data?.isImage ? <img src={cn.data.imageUrl as string} style={{width:'100%', height:'100%', objectFit:'cover'}} alt="mini" /> : cn.data?.isShape ? null : <div className="html-content" style={{padding:'15px', width:'100%', fontWeight: cn.style?.fontWeight || 'normal', textAlign: cn.style?.textAlign || 'center', color: cn.style?.color || '#000', fontFamily: cn.style?.fontFamily || 'sans-serif', fontSize: cn.style?.fontSize || '14px', textDecoration: cn.style?.textDecoration || 'none'}} dangerouslySetInnerHTML={{ __html: renderHTMLWithMath(cn.data?.content) }} />}
                     </div>
                   ) : null)}
@@ -1094,7 +1085,8 @@ function FlowEditor() {
         data: {
           ...n.data,
           label: (
-            <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: n.style?.alignItems || 'center', justifyContent: n.style?.justifyContent || 'center', position: 'relative', border: resolvedBorder, borderRadius: n.style?.borderRadius || '12px', backgroundColor: n.style?.backgroundColor || '#fff', opacity: n.style?.opacity || 1 }}>
+            // ★ 修正箇所：外側の箱から display: flex と alignItems / justifyContent を削除。干渉を完全に防ぎます。
+            <div style={{ width: '100%', height: '100%', position: 'relative', border: resolvedBorder, borderRadius: n.style?.borderRadius || '12px', backgroundColor: n.style?.backgroundColor || '#fff', opacity: n.style?.opacity || 1 }}>
               
               {n.id !== 'center-mark' && (
                 <>
@@ -1128,10 +1120,12 @@ function FlowEditor() {
                       maxWidth: 'none', maxHeight: 'none', left: n.data?.isCropping ? `${offX}px` : 0, top: n.data?.isCropping ? `${offY}px` : 0,
                       transform: `translate(${n.data.imgPosX || 0}px, ${n.data.imgPosY || 0}px) scale(${n.data.imgZoom || 1})`, transformOrigin: 'center center', pointerEvents: 'none' 
                   }} alt="img" />
-                  <div className="html-content" style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: n.style?.alignItems || 'center', justifyContent: n.style?.justifyContent || 'center', pointerEvents: 'none', color: n.style?.color || '#000', fontFamily: n.style?.fontFamily || 'sans-serif', fontSize: n.style?.fontSize || '14px', fontWeight: n.style?.fontWeight || 'normal', textDecoration: n.style?.textDecoration || 'none', whiteSpace: 'pre-wrap', lineHeight: '1.2', textAlign: n.style?.textAlign || 'left', padding: n.style?.padding || '2px', transform: `translate(${textOffX}px, ${textOffY}px)` }} dangerouslySetInnerHTML={{ __html: renderHTMLWithMath(n.data?.content) }} />
+                  {/* ★ 画像のテキストオーバーレイも内側の箱だけで制御 */}
+                  <div className="html-content" style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: n.style?.alignItems || 'flex-start', justifyContent: n.style?.justifyContent || 'flex-start', pointerEvents: 'none', color: n.style?.color || '#000', fontFamily: n.style?.fontFamily || 'sans-serif', fontSize: n.style?.fontSize || '14px', fontWeight: n.style?.fontWeight || 'normal', textDecoration: n.style?.textDecoration || 'none', whiteSpace: 'pre-wrap', lineHeight: '1.2', textAlign: n.style?.textAlign || 'left', padding: n.style?.padding || '4px', transform: `translate(${textOffX}px, ${textOffY}px)` }} dangerouslySetInnerHTML={{ __html: renderHTMLWithMath(n.data?.content) }} />
                 </div>
               ) : n.id !== 'center-mark' && !n.data?.isTable ? (
-                <div className="html-content" style={{ pointerEvents: 'none', width: '100%', height: '100%', display: 'flex', flexDirection: 'column', alignItems: n.style?.alignItems || 'center', justifyContent: n.style?.justifyContent || 'center', color: n.style?.color || '#000', fontFamily: n.style?.fontFamily || 'sans-serif', fontSize: n.style?.fontSize || '14px', fontWeight: n.style?.fontWeight || 'normal', textDecoration: n.style?.textDecoration || 'none', whiteSpace: 'pre-wrap', lineHeight: '1.2', textAlign: n.style?.textAlign || 'left', padding: n.style?.padding || '2px', transform: `translate(${textOffX}px, ${textOffY}px)` }} dangerouslySetInnerHTML={{ __html: renderHTMLWithMath(n.data?.content) }} />
+                /* ★ テキストノード：内側の箱だけで flexDirection: column の基準で完璧に制御します */
+                <div className="html-content" style={{ pointerEvents: 'none', width: '100%', height: '100%', display: 'flex', flexDirection: 'column', alignItems: n.style?.alignItems || 'flex-start', justifyContent: n.style?.justifyContent || 'flex-start', color: n.style?.color || '#000', fontFamily: n.style?.fontFamily || 'sans-serif', fontSize: n.style?.fontSize || '14px', fontWeight: n.style?.fontWeight || 'normal', textDecoration: n.style?.textDecoration || 'none', whiteSpace: 'pre-wrap', lineHeight: '1.2', textAlign: n.style?.textAlign || 'left', padding: n.style?.padding || '4px', transform: `translate(${textOffX}px, ${textOffY}px)` }} dangerouslySetInnerHTML={{ __html: renderHTMLWithMath(n.data?.content) }} />
               ) : null}
 
               {n.id !== 'center-mark' ? (
