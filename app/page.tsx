@@ -51,15 +51,17 @@ const DoubleEdge = ({ id, sourceX, sourceY, targetX, targetY, sourcePosition, ta
 
   return (
     <>
-      {/* ★ カスタム矢印（塗りつぶしなしのV字）の定義。向きもサイズも完璧に調整済み */}
+      {/* ★ カスタム矢印（底辺のある閉じた三角形）の定義。向きもサイズも接点も完璧に調整済み */}
       {isDouble && (
         <svg style={{ position: 'absolute', width: 0, height: 0 }}>
           <defs>
-            <marker id={`custom-arrow-${id}`} viewBox="0 0 12 12" refX="9" refY="6" markerWidth={customArrowSize} markerHeight={customArrowSize} markerUnits="userSpaceOnUse" orient="auto">
-              <polyline points="2,2 10,6 2,10" fill="none" stroke={edgeColor} strokeWidth={strokeWidth >= 3 ? 2 : 1.5} strokeLinecap="round" strokeLinejoin="round" />
+            {/* ★ 終了マーカー: V字を閉じて閉じた三角形に。refXを2に設定し、二重線の先端を傘の底辺にピタッと合わせる */}
+            <marker id={`custom-arrow-${id}`} viewBox="0 0 12 12" refX="2" refY="6" markerWidth={customArrowSize} markerHeight={customArrowSize} markerUnits="userSpaceOnUse" orient="auto">
+              <polygon points="2,2 10,6 2,10" fill="none" stroke={edgeColor} strokeWidth={strokeWidth >= 3 ? 2 : 1.5} strokeLinecap="round" strokeLinejoin="round" />
             </marker>
-            <marker id={`custom-arrow-start-${id}`} viewBox="0 0 12 12" refX="3" refY="6" markerWidth={customArrowSize} markerHeight={customArrowSize} markerUnits="userSpaceOnUse" orient="auto">
-              <polyline points="10,2 2,6 10,10" fill="none" stroke={edgeColor} strokeWidth={strokeWidth >= 3 ? 2 : 1.5} strokeLinecap="round" strokeLinejoin="round" />
+            {/* ★ 開始マーカー: 同様に閉じた三角形に。refXを10に設定し、接点を底辺に合わせる */}
+            <marker id={`custom-arrow-start-${id}`} viewBox="0 0 12 12" refX="10" refY="6" markerWidth={customArrowSize} markerHeight={customArrowSize} markerUnits="userSpaceOnUse" orient="auto">
+              <polygon points="10,2 2,6 10,10" fill="none" stroke={edgeColor} strokeWidth={strokeWidth >= 3 ? 2 : 1.5} strokeLinecap="round" strokeLinejoin="round" />
             </marker>
           </defs>
         </svg>
@@ -71,7 +73,7 @@ const DoubleEdge = ({ id, sourceX, sourceY, targetX, targetY, sourcePosition, ta
           <BaseEdge path={edgePath} style={{ ...style, strokeWidth: strokeWidth + 8, stroke: edgeColor }} />
           {/* 二重線の内側の隙間（背景色でくり抜く） */}
           <BaseEdge path={edgePath} style={{ ...style, strokeWidth: strokeWidth + 4, stroke: 'var(--bg-color, #f1f1f1)' }} />
-          {/* カスタム矢印を乗せるための透明な線 */}
+          {/* カスタム矢印を乗せるための透明な線。この線の先端に閉じた傘を配置する */}
           <BaseEdge path={edgePath} markerEnd={rMarkerEnd} markerStart={rMarkerStart} style={{ strokeWidth: strokeWidth, stroke: 'transparent', fill: 'none' }} />
         </>
       ) : (
@@ -928,7 +930,7 @@ function FlowEditor() {
           label: (
             <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: n.style?.alignItems || 'flex-start', justifyContent: n.style?.justifyContent || 'flex-start', position: 'relative', border: resolvedBorder, borderRadius: n.style?.borderRadius || '12px', backgroundColor: n.style?.backgroundColor || '#fff', opacity: n.style?.opacity || 1 }}>
               
-              {/* ★ 透明なターゲットと極小のソースハンドル。オフセット設定付き */}
+              {/* ★ ReactFlowデフォルトの黒丸を完全に根絶し、透明な受信用ハンドルと「ホバーした時だけ見える青丸」にしました */}
               {n.id !== 'center-mark' && (
                 <>
                   <Handle type="target" position={Position.Top} id="top-tgt" className="custom-handle-target custom-handle-offset-top" />
@@ -997,7 +999,7 @@ function FlowEditor() {
 
   const isRoot = historyLevel.length === 0;
   const actionBtnStyle = { padding: '6px 10px', borderRadius: '6px', border: '1px solid #ccc', backgroundColor: '#fff', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px', boxShadow: '0 2px 4px rgba(0,0,0,0.05)', fontWeight: 'bold', fontSize: '12px', transition: 'all 0.2s', whiteSpace: 'nowrap' };
-  const primaryBtnStyle = { ...actionBtnStyle, backgroundColor: '#3b82f6', color: '#fff', border: 'none', boxShadow: '0 2px 4px rgba(59, 130, 246, 0.3)' };
+  const primaryBtnStyle = { ...actionBtnStyle, backgroundColor: '#3b82f6', color: '#fff', border: 'none', boxShadow: '0 2px 4px rgba(5, 130, 246, 0.3)' };
 
   const editorPanelStyle = isExpandedEditor ? {
       position: 'fixed' as const, top: '20px', right: '20px', width: '450px', maxHeight: '90vh', backgroundColor: '#fff', zIndex: 10000,
@@ -1033,7 +1035,7 @@ function FlowEditor() {
             .react-flow__background { background-color: #fff !important; }
         }
 
-        /* ★ ReactFlowデフォルトの黒丸を完全に根絶する */
+        /* ★ ReactFlowデフォルトの黒丸を完全に根絕する */
         .react-flow__handle {
             background: transparent !important;
             border: none !important;
