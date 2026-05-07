@@ -46,16 +46,15 @@ const DoubleEdge = ({ id, sourceX, sourceY, targetX, targetY, sourcePosition, ta
     rMarkerStart = `url(#custom-arrow-start-${id})`;
   }
 
-  // 矢印のサイズを線の太さに応じて調整し、1pxの時でもしっかり大きく見えるように
+  // 矢印のサイズ調整
   const customArrowSize = strokeWidth * 1.5 + 16; 
 
   return (
     <>
-      {/* ★ カスタム矢印（底辺のない「開いた傘（V字）」）の定義 */}
+      {/* カスタム矢印（底辺のない開いた傘） */}
       {isDouble && (
         <svg style={{ position: 'absolute', width: 0, height: 0 }}>
           <defs>
-            {/* ★ polygonをpolylineに変更し、縦線を消去！二重線が綺麗に溶け込みます */}
             <marker id={`custom-arrow-${id}`} viewBox="0 0 12 12" refX="2" refY="6" markerWidth={customArrowSize} markerHeight={customArrowSize} markerUnits="userSpaceOnUse" orient="auto">
               <polyline points="2,2 10,6 2,10" fill="none" stroke={edgeColor} strokeWidth={strokeWidth >= 3 ? 2 : 1.5} strokeLinecap="round" strokeLinejoin="round" />
             </marker>
@@ -68,11 +67,8 @@ const DoubleEdge = ({ id, sourceX, sourceY, targetX, targetY, sourcePosition, ta
 
       {isDouble ? (
         <>
-          {/* 二重線の外側（太い線） */}
           <BaseEdge path={edgePath} style={{ ...style, strokeWidth: strokeWidth + 8, stroke: edgeColor }} />
-          {/* 二重線の内側の隙間（背景色でくり抜く） */}
           <BaseEdge path={edgePath} style={{ ...style, strokeWidth: strokeWidth + 4, stroke: 'var(--bg-color, #f1f1f1)' }} />
-          {/* カスタム矢印を乗せるための透明な線 */}
           <BaseEdge path={edgePath} markerEnd={rMarkerEnd} markerStart={rMarkerStart} style={{ strokeWidth: strokeWidth, stroke: 'transparent', fill: 'none' }} />
         </>
       ) : (
@@ -131,12 +127,17 @@ const QUICK_TEXT_COLORS = ['#000000', '#FF0000', '#008000', '#0000FF', '#FFF000'
 function FlowEditor() {
   const { setViewport, getZoom } = useReactFlow();
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const jsonImportRef = useRef<HTMLInputElement>(null);
   
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [isExpandedEditor, setIsExpandedEditor] = useState(false);
   const [isTopBarOpen, setIsTopBarOpen] = useState(true);
   const [isBottomBarOpen, setIsBottomBarOpen] = useState(true);
   
+  // ★ 新機能：印刷モードの状態管理
+  const [isPrintMode, setIsPrintMode] = useState(false);
+  const [isExecutingPrint, setIsExecutingPrint] = useState(false);
+
   const [files, setFiles] = useState<Record<string, any>>({});
   const [activeFileId, setActiveFileId] = useState<string>('default');
   
@@ -240,6 +241,99 @@ function FlowEditor() {
     });
     alert('💾 データを保存しました！');
   }, [activeFileId, currentLevel, levelData]);
+
+  // ★ 新機能：エクスポート（書き出し）
+  const exportData = useCallback(() => {
+      handleManualSave(); // 最新を保存
+      setTimeout(() => {
+          const currentData = localStorage.getItem('my-logic-files');
+          if (!currentData) return;
+          const blob = new Blob([currentData], { type: "application/json" });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = `logic-notes-backup-${new Date().toISOString().slice(0,10)}.json`;
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          URL.revokeObjectURL(url);
+      }, 100);
+  }, [handleManualSave]);
+
+  // ★ 新機能：インポート（読み込み）
+  const importData = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = (ev) => {
+          try {
+              const parsed = JSON.parse(ev.target?.result as string);
+              if (parsed && typeof parsed === 'object') {
+                  setFiles(parsed);
+                  localStorage.setItem('my-logic-files', JSON.stringify(parsed));
+                  const firstId = Object.keys(parsed)[0];
+                  if (firstId) {
+                      localStorage.setItem('my-logic-active-id', firstId);
+                      loadFileInitial(firstId, parsed);
+                  }
+                  alert('🎉 データを正常に読み込みました！');
+              }
+          } catch(err) {
+              alert('❌ ファイルの読み込みに失敗しました。正しいバックアップファイルを選択してください。');
+          }
+      };
+      reader.readAsText(file);
+      if (jsonImportRef.current) jsonImportRef.current.value = ''; // Reset input
+  }, []);
+
+  // ★ 新機能：印刷モードのトグル
+  const togglePrintMode = useCallback(() => {
+      setIsPrintMode(prev => {
+          const next = !prev;
+          if (next) {
+              // 印刷モードON: トリミング枠がなければ1つ追加する
+              setNodes(nds => {
+                  if (nds.some(n => n.type === 'printZone')) return nds;
+                  const newId = `print-zone-${Date.now()}`;
+                  return [...nds, {
+                      id: newId, type: 'printZone', position: { x: 0, y: 0 },
+                      data: { label: '印刷範囲 1' },
+                      style: { width: 800, height: 1130 }, // A4縦の比率に近いデフォルト
+                      zIndex: 99999
+                  }];
+              });
+          } else {
+              // 印刷モードOFF: トリミング枠をすべて消す
+              setNodes(nds => nds.filter(n => n.type !== 'printZone'));
+          }
+          return next;
+      });
+  }, []);
+
+  // ★ 新機能：印刷範囲を追加
+  const addPrintZone = useCallback(() => {
+      setNodes(nds => {
+          const count = nds.filter(n => n.type === 'printZone').length;
+          return [...nds, {
+              id: `print-zone-${Date.now()}`, type: 'printZone', position: { x: count * 50, y: count * 50 },
+              data: { label: `印刷範囲 ${count + 1}` },
+              style: { width: 800, height: 1130 },
+              zIndex: 99999
+          }];
+      });
+  }, []);
+
+  // ★ 新機能：印刷の実行
+  const executePrint = useCallback(() => {
+      clearSelection();
+      setIsExecutingPrint(true);
+      // ReactFlowがプリント用のDOMを描画するのを待ってから印刷ダイアログを呼ぶ
+      setTimeout(() => {
+          window.print();
+          setIsExecutingPrint(false);
+      }, 800);
+  }, [clearSelection]);
+
 
   const loadFileInitial = (id: string, allFiles = files) => {
     const target = allFiles[id]; if (!target) return;
@@ -821,6 +915,7 @@ function FlowEditor() {
     setGuides({});
   }, [takeSnapshot]);
 
+  // ★ 印刷モードの専用ノード（トリミング枠）を定義
   const flowNodes = useMemo(() => {
     const centerNode: any = { 
       id: 'center-mark', type: 'default', position: { x: -10, y: -10 }, draggable: false, selectable: false, 
@@ -829,6 +924,25 @@ function FlowEditor() {
     };
 
     return [centerNode, ...nodes.map(n => {
+      // 印刷範囲用の特殊ノード
+      if (n.type === 'printZone') {
+        return {
+          ...n,
+          draggable: true,
+          data: {
+            label: (
+              <div style={{ width: '100%', height: '100%', border: '4px dashed #3b82f6', backgroundColor: 'rgba(59, 130, 246, 0.05)', position: 'relative' }}>
+                <div style={{ position: 'absolute', top: 0, left: 0, background: '#3b82f6', color: '#fff', padding: '4px 12px', fontSize: '14px', fontWeight: 'bold' }}>
+                  {n.data.label}
+                </div>
+                <NodeResizer isVisible={true} minWidth={200} minHeight={200} handleStyle={{ width: 12, height: 12, background: '#3b82f6' }} lineStyle={{ border: 'none' }} />
+              </div>
+            )
+          },
+          style: { ...n.style, border: 'none', backgroundColor: 'transparent', padding: 0 }
+        };
+      }
+
       const isPreview = Boolean(n.data?.previewVisible && !n.data?.isShape && !n.data?.isImage && !n.data?.isTable);
       let previewElement: React.ReactNode = null;
       
@@ -1020,6 +1134,35 @@ function FlowEditor() {
 
   const isTableEditing = primaryNode?.data?.isTable && (selectedCells[primaryNode.id]?.length || 0) > 0;
   
+  // ★ 印刷時の処理（メインUIを非表示にし、印刷用レイアウトのみにする）
+  if (isExecutingPrint) {
+      const printBoxes = nodes.filter(n => n.type === 'printZone');
+      const printableNodes = nodes.filter(n => n.type !== 'printZone' && n.id !== 'center-mark');
+      return (
+          <div style={{ backgroundColor: '#fff', width: '100%', minHeight: '100vh' }}>
+              <style>{`
+                  @page { size: auto; margin: 0; }
+                  body { background: #fff !important; }
+              `}</style>
+              {printBoxes.map((box, i) => (
+                  <div key={box.id} style={{ width: box.style?.width || 800, height: box.style?.height || 1130, position: 'relative', overflow: 'hidden', pageBreakAfter: 'always', margin: '0 auto', backgroundColor: levelData[currentLevel]?.bgColor || '#ffffff' }}>
+                      <ReactFlowProvider>
+                          <ReactFlow 
+                              nodes={printableNodes} 
+                              edges={edges} 
+                              edgeTypes={edgeTypes} 
+                              defaultViewport={{ x: -box.position.x, y: -box.position.y, zoom: 1 }}
+                              panOnDrag={false} zoomOnScroll={false} nodesDraggable={false} elementsSelectable={false}
+                          >
+                              <Background color="#f1f1f1" />
+                          </ReactFlow>
+                      </ReactFlowProvider>
+                  </div>
+              ))}
+          </div>
+      );
+  }
+
   return (
     <div style={{ width: '100vw', height: '100vh', display: 'flex', flexDirection: 'row', overflow: 'hidden' }}>
       <style>{`
@@ -1033,7 +1176,6 @@ function FlowEditor() {
             .react-flow__background { background-color: #fff !important; }
         }
 
-        /* ★ ReactFlowデフォルトの黒丸を完全に根絶する */
         .react-flow__handle {
             background: transparent !important;
             border: none !important;
@@ -1044,19 +1186,19 @@ function FlowEditor() {
             box-shadow: none !important;
         }
 
-        /* ★ 透明なハンドル（送受信）とオフセット設定 */
         .custom-handle, .custom-handle-target { width: 24px !important; height: 24px !important; background: transparent !important; border: none !important; z-index: 10 !important; cursor: crosshair !important; pointer-events: auto !important; display: flex; justify-content: center; align-items: center; }
         
-        /* ★ 通常は見えないが、近づくと青い丸が出てくる */
         .custom-handle::before, .custom-handle-target::before { content: ""; display: block; width: 0px; height: 0px; background: #3b82f6; border-radius: 50%; transition: all 0.2s cubic-bezier(0.34, 1.56, 0.64, 1); border: 2px solid #fff; opacity: 0; }
         .custom-handle:hover::before, .custom-handle-target:hover::before { width: 14px; height: 14px; opacity: 1; box-shadow: 0 1px 3px rgba(0,0,0,0.2); }
 
-        /* ★ 矢印がめり込まないよう、図形から外側に1mm（約4px）だけ離すオフセット */
         .custom-handle-offset-top { top: -4px !important; }
         .custom-handle-offset-bottom { bottom: -4px !important; }
         .custom-handle-offset-left { left: -4px !important; }
         .custom-handle-offset-right { right: -4px !important; }
       `}</style>
+      
+      {/* 隠しインポートボタン */}
+      <input type="file" ref={jsonImportRef} style={{ display: 'none' }} onChange={importData} accept=".json" />
       <input type="file" ref={fileInputRef} style={{ display: 'none' }} onChange={handleFileChange} accept="image/*" />
       
       {isExpandedEditor && (
@@ -1115,7 +1257,7 @@ function FlowEditor() {
             <Background color="#f1f1f1" className="no-print" /><Controls className="no-print" /><SmartGuides guides={guides} />
           </ReactFlow>
           
-          {selectedNodes.length > 0 && primaryNode && (
+          {selectedNodes.length > 0 && primaryNode && primaryNode.type !== 'printZone' && (
             <div className="no-print" style={{ position:'absolute', right:0, top:0, bottom:0, width:'320px', borderLeft:'1px solid #ddd', padding:'15px', backgroundColor:'#fff', zIndex:1000, overflowY: 'auto', boxShadow: '-4px 0 10px rgba(0,0,0,0.05)' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
                 <h3 style={{fontSize:'14px', margin: 0}}>{selectedNodes.length > 1 ? `${selectedNodes.length}個の要素を一括編集` : primaryNode.data?.isTable ? '表の設定' : primaryNode.data?.isImage ? '画像編集' : primaryNode.data?.isShape ? '図形設定' : 'テキスト設定'}</h3>
@@ -1380,32 +1522,51 @@ function FlowEditor() {
           )}
         </div>
 
+        {/* 下部バー */}
         {isBottomBarOpen ? (
           <div className="no-print" style={{ padding: '8px 10px', backgroundColor: 'rgba(255,255,255,0.95)', borderTop: '1px solid #eee', display: 'flex', flexWrap: 'nowrap', overflowX: 'auto', justifyContent: 'center', alignItems: 'center', gap: '6px', zIndex: 1001, boxShadow: '0 -4px 10px rgba(0,0,0,0.03)', backdropFilter: 'blur(4px)' }}>
-            <button onClick={undo} disabled={past.length === 0} style={{ ...actionBtnStyle, opacity: past.length === 0 ? 0.4 : 1, cursor: past.length === 0 ? 'default' : 'pointer' }}>↩️ 戻る</button>
-            <button onClick={redo} disabled={future.length === 0} style={{ ...actionBtnStyle, opacity: future.length === 0 ? 0.4 : 1, cursor: future.length === 0 ? 'default' : 'pointer' }}>↪️ 進む</button>
-            <div style={{ width: '1px', height: '24px', backgroundColor: '#ddd', margin: '0 2px' }} />
-            <button onClick={handleManualSave} style={{ ...primaryBtnStyle, backgroundColor: '#059669', boxShadow: '0 2px 4px rgba(5, 150, 105, 0.3)' }}>💾 保存</button>
-            <div style={{ width: '1px', height: '24px', backgroundColor: '#ddd', margin: '0 2px' }} />
-            <button onClick={goBack} disabled={isRoot} style={{ ...actionBtnStyle, opacity: isRoot ? 0.4 : 1, cursor: isRoot ? 'default' : 'pointer' }}>🔙 前へ</button>
-            <button onClick={goTop} disabled={isRoot} style={{ ...actionBtnStyle, opacity: isRoot ? 0.4 : 1, cursor: isRoot ? 'default' : 'pointer' }}>🏠 TOP</button>
-            <div style={{ width: '1px', height: '24px', backgroundColor: '#ddd', margin: '0 2px' }} />
-            <button onClick={() => setViewport({ x: 0, y: 0, zoom: 1 }, { duration: 800 })} style={actionBtnStyle}>🎯 中央</button>
-            <button onClick={() => window.print()} style={{ ...actionBtnStyle, backgroundColor: '#f1f5f9' }}>🖨️ 印刷</button>
-            <div style={{ width: '1px', height: '24px', backgroundColor: '#ddd', margin: '0 2px' }} />
-            <button onClick={() => addNode('text')} style={primaryBtnStyle}>📝 テキスト</button>
-            <button onClick={() => addNode('image')} style={{ ...primaryBtnStyle, backgroundColor: '#10b981', boxShadow: '0 2px 4px rgba(16, 185, 129, 0.3)' }}>📸 画像</button>
-            <button onClick={() => addNode('shape')} style={{ ...primaryBtnStyle, backgroundColor: '#f59e0b', boxShadow: '0 2px 4px rgba(245, 158, 11, 0.3)' }}>🟦 図形</button>
-            <button onClick={() => addNode('table')} style={{ ...primaryBtnStyle, backgroundColor: '#6366f1', boxShadow: '0 2px 4px rgba(99, 102, 241, 0.3)' }}>🧮 表</button>
-            <div style={{ width: '1px', height: '24px', backgroundColor: '#ddd', margin: '0 2px' }} />
-            <div style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '11px', fontWeight: 'bold', color: '#555', backgroundColor: '#fff', padding: '4px 8px', borderRadius: '6px', border: '1px solid #ccc' }}>
-              <span>🎨 背景</span>
-              <input type="color" value={levelData[currentLevel]?.bgColor || '#ffffff'} onChange={(e) => {
-                const newColor = e.target.value;
-                setLevelData(prev => ({ ...prev, [currentLevel]: { ...(prev[currentLevel] || {}), bgColor: newColor } }));
-              }} style={{width:'16px', height:'16px', cursor:'pointer', border: 'none', padding: 0, borderRadius: '4px'}} />
-            </div>
-            <button onClick={() => setIsBottomBarOpen(false)} style={{ padding: '4px 8px', marginLeft: 'auto', fontSize: '10px', background: '#e2e8f0', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold', color: '#475569' }}>▼ 隠す</button>
+            
+            {/* ★ 印刷モードON時の専用メニュー */}
+            {isPrintMode ? (
+               <>
+                 <div style={{ fontWeight: 'bold', fontSize: '12px', color: '#b91c1c', padding: '0 10px' }}>🖨️ 印刷モード</div>
+                 <div style={{ width: '1px', height: '24px', backgroundColor: '#ddd', margin: '0 2px' }} />
+                 <button onClick={addPrintZone} style={{ ...actionBtnStyle, backgroundColor: '#eff6ff', color: '#1d4ed8', border: '1px solid #bfdbfe' }}>📄 印刷範囲を追加</button>
+                 <button onClick={executePrint} style={{ ...actionBtnStyle, backgroundColor: '#10b981', color: '#fff', border: 'none', boxShadow: '0 2px 4px rgba(16, 185, 129, 0.3)' }}>✅ 印刷を実行</button>
+                 <div style={{ width: '1px', height: '24px', backgroundColor: '#ddd', margin: '0 2px' }} />
+                 <button onClick={togglePrintMode} style={{ ...actionBtnStyle, color: '#4b5563' }}>❌ キャンセル</button>
+               </>
+            ) : (
+               /* 通常時のメニュー */
+               <>
+                 <button onClick={undo} disabled={past.length === 0} style={{ ...actionBtnStyle, opacity: past.length === 0 ? 0.4 : 1, cursor: past.length === 0 ? 'default' : 'pointer' }}>↩️ 戻る</button>
+                 <button onClick={redo} disabled={future.length === 0} style={{ ...actionBtnStyle, opacity: future.length === 0 ? 0.4 : 1, cursor: future.length === 0 ? 'default' : 'pointer' }}>↪️ 進む</button>
+                 <div style={{ width: '1px', height: '24px', backgroundColor: '#ddd', margin: '0 2px' }} />
+                 <button onClick={handleManualSave} style={{ ...primaryBtnStyle, backgroundColor: '#059669', boxShadow: '0 2px 4px rgba(5, 150, 105, 0.3)' }}>💾 保存</button>
+                 <button onClick={() => jsonImportRef.current?.click()} style={actionBtnStyle}>📥 読込</button>
+                 <button onClick={exportData} style={actionBtnStyle}>📤 書出</button>
+                 <div style={{ width: '1px', height: '24px', backgroundColor: '#ddd', margin: '0 2px' }} />
+                 <button onClick={goBack} disabled={isRoot} style={{ ...actionBtnStyle, opacity: isRoot ? 0.4 : 1, cursor: isRoot ? 'default' : 'pointer' }}>🔙 前へ</button>
+                 <button onClick={goTop} disabled={isRoot} style={{ ...actionBtnStyle, opacity: isRoot ? 0.4 : 1, cursor: isRoot ? 'default' : 'pointer' }}>🏠 TOP</button>
+                 <div style={{ width: '1px', height: '24px', backgroundColor: '#ddd', margin: '0 2px' }} />
+                 <button onClick={() => setViewport({ x: 0, y: 0, zoom: 1 }, { duration: 800 })} style={actionBtnStyle}>🎯 中央</button>
+                 <button onClick={togglePrintMode} style={{ ...actionBtnStyle, backgroundColor: '#f1f5f9' }}>🖨️ 印刷設定</button>
+                 <div style={{ width: '1px', height: '24px', backgroundColor: '#ddd', margin: '0 2px' }} />
+                 <button onClick={() => addNode('text')} style={primaryBtnStyle}>📝 テキスト</button>
+                 <button onClick={() => addNode('image')} style={{ ...primaryBtnStyle, backgroundColor: '#10b981', boxShadow: '0 2px 4px rgba(16, 185, 129, 0.3)' }}>📸 画像</button>
+                 <button onClick={() => addNode('shape')} style={{ ...primaryBtnStyle, backgroundColor: '#f59e0b', boxShadow: '0 2px 4px rgba(245, 158, 11, 0.3)' }}>🟦 図形</button>
+                 <button onClick={() => addNode('table')} style={{ ...primaryBtnStyle, backgroundColor: '#6366f1', boxShadow: '0 2px 4px rgba(99, 102, 241, 0.3)' }}>🧮 表</button>
+                 <div style={{ width: '1px', height: '24px', backgroundColor: '#ddd', margin: '0 2px' }} />
+                 <div style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '11px', fontWeight: 'bold', color: '#555', backgroundColor: '#fff', padding: '4px 8px', borderRadius: '6px', border: '1px solid #ccc' }}>
+                   <span>🎨 背景</span>
+                   <input type="color" value={levelData[currentLevel]?.bgColor || '#ffffff'} onChange={(e) => {
+                     const newColor = e.target.value;
+                     setLevelData(prev => ({ ...prev, [currentLevel]: { ...(prev[currentLevel] || {}), bgColor: newColor } }));
+                   }} style={{width:'16px', height:'16px', cursor:'pointer', border: 'none', padding: 0, borderRadius: '4px'}} />
+                 </div>
+                 <button onClick={() => setIsBottomBarOpen(false)} style={{ padding: '4px 8px', marginLeft: 'auto', fontSize: '10px', background: '#e2e8f0', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold', color: '#475569' }}>▼ 隠す</button>
+               </>
+            )}
           </div>
         ) : (
           <button className="no-print" onClick={() => setIsBottomBarOpen(true)} style={{ position: 'absolute', bottom: 10, right: 10, zIndex: 100, padding: '4px 8px', fontSize: '10px', background: '#e2e8f0', border: '1px solid #cbd5e1', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold', color: '#475569', boxShadow: '0 -2px 4px rgba(0,0,0,0.1)' }}>▲ ツールバーを表示</button>
