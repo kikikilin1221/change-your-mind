@@ -46,17 +46,20 @@ const DoubleEdge = ({ id, sourceX, sourceY, targetX, targetY, sourcePosition, ta
     rMarkerStart = `url(#custom-arrow-start-${id})`;
   }
 
+  // ★ 矢印のサイズを線の太さに応じて調整し、1pxの時でもしっかり大きく見えるように
+  const customArrowSize = strokeWidth * 1.5 + 16; 
+
   return (
     <>
       {/* ★ カスタム矢印（塗りつぶしなしのV字）の定義。向きもサイズも完璧に調整済み */}
       {isDouble && (
         <svg style={{ position: 'absolute', width: 0, height: 0 }}>
           <defs>
-            <marker id={`custom-arrow-${id}`} viewBox="0 0 10 10" refX="8" refY="5" markerWidth="4.5" markerHeight="4.5" orient="auto">
-              <polyline points="2,2 8,5 2,8" fill="none" stroke={edgeColor} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+            <marker id={`custom-arrow-${id}`} viewBox="0 0 12 12" refX="9" refY="6" markerWidth={customArrowSize} markerHeight={customArrowSize} markerUnits="userSpaceOnUse" orient="auto">
+              <polyline points="2,2 10,6 2,10" fill="none" stroke={edgeColor} strokeWidth={strokeWidth >= 3 ? 2 : 1.5} strokeLinecap="round" strokeLinejoin="round" />
             </marker>
-            <marker id={`custom-arrow-start-${id}`} viewBox="0 0 10 10" refX="2" refY="5" markerWidth="4.5" markerHeight="4.5" orient="auto">
-              <polyline points="8,2 2,5 8,8" fill="none" stroke={edgeColor} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+            <marker id={`custom-arrow-start-${id}`} viewBox="0 0 12 12" refX="3" refY="6" markerWidth={customArrowSize} markerHeight={customArrowSize} markerUnits="userSpaceOnUse" orient="auto">
+              <polyline points="10,2 2,6 10,10" fill="none" stroke={edgeColor} strokeWidth={strokeWidth >= 3 ? 2 : 1.5} strokeLinecap="round" strokeLinejoin="round" />
             </marker>
           </defs>
         </svg>
@@ -297,7 +300,6 @@ function FlowEditor() {
     } : n));
   }, []);
 
-  // ★ 線のデザイン更新を完璧に制御
   const updateEdgeDesign = useCallback((config: any) => {
     takeSnapshot();
     setEdges((eds: any[]) => eds.map((e: any) => {
@@ -305,7 +307,7 @@ function FlowEditor() {
       
       const newStrokeWidth = config.strokeWidth !== undefined ? config.strokeWidth : (Number(e.style?.strokeWidth) || 1);
       const newColor = config.color !== undefined ? config.color : (e.data?.color || '#333');
-      const mSize = Math.max(12, newStrokeWidth * 3); // 矢印のサイズを調整
+      const mSize = Math.max(12, newStrokeWidth * 3); 
       
       const baseMarker = { type: MarkerType.ArrowClosed, color: newColor, width: mSize, height: mSize };
       
@@ -313,7 +315,6 @@ function FlowEditor() {
       let newMarkerType = config.markerType !== undefined ? config.markerType : e.data?.markerType;
       let newLabel = config.label !== undefined ? config.label : e.label;
       
-      // 普通に戻す時などのリセット処理
       if (config.resetDesign) {
          newDouble = config.double || false;
          newMarkerType = config.markerType || 'none';
@@ -1359,7 +1360,6 @@ function FlowEditor() {
                 <button onClick={() => updateEdgeDesign({ label: '<span style="color: blue;">NO</span>', labelStyle: { ...selectedEdge.data?.labelStyle, textAlign: 'center' } })} style={{flex:1, padding:'6px', border: '1px solid #93c5fd', color: 'blue', background: '#eff6ff', cursor: 'pointer', borderRadius: '4px', fontWeight: 'bold', fontSize: '11px'}}>NO 線</button>
               </div>
 
-              {/* ★ 線の太さをスライダー化（0.5〜10）。デフォルトは一番細い1です */}
               <label style={{fontSize:'11px', fontWeight: 'bold'}}>線の太さ</label>
               <div style={{ display:'flex', gap:'10px', alignItems: 'center', marginBottom:'15px', marginTop: '5px' }}>
                 <input type="range" min="0.5" max="10" step="0.5" value={Number(selectedEdge.style?.strokeWidth) || 1} onChange={(e) => updateEdgeDesign({ strokeWidth: Number(e.target.value) })} style={{flex: 1}} />
