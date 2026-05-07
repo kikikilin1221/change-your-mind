@@ -92,7 +92,6 @@ const DoubleEdge = ({ id, sourceX, sourceY, targetX, targetY, sourcePosition, ta
 
   return (
     <>
-      {/* カスタム矢印（底辺のない「開いた傘（V字）」）の定義 */}
       {isDouble && (
         <svg style={{ position: 'absolute', width: 0, height: 0 }}>
           <defs>
@@ -279,7 +278,6 @@ function FlowEditor() {
         localStorage.setItem('my-logic-active-id', activeFileId);
         return updatedFiles;
     });
-    // ★ 復活：保存成功のアラートを表示
     alert('💾 ノートを正常に保存しました！');
   }, [activeFileId, currentLevel, levelData]);
 
@@ -336,7 +334,7 @@ function FlowEditor() {
                       id: newId, type: 'printZone', position: { x: 0, y: 0 },
                       data: { label: '印刷範囲 1' },
                       style: { width: 800, height: 1130 },
-                      width: 800, height: 1130,
+                      width: 800, height: 1130, // 初期サイズを明確にセット
                       zIndex: 99999
                   }];
               });
@@ -360,13 +358,16 @@ function FlowEditor() {
       });
   }, []);
 
+  // 印刷実行
   const executePrint = useCallback(() => {
       clearSelection();
       setIsExecutingPrint(true);
       setTimeout(() => {
           window.print();
-          setIsExecutingPrint(false);
-      }, 1500); 
+          setTimeout(() => {
+              setIsExecutingPrint(false);
+          }, 500); 
+      }, 1000); 
   }, [clearSelection]);
 
   const loadFileInitial = (id: string, allFiles = files) => {
@@ -639,6 +640,7 @@ function FlowEditor() {
       }
   };
 
+  // ★ 修正箇所：レイアウト（flex-direction: column）の縦横の入れ替わりバグを解消
   const handleLayout = (hAlign?: string, vAlign?: string) => {
       takeSnapshot();
       if (primaryNode?.data?.isTable && (selectedCells[primaryNode.id]?.length || 0) > 0) {
@@ -659,10 +661,12 @@ function FlowEditor() {
           let styleUpdate: any = {};
           if (hAlign) {
               styleUpdate.textAlign = hAlign;
-              styleUpdate.justifyContent = hAlign === 'left' ? 'flex-start' : hAlign === 'right' ? 'flex-end' : 'center';
+              // 横方向の配置は alignItems (columnベースのため)
+              styleUpdate.alignItems = hAlign === 'left' ? 'flex-start' : hAlign === 'right' ? 'flex-end' : 'center';
           }
           if (vAlign) {
-              styleUpdate.alignItems = vAlign === 'top' ? 'flex-start' : vAlign === 'bottom' ? 'flex-end' : 'center';
+              // 縦方向の配置は justifyContent (columnベースのため)
+              styleUpdate.justifyContent = vAlign === 'top' ? 'flex-start' : vAlign === 'bottom' ? 'flex-end' : 'center';
           }
           updateSelectedNodes({}, styleUpdate);
       }
@@ -763,8 +767,7 @@ function FlowEditor() {
     const parent = selNodes.length === 1 ? selNodes[0] : null;
 
     let data: any = { content: '項目', previewVisible: false, previewStyle: { opacity: 0.7, offsetX: 0, offsetY: -150, width: 180, height: 120 }, textOffsetX: 0, textOffsetY: 0 };
-    // ★ 修正：テキスト図形の初期設定で「灰色の枠線（borderColor）」をなくし、完全な透明（none）にしました
-    let style: any = { backgroundColor: '#ffffff', color: '#000', borderRadius: '12px', fontSize: '14px', width: 200, height: 100, display: 'flex', alignItems: 'flex-start', justifyContent: 'flex-start', textAlign: 'left', padding: '2px', borderColor: 'transparent' };
+    let style: any = { backgroundColor: '#ffffff', color: '#000', borderRadius: '12px', fontSize: '14px', width: 200, height: 100, display: 'flex', alignItems: 'center', justifyContent: 'center', textAlign: 'center', padding: '2px', borderColor: 'transparent' }; // ★ 初期値も中央揃えに見直しました
     
     if (type === 'image') { fileInputRef.current?.click(); return; }
     
@@ -1077,7 +1080,6 @@ function FlowEditor() {
       const offX = n.data?.cropOffsetX || 0;
       const offY = n.data?.cropOffsetY || 0;
 
-      // ★ 修正：テキスト図形でデフォルトの灰色線（#ccc）を持っていた古いデータは枠線「なし」に強制変換して綺麗にします
       const isTextNode = !n.data?.isShape && !n.data?.isImage && !n.data?.isTable;
       const bColor = n.style?.borderColor;
       const hideGrayBorder = isTextNode && (!bColor || bColor === '#ccc' || bColor === 'transparent');
@@ -1092,7 +1094,7 @@ function FlowEditor() {
         data: {
           ...n.data,
           label: (
-            <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: n.style?.alignItems || 'flex-start', justifyContent: n.style?.justifyContent || 'flex-start', position: 'relative', border: resolvedBorder, borderRadius: n.style?.borderRadius || '12px', backgroundColor: n.style?.backgroundColor || '#fff', opacity: n.style?.opacity || 1 }}>
+            <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: n.style?.alignItems || 'center', justifyContent: n.style?.justifyContent || 'center', position: 'relative', border: resolvedBorder, borderRadius: n.style?.borderRadius || '12px', backgroundColor: n.style?.backgroundColor || '#fff', opacity: n.style?.opacity || 1 }}>
               
               {n.id !== 'center-mark' && (
                 <>
@@ -1126,10 +1128,10 @@ function FlowEditor() {
                       maxWidth: 'none', maxHeight: 'none', left: n.data?.isCropping ? `${offX}px` : 0, top: n.data?.isCropping ? `${offY}px` : 0,
                       transform: `translate(${n.data.imgPosX || 0}px, ${n.data.imgPosY || 0}px) scale(${n.data.imgZoom || 1})`, transformOrigin: 'center center', pointerEvents: 'none' 
                   }} alt="img" />
-                  <div className="html-content" style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: n.style?.alignItems || 'flex-start', justifyContent: n.style?.justifyContent || 'flex-start', pointerEvents: 'none', color: n.style?.color || '#000', fontFamily: n.style?.fontFamily || 'sans-serif', fontSize: n.style?.fontSize || '14px', fontWeight: n.style?.fontWeight || 'normal', textDecoration: n.style?.textDecoration || 'none', whiteSpace: 'pre-wrap', lineHeight: '1.2', textAlign: n.style?.textAlign || 'left', padding: n.style?.padding || '2px', transform: `translate(${textOffX}px, ${textOffY}px)` }} dangerouslySetInnerHTML={{ __html: renderHTMLWithMath(n.data?.content) }} />
+                  <div className="html-content" style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: n.style?.alignItems || 'center', justifyContent: n.style?.justifyContent || 'center', pointerEvents: 'none', color: n.style?.color || '#000', fontFamily: n.style?.fontFamily || 'sans-serif', fontSize: n.style?.fontSize || '14px', fontWeight: n.style?.fontWeight || 'normal', textDecoration: n.style?.textDecoration || 'none', whiteSpace: 'pre-wrap', lineHeight: '1.2', textAlign: n.style?.textAlign || 'left', padding: n.style?.padding || '2px', transform: `translate(${textOffX}px, ${textOffY}px)` }} dangerouslySetInnerHTML={{ __html: renderHTMLWithMath(n.data?.content) }} />
                 </div>
               ) : n.id !== 'center-mark' && !n.data?.isTable ? (
-                <div className="html-content" style={{ pointerEvents: 'none', width: '100%', height: '100%', display: 'flex', flexDirection: 'column', alignItems: n.style?.alignItems || 'flex-start', justifyContent: n.style?.justifyContent || 'flex-start', color: n.style?.color || '#000', fontFamily: n.style?.fontFamily || 'sans-serif', fontSize: n.style?.fontSize || '14px', fontWeight: n.style?.fontWeight || 'normal', textDecoration: n.style?.textDecoration || 'none', whiteSpace: 'pre-wrap', lineHeight: '1.2', textAlign: n.style?.textAlign || 'left', padding: n.style?.padding || '2px', transform: `translate(${textOffX}px, ${textOffY}px)` }} dangerouslySetInnerHTML={{ __html: renderHTMLWithMath(n.data?.content) }} />
+                <div className="html-content" style={{ pointerEvents: 'none', width: '100%', height: '100%', display: 'flex', flexDirection: 'column', alignItems: n.style?.alignItems || 'center', justifyContent: n.style?.justifyContent || 'center', color: n.style?.color || '#000', fontFamily: n.style?.fontFamily || 'sans-serif', fontSize: n.style?.fontSize || '14px', fontWeight: n.style?.fontWeight || 'normal', textDecoration: n.style?.textDecoration || 'none', whiteSpace: 'pre-wrap', lineHeight: '1.2', textAlign: n.style?.textAlign || 'left', padding: n.style?.padding || '2px', transform: `translate(${textOffX}px, ${textOffY}px)` }} dangerouslySetInnerHTML={{ __html: renderHTMLWithMath(n.data?.content) }} />
               ) : null}
 
               {n.id !== 'center-mark' ? (
@@ -1185,7 +1187,6 @@ function FlowEditor() {
 
   const isTableEditing = primaryNode?.data?.isTable && (selectedCells[primaryNode.id]?.length || 0) > 0;
   
-  // ★ 印刷実行中：不要なReactFlowコンポーネント（特にBackgroundドット）を取り除き、高速化＆完全マッピングを実現！
   if (isExecutingPrint) {
       const printBoxes = nodes.filter(n => n.type === 'printZone');
       const printableNodes = flowNodes.filter(n => n.type !== 'printZone' && n.id !== 'center-mark');
@@ -1215,7 +1216,6 @@ function FlowEditor() {
                                   defaultViewport={{ x: -boxX, y: -boxY, zoom: 1 }}
                                   panOnDrag={false} zoomOnScroll={false} nodesDraggable={false} elementsSelectable={false} preventScrolling={false}
                               >
-                                  {/* ★ 激重の原因だった <Background /> を削除！これで印刷ダイアログが一瞬で開きます！ */}
                               </ReactFlow>
                           </ReactFlowProvider>
                       </div>
