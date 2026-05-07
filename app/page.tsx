@@ -29,15 +29,17 @@ const getEdgePoint = (cx: number, cy: number, w: number, h: number, tx: number, 
 const DoubleEdge = ({ id, sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, style = {}, markerEnd, markerStart, data, label }: EdgeProps) => {
   const [edgePath, labelX, labelY] = getBezierPath({ sourceX, sourceY, sourcePosition, targetX, targetY, targetPosition });
   const isDouble = (data as any)?.double;
-  const strokeWidth = Number(style?.strokeWidth) || 2;
+  const strokeWidth = Number(style?.strokeWidth) || 1;
+  const edgeColor = (data as any)?.color || '#333';
+  const labelStyle = (data as any)?.labelStyle || { textAlign: 'center' };
+
   return (
     <>
-      <BaseEdge id={id} path={edgePath} markerEnd={markerEnd} markerStart={markerStart} style={{ ...style, strokeWidth: isDouble ? strokeWidth + 4 : strokeWidth, stroke: '#333' }} />
+      <BaseEdge id={id} path={edgePath} markerEnd={markerEnd} markerStart={markerStart} style={{ ...style, strokeWidth: isDouble ? strokeWidth + 4 : strokeWidth, stroke: edgeColor }} />
       {isDouble && <BaseEdge path={edgePath} style={{ ...style, strokeWidth: strokeWidth, stroke: '#fff' }} />}
       {label && (
         <EdgeLabelRenderer>
-          {/* ★ 線の文字の背景(background)や枠線を消し、シンプルなテキストのみにしました */}
-          <div className="no-print" style={{ position: 'absolute', transform: `translate(-50%, -50%) translate(${labelX}px,${labelY}px)`, padding: '2px 4px', fontSize: '14px', fontWeight: 'bold', color: '#333', pointerEvents: 'none', zIndex: 1000 }}>{String(label)}</div>
+          <div className="no-print" style={{ position: 'absolute', transform: `translate(-50%, -50%) translate(${labelX}px,${labelY}px)`, padding: '2px 4px', fontSize: '14px', fontWeight: 'bold', color: '#333', pointerEvents: 'none', zIndex: 1000, textShadow: '0 0 3px #fff, 0 0 3px #fff, 0 0 3px #fff', width: '150px', ...labelStyle }} dangerouslySetInnerHTML={{ __html: renderHTMLWithMath(String(label)) }} />
         </EdgeLabelRenderer>
       )}
     </>
@@ -116,6 +118,7 @@ function FlowEditor() {
   const imageCropDragRef = useRef<{ id: string, startX: number, startY: number, initX: number, initY: number } | null>(null);
   
   const editorRef = useRef<HTMLDivElement>(null);
+  const edgeEditorRef = useRef<HTMLDivElement>(null);
   const savedRangeRef = useRef<Range | null>(null);
 
   const nodesRef = useRef<any[]>([]);
@@ -256,6 +259,39 @@ function FlowEditor() {
     } : n));
   }, []);
 
+  const updateEdgeDesign = useCallback((config: any) => {
+    takeSnapshot();
+    setEdges((eds: any[]) => eds.map((e: any) => {
+      if (!e.selected) return e;
+      
+      const newStrokeWidth = config.strokeWidth !== undefined ? config.strokeWidth : (Number(e.style?.strokeWidth) || 1);
+      const newColor = config.color !== undefined ? config.color : (e.data?.color || '#333');
+      const mSize = Math.max(10, newStrokeWidth * 2);
+      const m = { type: MarkerType.ArrowClosed, color: newColor, width: mSize, height: mSize };
+      
+      const newDouble = config.double !== undefined ? config.double : e.data?.double;
+      
+      let mEnd = e.markerEnd;
+      let mStart = e.markerStart;
+      
+      if (config.arrow !== undefined || config.both !== undefined || config.strokeWidth !== undefined || config.color !== undefined) {
+          const applyArrow = config.arrow !== undefined ? config.arrow : !!e.markerEnd;
+          const applyBoth = config.both !== undefined ? config.both : !!e.markerStart;
+          mEnd = applyArrow || applyBoth ? m : undefined;
+          mStart = applyBoth ? m : undefined;
+      }
+
+      return { 
+          ...e, 
+          style: { ...e.style, strokeWidth: newStrokeWidth, stroke: newColor },
+          data: { ...(e.data || {}), double: newDouble, color: newColor, labelStyle: config.labelStyle !== undefined ? config.labelStyle : e.data?.labelStyle }, 
+          markerEnd: mEnd, 
+          markerStart: mStart, 
+          label: config.label !== undefined ? config.label : e.label 
+      };
+    }));
+  }, [takeSnapshot]);
+
   const saveSelection = () => {
     const sel = window.getSelection();
     if (sel && sel.rangeCount > 0) savedRangeRef.current = sel.getRangeAt(0).cloneRange();
@@ -263,6 +299,17 @@ function FlowEditor() {
 
   const applyUnifiedFormat = (type: 'fontName' | 'bold' | 'strikeThrough' | 'foreColor' | 'fontSize', value: any = '') => {
       takeSnapshot();
+      
+      if (document.activeElement === edgeEditorRef.current && edgeEditorRef.current && selectedEdge) {
+          const selection = window.getSelection();
+          if (!selection) return;
+          if (savedRangeRef.current) { selection.removeAllRanges(); selection.addRange(savedRangeRef.current); }
+          document.execCommand(type, false, value);
+          if (selection.rangeCount > 0) savedRangeRef.current = selection.getRangeAt(0).cloneRange();
+          updateEdgeDesign({ label: edgeEditorRef.current.innerHTML });
+          return;
+      }
+
       const isActive = document.activeElement === editorRef.current;
       const isTableEditing = primaryNode?.data?.isTable && (selectedCells[primaryNode.id]?.length || 0) > 0;
 
@@ -534,15 +581,17 @@ function FlowEditor() {
     takeSnapshot();
     const id = `node-${Date.now()}`;
     
-    // ★ 追加する図形の設定（デフォルトを左上に。パディングを2pxにして余白を削る）
+    const selNodes = nodesRef.current.filter(n => n.selected);
+    const parent = selNodes.length === 1 ? selNodes[0] : null;
+
     let data: any = { content: '項目', previewVisible: false, previewStyle: { opacity: 0.7, offsetX: 0, offsetY: -150, width: 180, height: 120 }, textOffsetX: 0, textOffsetY: 0 };
-    let style: any = { backgroundColor: '#ffffff', color: '#000', borderRadius: '12px', fontSize: '14px', width: 200, height: 100, display: 'flex', alignItems: 'flex-start', justifyContent: 'flex-start', textAlign: 'left', padding: '2px' };
+    let style: any = { backgroundColor: '#ffffff', color: '#000', borderRadius: '12px', fontSize: '14px', width: 200, height: 100, display: 'flex', alignItems: 'flex-start', justifyContent: 'flex-start', textAlign: 'left', padding: '2px', borderColor: '#ccc' };
     
     if (type === 'image') { fileInputRef.current?.click(); return; }
     
     if (type === 'shape') {
       data = { content: '', isShape: true, shapeType: 'rect', keepRatio: false, textOffsetX: 0, textOffsetY: 0 };
-      style = { ...style, backgroundColor: '#eee', borderRadius: '4px', border: '3px solid #333' };
+      style = { ...style, backgroundColor: '#eee', borderRadius: '4px', border: '3px solid #333', borderColor: '#333' };
     }
     if (type === 'table') {
       data = { 
@@ -552,20 +601,16 @@ function FlowEditor() {
               "1-0": { content: "セル", style: { border: '1px solid #333' } }, "1-1": { content: "セル", style: { border: '1px solid #333' } }
           } 
       };
-      style = { ...style, width: 300, height: 150, padding: 0, backgroundColor: '#fff', display: 'block', borderRadius: '8px', border: '2px solid #ccc' };
+      style = { ...style, width: 300, height: 150, padding: 0, backgroundColor: '#fff', display: 'block', borderRadius: '8px', border: '2px solid #ccc', borderColor: '#ccc' };
     }
 
-    const selNodes = nodesRef.current.filter(n => n.selected);
-    const parent = selNodes.length === 1 ? selNodes[0] : null;
-
     if (parent && (type === 'text' || type === 'table')) {
-        // 「接続の向き」設定を廃止したので、Enterキーでの追加は常に「下（縦）」に統一。
         const sourceHandle = 'bottom-src';
         const targetHandle = 'top-tgt';
 
         const edgeId = `e-${parent.id}-${id}`;
         setEdges((eds: any[]) => [...eds.map((e: any) => ({...e, selected:false})), { 
-            id: edgeId, source: parent.id, target: id, sourceHandle, targetHandle, type: 'default', style: { strokeWidth: 2 } 
+            id: edgeId, source: parent.id, target: id, sourceHandle, targetHandle, type: 'default', style: { strokeWidth: 1 } 
         }]);
         
         setNodes((nds: any[]) => {
@@ -573,7 +618,6 @@ function FlowEditor() {
             const parentW = Number(parent.style?.width || 200);
             const parentH = Number(parent.style?.height || 100);
             
-            // 下方向に追加
             const newX = parent.position.x;
             const newY = parent.position.y + parentH + 80;
 
@@ -611,14 +655,21 @@ function FlowEditor() {
       const activeEl = document.activeElement as HTMLElement;
       const isEditing = activeEl?.tagName === 'INPUT' || activeEl?.tagName === 'TEXTAREA' || activeEl?.isContentEditable;
       
-      // ★ Tabキーで一発文字入力モードへ
-      if (e.key === 'Tab' && !isEditing && selectedNodes.length === 1) {
+      if (e.key === 'Tab' && !isEditing) {
           e.preventDefault();
-          if (editorRef.current) {
+          if (selectedNodes.length === 1 && editorRef.current) {
               editorRef.current.focus();
               const sel = window.getSelection();
               const range = document.createRange();
               range.selectNodeContents(editorRef.current);
+              range.collapse(false);
+              sel?.removeAllRanges();
+              sel?.addRange(range);
+          } else if (selectedEdge && edgeEditorRef.current) {
+              edgeEditorRef.current.focus();
+              const sel = window.getSelection();
+              const range = document.createRange();
+              range.selectNodeContents(edgeEditorRef.current);
               range.collapse(false);
               sel?.removeAllRanges();
               sel?.addRange(range);
@@ -650,7 +701,7 @@ function FlowEditor() {
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [addNode, handleCopy, handlePaste, undo, redo, takeSnapshot, handleManualSave, selectedNodes.length]);
+  }, [addNode, handleCopy, handlePaste, undo, redo, takeSnapshot, handleManualSave, selectedNodes.length, selectedEdge]);
 
   useEffect(() => {
     const onMouseMove = (e: MouseEvent) => {
@@ -684,7 +735,7 @@ function FlowEditor() {
           return [...nds.map((n: any) => ({...n, selected: false})), { 
             id: `img-${Date.now()}`, position: { x: 50, y: 50 }, zIndex: maxZ + 1, selected: true,
             data: { isImage: true, imageUrl: ev.target?.result, imgPosX: 0, imgPosY: 0, imgZoom: 1, isCropping: false, cropBaseW: 300, cropBaseH: 200, cropOffsetX: 0, cropOffsetY: 0, textOffsetX: 0, textOffsetY: 0 }, 
-            style: { width: 300, height: 200, background: '#fff', padding: 0, border: '1px solid #ccc' } 
+            style: { width: 300, height: 200, background: '#fff', padding: 0, border: '1px solid #ccc', borderColor: '#ccc' } 
           }];
         });
       };
@@ -816,26 +867,29 @@ function FlowEditor() {
       const offX = n.data?.cropOffsetX || 0;
       const offY = n.data?.cropOffsetY || 0;
 
+      const resolvedBorder = n.data?.isShape 
+            ? `3px solid ${n.style?.borderColor || '#333'}` 
+            : `1px solid ${n.style?.borderColor || '#ccc'}`;
+
       return {
         ...n,
         draggable: n.data?.isImage && n.data?.isCropping ? false : true,
         data: {
           ...n.data,
           label: (
-            <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: n.style?.alignItems || 'flex-start', justifyContent: n.style?.justifyContent || 'flex-start', position: 'relative' }}>
+            <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: n.style?.alignItems || 'flex-start', justifyContent: n.style?.justifyContent || 'flex-start', position: 'relative', border: resolvedBorder, borderRadius: n.style?.borderRadius || '12px', backgroundColor: n.style?.backgroundColor || '#fff', opacity: n.style?.opacity || 1 }}>
               
-              {/* ★ 全方位に「透明な受信用の的(Target)」と「小さな黒い点(Source)」を配置！これでどこからでも自由に繋げます */}
               {n.id !== 'center-mark' && (
                 <>
-                  <Handle type="target" position={Position.Top} id="top-tgt" className="custom-handle-target" />
-                  <Handle type="target" position={Position.Bottom} id="bottom-tgt" className="custom-handle-target" />
-                  <Handle type="target" position={Position.Left} id="left-tgt" className="custom-handle-target" />
-                  <Handle type="target" position={Position.Right} id="right-tgt" className="custom-handle-target" />
+                  <Handle type="target" position={Position.Top} id="top-tgt" className="custom-handle-target react-flow__handle-top" />
+                  <Handle type="target" position={Position.Bottom} id="bottom-tgt" className="custom-handle-target react-flow__handle-bottom" />
+                  <Handle type="target" position={Position.Left} id="left-tgt" className="custom-handle-target react-flow__handle-left" />
+                  <Handle type="target" position={Position.Right} id="right-tgt" className="custom-handle-target react-flow__handle-right" />
 
-                  <Handle type="source" position={Position.Left} id="left-src" className="custom-handle" />
-                  <Handle type="source" position={Position.Right} id="right-src" className="custom-handle" />
-                  <Handle type="source" position={Position.Top} id="top-src" className="custom-handle" />
-                  <Handle type="source" position={Position.Bottom} id="bottom-src" className="custom-handle" />
+                  <Handle type="source" position={Position.Left} id="left-src" className="custom-handle react-flow__handle-left" />
+                  <Handle type="source" position={Position.Right} id="right-src" className="custom-handle react-flow__handle-right" />
+                  <Handle type="source" position={Position.Top} id="top-src" className="custom-handle react-flow__handle-top" />
+                  <Handle type="source" position={Position.Bottom} id="bottom-src" className="custom-handle react-flow__handle-bottom" />
                 </>
               )}
 
@@ -857,12 +911,10 @@ function FlowEditor() {
                       maxWidth: 'none', maxHeight: 'none', left: n.data?.isCropping ? `${offX}px` : 0, top: n.data?.isCropping ? `${offY}px` : 0,
                       transform: `translate(${n.data.imgPosX || 0}px, ${n.data.imgPosY || 0}px) scale(${n.data.imgZoom || 1})`, transformOrigin: 'center center', pointerEvents: 'none' 
                   }} alt="img" />
-                  {/* 画像のテキスト */}
-                  <div className="html-content" style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: n.style?.alignItems || 'flex-start', justifyContent: n.style?.justifyContent || 'flex-start', pointerEvents: 'none', color: n.style?.color || '#000', fontFamily: n.style?.fontFamily || 'sans-serif', fontSize: n.style?.fontSize || '14px', fontWeight: n.style?.fontWeight || 'normal', textDecoration: n.style?.textDecoration || 'none', whiteSpace: 'pre-wrap', lineHeight: '1.2', textAlign: n.style?.textAlign || 'left', padding: n.style?.padding || '2px', transform: `translate(${textOffX}px, ${textOffY}px)` }} dangerouslySetInnerHTML={{ __html: renderHTMLWithMath(n.data?.content) }} />
+                  <div className="html-content" style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: n.style?.alignItems || 'flex-start', justifyContent: n.style?.justifyContent || 'flex-start', pointerEvents: 'none', color: n.style?.color || '#000', fontFamily: n.style?.fontFamily || 'sans-serif', fontSize: n.style?.fontSize || '14px', fontWeight: n.style?.fontWeight || 'normal', textDecoration: n.style?.textDecoration || 'none', whiteSpace: 'pre-wrap', lineHeight: '1.2', textAlign: n.style?.textAlign || 'left', padding: n.style?.padding || '2px', transform: `translate(${textOffX}px, ${textOffY}px)` }} dangerouslySetInnerHTML={{ __html: renderHTMLWithMath(n.data?.content) }} />
                 </div>
               ) : n.id !== 'center-mark' && !n.data?.isTable ? (
-                // ★ 通常テキスト・図形のテキスト (パディングを削り、textOffsetで位置を微調整できるようにしました)
-                <div className="html-content" style={{ pointerEvents: 'none', width: '100%', height: '100%', display: 'flex', flexDirection: 'column', justifyContent: n.style?.justifyContent || 'flex-start', color: n.style?.color || '#000', fontFamily: n.style?.fontFamily || 'sans-serif', fontSize: n.style?.fontSize || '14px', fontWeight: n.style?.fontWeight || 'normal', textDecoration: n.style?.textDecoration || 'none', whiteSpace: 'pre-wrap', lineHeight: '1.2', textAlign: n.style?.textAlign || 'left', padding: n.style?.padding || '2px', transform: `translate(${textOffX}px, ${textOffY}px)` }} dangerouslySetInnerHTML={{ __html: renderHTMLWithMath(n.data?.content) }} />
+                <div className="html-content" style={{ pointerEvents: 'none', width: '100%', height: '100%', display: 'flex', flexDirection: 'column', alignItems: n.style?.alignItems || 'flex-start', justifyContent: n.style?.justifyContent || 'flex-start', color: n.style?.color || '#000', fontFamily: n.style?.fontFamily || 'sans-serif', fontSize: n.style?.fontSize || '14px', fontWeight: n.style?.fontWeight || 'normal', textDecoration: n.style?.textDecoration || 'none', whiteSpace: 'pre-wrap', lineHeight: '1.2', textAlign: n.style?.textAlign || 'left', padding: n.style?.padding || '2px', transform: `translate(${textOffX}px, ${textOffY}px)` }} dangerouslySetInnerHTML={{ __html: renderHTMLWithMath(n.data?.content) }} />
               ) : null}
 
               {n.id !== 'center-mark' ? (
@@ -886,21 +938,12 @@ function FlowEditor() {
                  />
               ) : null}
             </div>
-          )
+          ),
+          style: { ...n.style, border: 'none', backgroundColor: 'transparent' }
         }
       };
     })];
   }, [nodes, enterLevel, levelData, takeSnapshot, selectedCells]);
-
-  const updateEdgeDesign = (config: any) => {
-    takeSnapshot();
-    setEdges((eds: any[]) => eds.map((e: any) => {
-      if (!e.selected) return e;
-      const mSize = Math.max(8, (Number(e.style?.strokeWidth) || 2) * 1.5);
-      const m = { type: MarkerType.ArrowClosed, color: '#333', width: mSize, height: mSize };
-      return { ...e, data: { ...(e.data || {}), double: config.double }, markerEnd: config.arrow || config.both ? m : undefined, markerStart: config.both ? m : undefined, label: config.label !== undefined ? config.label : e.label };
-    }));
-  };
 
   const isRoot = historyLevel.length === 0;
   const actionBtnStyle = { padding: '6px 10px', borderRadius: '6px', border: '1px solid #ccc', backgroundColor: '#fff', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px', boxShadow: '0 2px 4px rgba(0,0,0,0.05)', fontWeight: 'bold', fontSize: '12px', transition: 'all 0.2s', whiteSpace: 'nowrap' };
@@ -927,39 +970,13 @@ function FlowEditor() {
 
   const isTableEditing = primaryNode?.data?.isTable && (selectedCells[primaryNode.id]?.length || 0) > 0;
   
-  useEffect(() => {
-    if (editorRef.current) {
-        if (primaryNode && !primaryNode.data?.isTable) {
-            if (editorRef.current.innerHTML !== (primaryNode.data.content || '')) {
-                editorRef.current.innerHTML = primaryNode.data.content || '';
-            }
-        } else if (!primaryNode) {
-            editorRef.current.innerHTML = '';
-        }
-    }
-  }, [primaryNode?.id, primaryNode?.data?.content, primaryNode?.data?.isTable]);
-
-  useEffect(() => {
-      if (editorRef.current && primaryNode?.data?.isTable) {
-          const activeCells = selectedCells[primaryNode.id] || [];
-          if (activeCells.length === 1) {
-              const cellContent = primaryNode.data.cells[activeCells[0]]?.content || '';
-              if (editorRef.current.innerHTML !== cellContent) editorRef.current.innerHTML = cellContent;
-          } else if (activeCells.length > 1) {
-              editorRef.current.innerHTML = '<span style="color:#999">複数セル選択中 (※入力すると全セル上書きされます)</span>';
-          } else {
-              editorRef.current.innerHTML = '';
-          }
-      }
-  }, [primaryNode?.id, primaryNode?.data?.isTable, selectedCells, primaryNode?.data?.cells]);
-
   return (
     <div style={{ width: '100vw', height: '100vh', display: 'flex', flexDirection: 'row', overflow: 'hidden' }}>
       <style>{`
         .html-content p { margin: 0; }
-        .html-content strike, #node-editor strike { text-decoration: line-through double !important; }
-        .html-content *, #node-editor * { line-height: 1.2 !important; vertical-align: baseline !important; }
-        #node-editor:empty:before { content: "テキストを入力..."; color: #aaa; pointer-events: none; }
+        .html-content strike, #node-editor strike, #edge-editor strike { text-decoration: line-through double !important; }
+        .html-content *, #node-editor *, #edge-editor * { line-height: 1.2 !important; vertical-align: baseline !important; }
+        #node-editor:empty:before, #edge-editor:empty:before { content: attr(data-placeholder); color: #aaa; pointer-events: none; }
         
         /* 印刷時に消す要素 */
         @media print {
@@ -967,12 +984,15 @@ function FlowEditor() {
             .react-flow__background { background-color: #fff !important; }
         }
 
-        /* ★ ハンドル（黒い点）を6pxの極小にし、近づいた時(hover)に大きくするように修正 */
-        .custom-handle { width: 6px !important; height: 6px !important; background: #333 !important; border: 1px solid #fff !important; transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1) !important; box-shadow: 0 1px 2px rgba(0,0,0,0.2) !important; cursor: crosshair !important; z-index: 10 !important; }
-        .custom-handle::after { content: ""; position: absolute; top: -12px; left: -12px; right: -12px; bottom: -12px; background: transparent; }
-        .custom-handle:hover { transform: scale(2.5) !important; background: #3b82f6 !important; border-color: #fff !important; }
+        .react-flow__handle-top { top: -2px !important; }
+        .react-flow__handle-bottom { bottom: -2px !important; }
+        .react-flow__handle-left { left: -2px !important; }
+        .react-flow__handle-right { right: -2px !important; }
 
-        /* 透明なターゲット(受信用)ハンドル。線をピタッと吸い付ける磁石の役割 */
+        .custom-handle { width: 6px !important; height: 6px !important; background: transparent !important; border: none !important; transition: all 0.2s cubic-bezier(0.34, 1.56, 0.64, 1) !important; box-shadow: none !important; cursor: crosshair !important; z-index: 10 !important; }
+        .custom-handle::after { content: ""; position: absolute; top: -15px; left: -15px; right: -15px; bottom: -15px; background: transparent; }
+        .custom-handle:hover { transform: scale(2.5) !important; background: #3b82f6 !important; border: 2px solid #fff !important; box-shadow: 0 1px 3px rgba(0,0,0,0.2) !important; }
+
         .custom-handle-target { width: 30px !important; height: 30px !important; background: transparent !important; border: none !important; z-index: 1 !important; cursor: crosshair !important; pointer-events: auto !important; }
       `}</style>
       <input type="file" ref={fileInputRef} style={{ display: 'none' }} onChange={handleFileChange} accept="image/*" />
@@ -1011,7 +1031,6 @@ function FlowEditor() {
                 style={{ marginLeft: '8px', fontSize: '14px', fontWeight: 'bold', color: '#333', textAlign: 'center', border: 'none', borderBottom: '1px dashed #999', background: 'transparent', outline: 'none', minWidth: '150px' }} 
               />
             </div>
-            {/* 上部バーを隠すボタン */}
             <button onClick={() => setIsTopBarOpen(false)} style={{ padding: '4px 8px', fontSize: '10px', background: '#e2e8f0', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold', color: '#475569' }}>▲ 隠す</button>
           </div>
         ) : (
@@ -1024,7 +1043,7 @@ function FlowEditor() {
              nodes={flowNodes} edges={edges} edgeTypes={edgeTypes} elevateNodesOnSelect={false} multiSelectionKeyCode={['Shift', 'Meta', 'Control']}
              onNodesChange={u => setNodes((nds: any[]) => applyNodeChanges(u, nds))} 
              onEdgesChange={u => setEdges((eds: any[]) => applyEdgeChanges(u, eds))} 
-             onConnect={p => { takeSnapshot(); setEdges((eds: any[]) => addEdge({...p, type:'default', style: {strokeWidth: 2}}, eds)); }} 
+             onConnect={p => { takeSnapshot(); setEdges((eds: any[]) => addEdge({...p, type:'default', style: {strokeWidth: 1}}, eds)); }} 
              onNodeDragStart={() => takeSnapshot()}
              onNodeDoubleClick={(_, n) => {
                 enterLevel(n.id, extractFirstLineText(n.data?.content));
@@ -1122,6 +1141,7 @@ function FlowEditor() {
 
                   <div 
                     id="node-editor" 
+                    data-placeholder="テキストを入力..."
                     ref={editorRef}
                     contentEditable={!primaryNode.data?.isTable || isTableEditing}
                     onInput={(e) => { 
@@ -1178,7 +1198,6 @@ function FlowEditor() {
                 <button onClick={() => handleLayout(undefined, 'flex-end')} style={{flex:1, cursor:'pointer', border:'1px solid #ccc', padding: '4px', fontSize:'11px', borderRadius: '4px'}}>下</button>
               </div>
 
-              {/* ★ 新機能：文字の微調整スライダー（X / Y） */}
               {!primaryNode.data?.isTable && (
                   <div style={{ marginBottom: '15px' }}>
                       <label style={{fontSize: '10px', fontWeight: 'bold'}}>文字位置の微調整 (X / Y)</label>
@@ -1189,6 +1208,9 @@ function FlowEditor() {
 
               <label style={{fontSize:'10px', fontWeight: 'bold'}}>全体の透明度</label>
               <input type="range" min="0.1" max="1" step="0.1" value={Number(primaryNode.style?.opacity ?? 1)} onChange={(e) => { takeSnapshot(); updateSelectedNodes({}, { opacity: parseFloat(e.target.value) })}} style={{width:'100%', marginBottom:'10px'}} />
+
+              <label style={{fontSize:'10px', fontWeight: 'bold'}}>枠線の色</label>
+              <input type="color" value={String(primaryNode.style?.borderColor || (primaryNode.data?.isShape ? '#333333' : '#cccccc'))} onChange={(e) => { takeSnapshot(); updateSelectedNodes({}, { borderColor: e.target.value })}} style={{width:'100%', height:'24px', cursor: 'pointer', border: 'none', padding: 0, marginBottom:'10px'}} />
 
               <label style={{fontSize:'10px', fontWeight: 'bold'}}>背景色</label>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: '4px', marginTop: '5px', marginBottom: '10px' }}>
@@ -1236,21 +1258,44 @@ function FlowEditor() {
                 <button onClick={clearSelection} style={{ border: 'none', background: 'none', fontSize: '18px', cursor: 'pointer', padding: '0 5px' }}>×</button>
               </div>
 
-              {/* ★ 新機能：線の中に文字を入力 */}
-              <label style={{fontSize:'11px', fontWeight: 'bold'}}>線の文字</label>
-              <input type="text" value={selectedEdge.label || ''} onChange={(e) => updateEdgeDesign({ label: e.target.value })} style={{width:'100%', padding:'6px', border:'1px solid #ccc', borderRadius:'4px', marginBottom:'15px', fontSize:'12px'}} placeholder="線に文字を入れる..." />
+              <label style={{fontSize:'11px', fontWeight: 'bold'}}>線の文字 (Tabキーで即入力)</label>
+              <div 
+                 id="edge-editor" 
+                 data-placeholder="線に文字を入れる..."
+                 ref={edgeEditorRef}
+                 contentEditable
+                 onInput={(e) => updateEdgeDesign({ label: e.currentTarget.innerHTML })}
+                 onBlur={(e) => updateEdgeDesign({ label: e.currentTarget.innerHTML })}
+                 onKeyUp={saveSelection}
+                 onMouseUp={saveSelection}
+                 style={{ width:'100%', minHeight: '40px', padding: '8px', border: '1px solid #ddd', borderRadius: '4px', outline: 'none', backgroundColor: '#fff', cursor: 'text', overflowY: 'auto', fontSize: '13px', marginBottom: '5px' }}
+              />
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '15px' }}>
+                 <div style={{ display:'flex', gap:'5px' }}>
+                    <button onMouseDown={(e) => e.preventDefault()} onClick={() => applyUnifiedFormat('bold')} style={{ cursor:'pointer', border:'1px solid #ccc', padding: '4px 8px', fontSize:'11px', borderRadius: '4px', background: '#fff' }}>太字</button>
+                    <input type="color" onChange={(e) => applyUnifiedFormat('foreColor', e.target.value)} style={{width:'24px', height:'24px', cursor: 'pointer', border: 'none', padding: 0}} />
+                 </div>
+                 <div style={{ display:'flex', gap:'5px' }}>
+                    <button onClick={() => updateEdgeDesign({ labelStyle: { ...selectedEdge.data?.labelStyle, textAlign: 'center' } })} style={{ cursor:'pointer', border:'1px solid #ccc', padding: '4px 8px', fontSize:'11px', borderRadius: '4px', background: '#fff' }}>中央</button>
+                    <button onClick={() => updateEdgeDesign({ labelStyle: { ...selectedEdge.data?.labelStyle, textAlign: 'right' } })} style={{ cursor:'pointer', border:'1px solid #ccc', padding: '4px 8px', fontSize:'11px', borderRadius: '4px', background: '#fff' }}>右詰</button>
+                 </div>
+              </div>
 
-              {/* ★ 新機能：YES / NO 線のワンタッチ追加 */}
               <label style={{fontSize:'11px', fontWeight: 'bold'}}>文字入り線 (クイック)</label>
               <div style={{ display:'flex', gap:'5px', marginTop: '5px', marginBottom: '20px' }}>
-                <button onClick={() => updateEdgeDesign({ label: 'YES' })} style={{flex:1, padding:'6px', border: '1px solid #ccc', background: '#f9f9f9', cursor: 'pointer', borderRadius: '4px', fontWeight: 'bold', fontSize: '11px'}}>YES 線</button>
-                <button onClick={() => updateEdgeDesign({ label: 'NO' })} style={{flex:1, padding:'6px', border: '1px solid #ccc', background: '#f9f9f9', cursor: 'pointer', borderRadius: '4px', fontWeight: 'bold', fontSize: '11px'}}>NO 線</button>
+                <button onClick={() => updateEdgeDesign({ label: '<span style="color: red;">YES</span>' })} style={{flex:1, padding:'6px', border: '1px solid #fca5a5', color: 'red', background: '#fef2f2', cursor: 'pointer', borderRadius: '4px', fontWeight: 'bold', fontSize: '11px'}}>YES 線</button>
+                <button onClick={() => updateEdgeDesign({ label: '<span style="color: blue;">NO</span>' })} style={{flex:1, padding:'6px', border: '1px solid #93c5fd', color: 'blue', background: '#eff6ff', cursor: 'pointer', borderRadius: '4px', fontWeight: 'bold', fontSize: '11px'}}>NO 線</button>
               </div>
 
-              <label style={{fontSize:'11px', fontWeight: 'bold'}}>太さ</label>
-              <div style={{ display:'flex', gap:'5px', marginBottom:'20px', marginTop: '5px' }}>
-                {[2, 6, 12].map(w => <button key={w} onClick={() => { takeSnapshot(); setEdges((eds: any[]) => eds.map((e: any) => e.selected ? { ...e, style: { ...e.style, strokeWidth: w } } : e)); }} style={{flex:1, padding:'6px', fontSize:'12px', cursor: 'pointer', border: '1px solid #ccc', borderRadius: '4px', background: selectedEdge.style?.strokeWidth === w ? '#ddd' : '#fff'}}>{w === 2 ? '細' : w === 6 ? '中' : '太'}</button>)}
+              <label style={{fontSize:'11px', fontWeight: 'bold'}}>線の太さ</label>
+              <div style={{ display:'flex', gap:'10px', alignItems: 'center', marginBottom:'15px', marginTop: '5px' }}>
+                <input type="range" min="1" max="6" step="1" value={Number(selectedEdge.style?.strokeWidth) || 1} onChange={(e) => updateEdgeDesign({ strokeWidth: Number(e.target.value) })} style={{flex: 1}} />
+                <span style={{fontSize: '12px', fontWeight: 'bold', width: '20px', textAlign: 'right'}}>{Number(selectedEdge.style?.strokeWidth) || 1}</span>
               </div>
+
+              <label style={{fontSize:'11px', fontWeight: 'bold'}}>線の色</label>
+              <input type="color" value={selectedEdge.data?.color || '#333333'} onChange={(e) => updateEdgeDesign({ color: e.target.value })} style={{width:'100%', height:'24px', border:'none', cursor:'pointer', padding:0, marginBottom:'20px', marginTop: '5px'}} />
+
               <label style={{fontSize:'11px', fontWeight: 'bold'}}>種類 (7種)</label>
               <div style={{ display:'flex', flexDirection:'column', gap:'5px', marginTop: '5px' }}>
                 {[{l:'普通',c:{}},{l:'片矢印 (→)',c:{arrow:true}},{l:'二重片矢印 (⇒)',c:{double:true,arrow:true}},{l:'両矢印 (↔)',c:{both:true}},{l:'二重両矢印 (⇔)',c:{double:true,both:true}},{l:'論理和 (∧)',c:{label:'∧'}},{l:'論理積 (∨)',c:{label:'∨'}}].map(item => (
