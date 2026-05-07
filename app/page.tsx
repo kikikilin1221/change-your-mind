@@ -8,6 +8,49 @@ import '@xyflow/react/dist/style.css';
 import katex from 'katex';
 import 'katex/dist/katex.min.css';
 
+// --- すべての画面で共通して使う「ノイズ完全排除」の強力なCSS ---
+const GLOBAL_CSS = `
+  .html-content p { margin: 0; }
+  .html-content strike, #node-editor strike, #edge-editor strike { text-decoration: line-through double !important; }
+  .html-content *, #node-editor *, #edge-editor * { line-height: 1.2 !important; vertical-align: baseline !important; }
+  #node-editor:empty:before, #edge-editor:empty:before { content: attr(data-placeholder); color: #aaa; pointer-events: none; }
+  
+  @media print {
+      .no-print { display: none !important; }
+      .react-flow__background { display: none !important; }
+      * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+      /* 印刷時は強制的に黒い点（ハンドル）や余計な枠線を根絶する */
+      .react-flow__handle { display: none !important; }
+      .react-flow__node { box-shadow: none !important; }
+  }
+
+  /* ReactFlowデフォルトの黒丸を完全に消し去る */
+  .react-flow__handle {
+      background: transparent !important;
+      border: none !important;
+      width: 1px !important;
+      height: 1px !important;
+      min-width: 0 !important;
+      min-height: 0 !important;
+      box-shadow: none !important;
+  }
+
+  /* 透明なハンドル（送受信）とオフセット設定 */
+  .custom-handle, .custom-handle-target { width: 24px !important; height: 24px !important; background: transparent !important; border: none !important; z-index: 10 !important; cursor: crosshair !important; pointer-events: auto !important; display: flex; justify-content: center; align-items: center; }
+  
+  /* 通常は見えないが、近づくと青い丸が出てくる */
+  .custom-handle::before, .custom-handle-target::before { content: ""; display: block; width: 0px; height: 0px; background: #3b82f6; border-radius: 50%; transition: all 0.2s cubic-bezier(0.34, 1.56, 0.64, 1); border: 2px solid #fff; opacity: 0; }
+  .custom-handle:hover::before, .custom-handle-target:hover::before { width: 14px; height: 14px; opacity: 1; box-shadow: 0 1px 3px rgba(0,0,0,0.2); }
+
+  /* 矢印がめり込まないよう、図形から外側に1mm（約4px）だけ離すオフセット */
+  .custom-handle-offset-top { top: -4px !important; }
+  .custom-handle-offset-bottom { bottom: -4px !important; }
+  .custom-handle-offset-left { left: -4px !important; }
+  .custom-handle-offset-right { right: -4px !important; }
+  
+  .print-page-wrapper { page-break-after: always; position: relative; overflow: hidden; margin: 0 auto; border: none !important; outline: none !important; }
+`;
+
 // --- 計算関数 ---
 const getEdgePoint = (cx: number, cy: number, w: number, h: number, tx: number, ty: number) => {
   const dx = tx - cx;
@@ -49,6 +92,7 @@ const DoubleEdge = ({ id, sourceX, sourceY, targetX, targetY, sourcePosition, ta
 
   return (
     <>
+      {/* カスタム矢印（底辺のない「開いた傘（V字）」）の定義 */}
       {isDouble && (
         <svg style={{ position: 'absolute', width: 0, height: 0 }}>
           <defs>
@@ -235,6 +279,8 @@ function FlowEditor() {
         localStorage.setItem('my-logic-active-id', activeFileId);
         return updatedFiles;
     });
+    // ★ 復活：保存成功のアラートを表示
+    alert('💾 ノートを正常に保存しました！');
   }, [activeFileId, currentLevel, levelData]);
 
   const exportData = useCallback(() => {
@@ -290,7 +336,7 @@ function FlowEditor() {
                       id: newId, type: 'printZone', position: { x: 0, y: 0 },
                       data: { label: '印刷範囲 1' },
                       style: { width: 800, height: 1130 },
-                      width: 800, height: 1130, // 初期サイズを明確にセット
+                      width: 800, height: 1130,
                       zIndex: 99999
                   }];
               });
@@ -314,11 +360,9 @@ function FlowEditor() {
       });
   }, []);
 
-  // 印刷実行（絶対座標強制ロック機能を追加し、完璧にフィットさせます）
   const executePrint = useCallback(() => {
       clearSelection();
       setIsExecutingPrint(true);
-      // React Flowが完全に再描画し、座標ロックが完了するのを待つ
       setTimeout(() => {
           window.print();
           setIsExecutingPrint(false);
@@ -528,7 +572,6 @@ function FlowEditor() {
       }
   };
 
-  // ★ 迷子になっていた「標準へ」リセット機能を復活させました！
   const handleResetFormat = () => {
       takeSnapshot();
       setPartialFontSize(14);
@@ -720,7 +763,8 @@ function FlowEditor() {
     const parent = selNodes.length === 1 ? selNodes[0] : null;
 
     let data: any = { content: '項目', previewVisible: false, previewStyle: { opacity: 0.7, offsetX: 0, offsetY: -150, width: 180, height: 120 }, textOffsetX: 0, textOffsetY: 0 };
-    let style: any = { backgroundColor: '#ffffff', color: '#000', borderRadius: '12px', fontSize: '14px', width: 200, height: 100, display: 'flex', alignItems: 'flex-start', justifyContent: 'flex-start', textAlign: 'left', padding: '2px', borderColor: '#ccc' };
+    // ★ 修正：テキスト図形の初期設定で「灰色の枠線（borderColor）」をなくし、完全な透明（none）にしました
+    let style: any = { backgroundColor: '#ffffff', color: '#000', borderRadius: '12px', fontSize: '14px', width: 200, height: 100, display: 'flex', alignItems: 'flex-start', justifyContent: 'flex-start', textAlign: 'left', padding: '2px', borderColor: 'transparent' };
     
     if (type === 'image') { fileInputRef.current?.click(); return; }
     
@@ -1033,9 +1077,14 @@ function FlowEditor() {
       const offX = n.data?.cropOffsetX || 0;
       const offY = n.data?.cropOffsetY || 0;
 
+      // ★ 修正：テキスト図形でデフォルトの灰色線（#ccc）を持っていた古いデータは枠線「なし」に強制変換して綺麗にします
+      const isTextNode = !n.data?.isShape && !n.data?.isImage && !n.data?.isTable;
+      const bColor = n.style?.borderColor;
+      const hideGrayBorder = isTextNode && (!bColor || bColor === '#ccc' || bColor === 'transparent');
+      
       const resolvedBorder = n.data?.isShape 
-            ? `3px solid ${n.style?.borderColor || '#333'}` 
-            : `1px solid ${n.style?.borderColor || '#ccc'}`;
+            ? `3px solid ${bColor || '#333'}` 
+            : (hideGrayBorder ? 'none' : `1px solid ${bColor}`);
 
       return {
         ...n,
@@ -1136,22 +1185,14 @@ function FlowEditor() {
 
   const isTableEditing = primaryNode?.data?.isTable && (selectedCells[primaryNode.id]?.length || 0) > 0;
   
+  // ★ 印刷実行中：不要なReactFlowコンポーネント（特にBackgroundドット）を取り除き、高速化＆完全マッピングを実現！
   if (isExecutingPrint) {
       const printBoxes = nodes.filter(n => n.type === 'printZone');
       const printableNodes = flowNodes.filter(n => n.type !== 'printZone' && n.id !== 'center-mark');
       
       return (
           <div style={{ backgroundColor: '#fff', width: '100%', minHeight: '100vh' }}>
-              <style>{`
-                  @media print {
-                      .no-print { display: none !important; }
-                  }
-                  @page { size: auto; margin: 0; }
-                  body { background: #fff !important; margin: 0; padding: 0; }
-                  * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
-                  .print-page-wrapper { page-break-after: always; position: relative; overflow: hidden; margin: 0 auto; }
-                  .react-flow__panel, .react-flow__attribution { display: none !important; }
-              `}</style>
+              <style>{GLOBAL_CSS}</style>
               
               <div className="no-print" style={{position: 'fixed', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: 'rgba(255,255,255,0.95)', zIndex: 99999}}>
                   <h2 style={{color: '#10b981', fontSize: '24px', marginBottom: '10px'}}>🖨️ 印刷データを精密生成中...</h2>
@@ -1174,6 +1215,7 @@ function FlowEditor() {
                                   defaultViewport={{ x: -boxX, y: -boxY, zoom: 1 }}
                                   panOnDrag={false} zoomOnScroll={false} nodesDraggable={false} elementsSelectable={false} preventScrolling={false}
                               >
+                                  {/* ★ 激重の原因だった <Background /> を削除！これで印刷ダイアログが一瞬で開きます！ */}
                               </ReactFlow>
                           </ReactFlowProvider>
                       </div>
@@ -1185,38 +1227,7 @@ function FlowEditor() {
 
   return (
     <div style={{ width: '100vw', height: '100vh', display: 'flex', flexDirection: 'row', overflow: 'hidden' }}>
-      <style>{`
-        .html-content p { margin: 0; }
-        .html-content strike, #node-editor strike, #edge-editor strike { text-decoration: line-through double !important; }
-        .html-content *, #node-editor *, #edge-editor * { line-height: 1.2 !important; vertical-align: baseline !important; }
-        #node-editor:empty:before, #edge-editor:empty:before { content: attr(data-placeholder); color: #aaa; pointer-events: none; }
-        
-        @media print {
-            .no-print { display: none !important; }
-            .react-flow__background { background-color: #fff !important; }
-            * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
-        }
-
-        .react-flow__handle {
-            background: transparent !important;
-            border: none !important;
-            width: 1px !important;
-            height: 1px !important;
-            min-width: 0 !important;
-            min-height: 0 !important;
-            box-shadow: none !important;
-        }
-
-        .custom-handle, .custom-handle-target { width: 24px !important; height: 24px !important; background: transparent !important; border: none !important; z-index: 10 !important; cursor: crosshair !important; pointer-events: auto !important; display: flex; justify-content: center; align-items: center; }
-        
-        .custom-handle::before, .custom-handle-target::before { content: ""; display: block; width: 0px; height: 0px; background: #3b82f6; border-radius: 50%; transition: all 0.2s cubic-bezier(0.34, 1.56, 0.64, 1); border: 2px solid #fff; opacity: 0; }
-        .custom-handle:hover::before, .custom-handle-target:hover::before { width: 14px; height: 14px; opacity: 1; box-shadow: 0 1px 3px rgba(0,0,0,0.2); }
-
-        .custom-handle-offset-top { top: -4px !important; }
-        .custom-handle-offset-bottom { bottom: -4px !important; }
-        .custom-handle-offset-left { left: -4px !important; }
-        .custom-handle-offset-right { right: -4px !important; }
-      `}</style>
+      <style>{GLOBAL_CSS}</style>
       
       <input type="file" ref={jsonImportRef} style={{ display: 'none' }} onChange={importData} accept=".json" />
       <input type="file" ref={fileInputRef} style={{ display: 'none' }} onChange={handleFileChange} accept="image/*" />
@@ -1434,7 +1445,7 @@ function FlowEditor() {
               <input type="range" min="0.1" max="1" step="0.1" value={Number(primaryNode.style?.opacity ?? 1)} onChange={(e) => { takeSnapshot(); updateSelectedNodes({}, { opacity: parseFloat(e.target.value) })}} style={{width:'100%', marginBottom:'10px'}} />
 
               <label style={{fontSize:'10px', fontWeight: 'bold'}}>枠線の色</label>
-              <input type="color" value={String(primaryNode.style?.borderColor || (primaryNode.data?.isShape ? '#333333' : '#cccccc'))} onChange={(e) => { takeSnapshot(); updateSelectedNodes({}, { borderColor: e.target.value })}} style={{width:'100%', height:'24px', cursor: 'pointer', border: 'none', padding: 0, marginBottom:'10px'}} />
+              <input type="color" value={String(primaryNode.style?.borderColor || (primaryNode.data?.isShape ? '#333333' : 'transparent'))} onChange={(e) => { takeSnapshot(); updateSelectedNodes({}, { borderColor: e.target.value })}} style={{width:'100%', height:'24px', cursor: 'pointer', border: 'none', padding: 0, marginBottom:'10px'}} />
 
               <label style={{fontSize:'10px', fontWeight: 'bold'}}>背景色</label>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: '4px', marginTop: '5px', marginBottom: '10px' }}>
