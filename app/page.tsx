@@ -314,7 +314,7 @@ function FlowEditor() {
       });
   }, []);
 
-  // ★ 印刷実行（絶対座標強制ロック機能を追加し、完璧にフィットさせます）
+  // 印刷実行（絶対座標強制ロック機能を追加し、完璧にフィットさせます）
   const executePrint = useCallback(() => {
       clearSelection();
       setIsExecutingPrint(true);
@@ -528,6 +528,7 @@ function FlowEditor() {
       }
   };
 
+  // ★ 迷子になっていた「標準へ」リセット機能を復活させました！
   const handleResetFormat = () => {
       takeSnapshot();
       setPartialFontSize(14);
@@ -905,7 +906,6 @@ function FlowEditor() {
     setGuides({});
   }, [takeSnapshot]);
 
-  // ★ 印刷範囲用の特殊ノード
   const flowNodes = useMemo(() => {
     const centerNode: any = { 
       id: 'center-mark', type: 'default', position: { x: -10, y: -10 }, draggable: false, selectable: false, 
@@ -1136,45 +1136,44 @@ function FlowEditor() {
 
   const isTableEditing = primaryNode?.data?.isTable && (selectedCells[primaryNode.id]?.length || 0) > 0;
   
-  // ★ 印刷実行中：オートフォーカスを完全排除し、絶対座標でロックオンします
   if (isExecutingPrint) {
       const printBoxes = nodes.filter(n => n.type === 'printZone');
       const printableNodes = flowNodes.filter(n => n.type !== 'printZone' && n.id !== 'center-mark');
+      
       return (
           <div style={{ backgroundColor: '#fff', width: '100%', minHeight: '100vh' }}>
               <style>{`
+                  @media print {
+                      .no-print { display: none !important; }
+                  }
                   @page { size: auto; margin: 0; }
                   body { background: #fff !important; margin: 0; padding: 0; }
                   * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
                   .print-page-wrapper { page-break-after: always; position: relative; overflow: hidden; margin: 0 auto; }
+                  .react-flow__panel, .react-flow__attribution { display: none !important; }
               `}</style>
               
               <div className="no-print" style={{position: 'fixed', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: 'rgba(255,255,255,0.95)', zIndex: 99999}}>
                   <h2 style={{color: '#10b981', fontSize: '24px', marginBottom: '10px'}}>🖨️ 印刷データを精密生成中...</h2>
-                  <p style={{color: '#666', fontWeight: 'bold'}}>ダイアログが開くまで、このままお待ちください（約1〜2秒）</p>
+                  <p style={{color: '#666', fontWeight: 'bold'}}>ダイアログが開くまで、このままお待ちください（約1秒）</p>
               </div>
 
               {printBoxes.map((box) => {
-                  // ★ 青枠のリアルタイムなサイズと座標をミリ単位で取得
-                  // `box.width` や `box.measured?.width` が確実に存在するようにフォールバックを設定し、エラーを防ぎます。
                   const boxW = (box.width ?? box.measured?.width ?? Number(box.style?.width)) || 800;
                   const boxH = (box.height ?? box.measured?.height ?? Number(box.style?.height)) || 1130;
                   const boxX = box.position.x;
                   const boxY = box.position.y;
                   
                   return (
-                      // 印刷コンテナを青枠と全く同じサイズにする
                       <div key={box.id} className="print-page-wrapper" style={{ width: `${boxW}px`, height: `${boxH}px`, backgroundColor: levelData[currentLevel]?.bgColor || '#ffffff' }}>
                           <ReactFlowProvider>
                               <ReactFlow 
                                   nodes={printableNodes} 
                                   edges={edges} 
                                   edgeTypes={edgeTypes} 
-                                  // ★ 最重要：ここでカメラの位置を青枠の左上に「強制ロック」する
                                   defaultViewport={{ x: -boxX, y: -boxY, zoom: 1 }}
                                   panOnDrag={false} zoomOnScroll={false} nodesDraggable={false} elementsSelectable={false} preventScrolling={false}
                               >
-                                  <Background color="#f1f1f1" />
                               </ReactFlow>
                           </ReactFlowProvider>
                       </div>
