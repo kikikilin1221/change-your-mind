@@ -312,15 +312,16 @@ function FlowEditor() {
       });
   }, []);
 
+  // ★ 修正：印刷実行時に React Flow のレンダリングとフィットを確実に行うための待機処理
   const executePrint = useCallback(() => {
       clearSelection();
       setIsExecutingPrint(true);
+      // React Flowが各ページのフィット処理を完了するのを待つ（少し余裕を持たせて1.2秒）
       setTimeout(() => {
           window.print();
           setIsExecutingPrint(false);
-      }, 1000); // 描画時間を確保するため少し長めに
+      }, 1200); 
   }, [clearSelection]);
-
 
   const loadFileInitial = (id: string, allFiles = files) => {
     const target = allFiles[id]; if (!target) return;
@@ -902,7 +903,7 @@ function FlowEditor() {
     setGuides({});
   }, [takeSnapshot]);
 
-  // ★ 印刷範囲用の特殊ノードの定義
+  // ★ 印刷範囲用の特殊ノード
   const flowNodes = useMemo(() => {
     const centerNode: any = { 
       id: 'center-mark', type: 'default', position: { x: -10, y: -10 }, draggable: false, selectable: false, 
@@ -911,7 +912,6 @@ function FlowEditor() {
     };
 
     return [centerNode, ...nodes.map(n => {
-      // 印刷範囲用の青い点線枠
       if (n.type === 'printZone') {
         return {
           ...n,
@@ -1121,35 +1121,48 @@ function FlowEditor() {
 
   const isTableEditing = primaryNode?.data?.isTable && (selectedCells[primaryNode.id]?.length || 0) > 0;
   
-  // ★ 印刷時の処理（メインUIを非表示にし、"flowNodes"を使用して完成デザインを印刷する）
+  // ★ 印刷時の処理：指定された青枠（printZone）に完全にフィットさせる
   if (isExecutingPrint) {
       const printBoxes = nodes.filter(n => n.type === 'printZone');
-      // ここを `nodes` ではなく `flowNodes` に修正し、デザインや文字を正しくレンダリングさせます。
+      // 印刷用ノードからは printZone 枠自体を除外する（青点線を印刷しないため）
       const printableNodes = flowNodes.filter(n => n.type !== 'printZone' && n.id !== 'center-mark');
       return (
           <div style={{ backgroundColor: '#fff', width: '100%', minHeight: '100vh' }}>
-              {/* ★ ブラウザの強制白黒化を防ぐ CSS を追加 */}
+              {/* ★ ブラウザの強制白黒化を防ぐ CSS */}
               <style>{`
                   @page { size: auto; margin: 0; }
                   body { background: #fff !important; margin: 0; padding: 0; }
                   * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+                  .print-page-wrapper { width: 100vw; height: 100vh; page-break-after: always; position: relative; overflow: hidden; }
               `}</style>
-              {printBoxes.map((box, i) => (
-                  <div key={box.id} style={{ width: box.style?.width || 800, height: box.style?.height || 1130, position: 'relative', overflow: 'hidden', pageBreakAfter: 'always', margin: '0 auto', backgroundColor: levelData[currentLevel]?.bgColor || '#ffffff' }}>
-                      {/* ReactFlowではなく絶対配置のDOMとしてレンダリングする方が確実なため、ReactFlowインスタンスを使用 */}
-                      <ReactFlowProvider>
-                          <ReactFlow 
-                              nodes={printableNodes} 
-                              edges={edges} 
-                              edgeTypes={edgeTypes} 
-                              defaultViewport={{ x: -(box.position.x || 0), y: -(box.position.y || 0), zoom: 1 }}
-                              panOnDrag={false} zoomOnScroll={false} nodesDraggable={false} elementsSelectable={false}
-                          >
-                              <Background color="#f1f1f1" />
-                          </ReactFlow>
-                      </ReactFlowProvider>
-                  </div>
-              ))}
+              {printBoxes.map((box, i) => {
+                  // ★ fitViewを完璧に動作させるため、対象の箱と同じサイズ・位置の「透明なノード」を一時的に仕込む
+                  const targetBoxNode = { 
+                      id: `target-${box.id}`, 
+                      position: box.position, 
+                      style: { width: box.style?.width, height: box.style?.height, opacity: 0, pointerEvents: 'none' }, 
+                      data: { label: '' } 
+                  };
+                  const pageNodes = [...printableNodes, targetBoxNode];
+                  
+                  return (
+                      <div key={box.id} className="print-page-wrapper" style={{ backgroundColor: levelData[currentLevel]?.bgColor || '#ffffff' }}>
+                          <ReactFlowProvider>
+                              <ReactFlow 
+                                  nodes={pageNodes} 
+                                  edges={edges} 
+                                  edgeTypes={edgeTypes} 
+                                  fitView 
+                                  // ★ padding: 0 と minZoom: 0.01 により、どんなサイズの枠でも紙いっぱいにピタッと合わせる
+                                  fitViewOptions={{ padding: 0, nodes: [{ id: targetBoxNode.id }], minZoom: 0.01, maxZoom: 10 }}
+                                  panOnDrag={false} zoomOnScroll={false} nodesDraggable={false} elementsSelectable={false}
+                              >
+                                  <Background color="#f1f1f1" />
+                              </ReactFlow>
+                          </ReactFlowProvider>
+                      </div>
+                  );
+              })}
           </div>
       );
   }
