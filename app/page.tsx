@@ -52,22 +52,27 @@ const DoubleEdge = ({ id, sourceX, sourceY, targetX, targetY, sourcePosition, ta
   const mType = (data as any)?.markerType;
 
   const displayLabel = label === undefined || label === null || label === 'undefined' ? '' : String(label);
+  
   let rMarkerEnd = markerEnd; let rMarkerStart = markerStart;
   if (mType === 'custom-double-arrow' || mType === 'custom-double-both') { rMarkerEnd = `url(#custom-arrow-${id})`; }
   if (mType === 'custom-double-both') { rMarkerStart = `url(#custom-arrow-start-${id})`; }
-  const customArrowSize = strokeWidth * 1.5 + 16; 
+  
+  // 矢印の傘のサイズを大きくし、傘の下（尾）を広げる
+  const customArrowSize = strokeWidth * 2 + 18; 
 
   return (
     <>
       {isDouble && (
         <svg style={{ position: 'absolute', width: 0, height: 0 }}>
           <defs>
-            {/* ★ 改善：傘の付け根を0に引いて鋭くし、refXをずらしてテキストから1mm(4px)の余白を確保 */}
-            <marker id={`custom-arrow-${id}`} viewBox="0 0 16 14" refX="16" refY="7" markerWidth={customArrowSize} markerHeight={customArrowSize} markerUnits="userSpaceOnUse" orient="auto">
-              <polyline points="0,2 12,7 0,12" fill="none" stroke={edgeColor} strokeWidth={strokeWidth >= 3 ? 2 : 1.5} strokeLinecap="round" strokeLinejoin="round" />
+            {/* ★ 改善：傘の付け根を少し引いて見やすくし、rectで二重線をマスキングして1mm(約4px)の余白を強制確保 */}
+            <marker id={`custom-arrow-${id}`} viewBox="0 0 24 24" refX="22" refY="12" markerWidth={customArrowSize} markerHeight={customArrowSize} markerUnits="userSpaceOnUse" orient="auto">
+              <rect x="-10" y="0" width="34" height="24" fill="var(--bg-color, #ffffff)" stroke="none" />
+              <polyline points="2,5 18,12 2,19" fill="none" stroke={edgeColor} strokeWidth={strokeWidth >= 3 ? 3 : 2} strokeLinecap="round" strokeLinejoin="round" />
             </marker>
-            <marker id={`custom-arrow-start-${id}`} viewBox="0 0 16 14" refX="0" refY="7" markerWidth={customArrowSize} markerHeight={customArrowSize} markerUnits="userSpaceOnUse" orient="auto">
-              <polyline points="16,2 4,7 16,12" fill="none" stroke={edgeColor} strokeWidth={strokeWidth >= 3 ? 2 : 1.5} strokeLinecap="round" strokeLinejoin="round" />
+            <marker id={`custom-arrow-start-${id}`} viewBox="0 0 24 24" refX="2" refY="12" markerWidth={customArrowSize} markerHeight={customArrowSize} markerUnits="userSpaceOnUse" orient="auto">
+              <rect x="-10" y="0" width="34" height="24" fill="var(--bg-color, #ffffff)" stroke="none" />
+              <polyline points="22,5 6,12 22,19" fill="none" stroke={edgeColor} strokeWidth={strokeWidth >= 3 ? 3 : 2} strokeLinecap="round" strokeLinejoin="round" />
             </marker>
           </defs>
         </svg>
@@ -278,17 +283,18 @@ function FlowEditor() {
     const derivationBlocks = currentNodes.filter(n => isDerivationBlock(n) && !n.data?.isTransparentHelper);
     
     const count = derivationBlocks.length;
-    const edgeLength = 100; 
+    const gapX = 120; 
+    const gapY = h0 + 4; // 詰め詰め
     
     // 常に右側に配置し、回数に応じて下へスタックする
-    const newX = x0 + w0 + edgeLength;
-    const newY = y0 + h0 * count; 
+    const newX = x0 + w0 + gapX;
+    const newY = y0 + count * gapY; 
 
     const newNodeId = `logical-n-${Date.now()}`;
     const newData = { ...primaryNode.data, content: '', isEditing: true, isDerivationBlock: true, parentNodeId: primaryNode.id };
     const newStyle = { ...primaryNode.style, width: w0, height: h0, fontSize: parentFontSize };
     const newNodeZ = Math.max(0, ...nodesRef.current.map((n: any) => Number(n.zIndex) || 0)) + 1;
-    const newNode = { id: newNodeId, selected: true, position: { x: newX, y: newY }, data: newData, style: newStyle, zIndex: newNodeZ };
+    const newNode = { id: newNodeId, selected: false, position: { x: newX, y: newY }, data: newData, style: newStyle, zIndex: newNodeZ };
 
     let transparentNode = null;
     let sourceNodeId = primaryNode.id;
@@ -297,13 +303,14 @@ function FlowEditor() {
     if (count > 0) {
         const tNodeId = `logical-t-${Date.now()}`;
         const tData = { ...primaryNode.data, content: '', isDerivationBlock: true, parentNodeId: primaryNode.id, isTransparentHelper: true };
-        const tStyle = { ...primaryNode.style, width: w0, height: h0, opacity: 0, pointerEvents: 'none', border: 'none', backgroundColor: 'transparent' };
+        const tStyle = { ...primaryNode.style, width: w0, height: h0, opacity: 0, pointerEvents: 'none', border: 'none', backgroundColor: 'transparent', borderWidth: 0 };
         transparentNode = { id: tNodeId, selected: false, position: { x: x0, y: newY }, data: tData, style: tStyle, zIndex: -10 };
         sourceNodeId = tNodeId;
     }
 
     setNodes((nds: any[]) => {
-        let updatedNodes = nds.map((n: any) => ({...n, selected: false}));
+        // ★ 親玉のテキストの選択状態を維持（青枠キープ）する
+        let updatedNodes = nds.map((n: any) => n.id === primaryNode.id ? { ...n, selected: true } : { ...n, selected: false });
         if (transparentNode) updatedNodes.push(transparentNode);
         updatedNodes.push(newNode);
         return updatedNodes;
@@ -314,8 +321,8 @@ function FlowEditor() {
     
     if (type === 'double_arrow') { edgeProps.data = { markerType: 'custom-double-both', double: true, fontSize: 18 }; } 
     else if (type === 'single_arrow') { edgeProps.data = { markerType: 'custom-double-arrow', double: true, fontSize: 18 }; } 
-    else if (type === 'and') { edgeProps.data = { markerType: 'none', fontSize: 18 }; edgeProps.label = '∧'; } 
-    else if (type === 'or') { edgeProps.data = { markerType: 'none', fontSize: 18 }; edgeProps.label = '∨'; }
+    else if (type === 'and') { edgeProps.data = { markerType: 'none', fontSize: 20 }; edgeProps.label = '∧'; } 
+    else if (type === 'or') { edgeProps.data = { markerType: 'none', fontSize: 20 }; edgeProps.label = '∨'; }
 
     setEdges((eds: any[]) => [...eds.map((e: any) => ({...e, selected:false})), { 
         id: edgeId, source: sourceNodeId, target: newNodeId, 
@@ -657,16 +664,17 @@ function FlowEditor() {
     takeSnapshot(); const id = `node-${Date.now()}`; const selNodes = nodesRef.current.filter(n => n.selected); const parent = selNodes.length === 1 ? selNodes[0] : null;
 
     let data: any = { content: '項目', previewVisible: false, previewStyle: { opacity: 0.7, offsetX: 0, offsetY: -150, width: 180, height: 120 }, textOffsetX: 0, textOffsetY: 0, isEditing: false, tableTitle: '' };
-    let style: any = { backgroundColor: '#ffffff', color: '#000000', borderRadius: '12px', fontSize: '14px', fontFamily: 'sans-serif', width: 200, height: 100, hAlign: 'left', vAlign: 'top', writingMode: 'horizontal-tb', padding: '4px', borderColor: 'transparent' };
+    // ★ 完璧なデフォルト設定：黒色枠線（2px）を標準にする
+    let style: any = { backgroundColor: '#ffffff', color: '#000000', borderRadius: '12px', fontSize: '14px', fontFamily: 'sans-serif', width: 200, height: 100, hAlign: 'left', vAlign: 'top', writingMode: 'horizontal-tb', padding: '4px', borderColor: '#000000', borderWidth: 2 };
     
     if (type === 'image') { fileInputRef.current?.click(); return; }
-    if (type === 'shape') { data = { content: '', isShape: true, shapeType: 'rect', keepRatio: false, textOffsetX: 0, textOffsetY: 0, isEditing: false }; style = { ...style, backgroundColor: '#eee', borderRadius: '4px', border: '3px solid #333', borderColor: '#333' }; }
+    if (type === 'shape') { data = { content: '', isShape: true, shapeType: 'rect', keepRatio: false, textOffsetX: 0, textOffsetY: 0, isEditing: false }; style = { ...style, backgroundColor: '#eee', borderRadius: '4px', borderColor: '#000000', borderWidth: 2 }; }
     if (type === 'table') {
       data = { 
           isTable: true, rows: 2, cols: 2, textOffsetX: 0, textOffsetY: 0, editingCell: null, tableTitle: '',
           cells: { "0-0": { content: "セル", style: { border: '1px solid #ccc', hAlign: 'left', vAlign: 'top', writingMode: 'horizontal-tb' } }, "0-1": { content: "セル", style: { border: '1px solid #ccc', hAlign: 'left', vAlign: 'top', writingMode: 'horizontal-tb' } }, "1-0": { content: "セル", style: { border: '1px solid #333', hAlign: 'left', vAlign: 'top', writingMode: 'horizontal-tb' } }, "1-1": { content: "セル", style: { border: '1px solid #333', hAlign: 'left', vAlign: 'top', writingMode: 'horizontal-tb' } } } 
       };
-      style = { ...style, width: 300, height: 150, padding: 0, backgroundColor: '#fff', display: 'block', borderRadius: '8px', border: '2px solid #ccc', borderColor: '#ccc' };
+      style = { ...style, width: 300, height: 150, padding: 0, backgroundColor: '#fff', display: 'block', borderRadius: '8px', borderColor: '#000000', borderWidth: 2 };
     }
 
     if (parent && (type === 'text' || type === 'table')) {
@@ -779,7 +787,7 @@ function FlowEditor() {
       takeSnapshot();
       setNodes((nds: any[]) => {
         const maxZ = Math.max(0, ...nds.map((n: any) => Number(n.zIndex) || 0));
-        return [...nds.map((n: any) => ({...n, selected: false})), { id: `img-${Date.now()}`, position: { x: 50, y: 50 }, zIndex: maxZ + 1, selected: true, data: { isImage: true, imageUrl: ev.target?.result, imgPosX: 0, imgPosY: 0, imgZoom: 1, isCropping: false, cropBaseW: 300, cropBaseH: 200, cropOffsetX: 0, cropOffsetY: 0, textOffsetX: 0, textOffsetY: 0 }, style: { width: 300, height: 200, background: '#fff', padding: 0, border: '1px solid #ccc', borderColor: '#ccc', hAlign: 'left', vAlign: 'top', writingMode: 'horizontal-tb' } }];
+        return [...nds.map((n: any) => ({...n, selected: false})), { id: `img-${Date.now()}`, position: { x: 50, y: 50 }, zIndex: maxZ + 1, selected: true, data: { isImage: true, imageUrl: ev.target?.result, imgPosX: 0, imgPosY: 0, imgZoom: 1, isCropping: false, cropBaseW: 300, cropBaseH: 200, cropOffsetX: 0, cropOffsetY: 0, textOffsetX: 0, textOffsetY: 0 }, style: { width: 300, height: 200, background: '#fff', padding: 0, borderColor: '#000000', borderWidth: 0, hAlign: 'left', vAlign: 'top', writingMode: 'horizontal-tb' } }];
       });
     }; reader.readAsDataURL(file);
   };
@@ -815,6 +823,7 @@ function FlowEditor() {
       let previewElement: React.ReactNode = null;
       const textOffX = Number(n.data?.textOffsetX || 0); const textOffY = Number(n.data?.textOffsetY || 0);
 
+      // ★ 縦書き/横書きとアラインメントの完璧なマッピング
       const rawHAlign = n.style?.hAlign || 'left'; const rawVAlign = n.style?.vAlign || 'top'; const wMode = n.style?.writingMode || 'horizontal-tb'; const isVertical = wMode === 'vertical-rl';
       const jc = rawVAlign === 'top' ? 'flex-start' : rawVAlign === 'bottom' ? 'flex-end' : 'center';
       const ai = isVertical ? (rawHAlign === 'right' ? 'flex-start' : rawHAlign === 'left' ? 'flex-end' : 'center') : (rawHAlign === 'left' ? 'flex-start' : rawHAlign === 'right' ? 'flex-end' : 'center');
@@ -964,10 +973,14 @@ function FlowEditor() {
 
       const baseW = n.data?.cropBaseW ?? (Number(n.style?.width) || 300); const baseH = n.data?.cropBaseH ?? (Number(n.style?.height) || 200);
       const offX = n.data?.cropOffsetX || 0; const offY = n.data?.cropOffsetY || 0;
+      
       const isTextNode = !n.data?.isShape && !n.data?.isImage && !n.data?.isTable;
-      const bColor = n.style?.borderColor; const hideGrayBorder = isTextNode && (!bColor || bColor === '#ccc' || bColor === 'transparent');
-      const resolvedBorder = n.data?.isShape ? `3px solid ${bColor || '#333'}` : (hideGrayBorder ? 'none' : `1px solid ${bColor}`);
-      const { hAlign: _nh, vAlign: _nv, writingMode: _nw, ...safeNodeStyle } = n.style || {};
+      const bColor = n.style?.borderColor || '#000000'; 
+      // ★ 枠線の太さをプロパティから取得（デフォルト：テキスト・図形は2px、画像は0px）
+      const bWidth = n.style?.borderWidth !== undefined ? Number(n.style.borderWidth) : (n.data?.isImage || n.data?.isTable ? 0 : 2);
+      const resolvedBorder = n.data?.isTransparentHelper ? 'none' : (bWidth > 0 ? `${bWidth}px solid ${bColor}` : 'none');
+
+      const { hAlign: _nh, vAlign: _nv, writingMode: _nw, borderWidth: _bw, ...safeNodeStyle } = n.style || {};
 
       const isTableAndCellEditing = n.data?.isTable && (selectedCells[n.id]?.length || 0) > 0;
 
@@ -978,7 +991,7 @@ function FlowEditor() {
           label: (
             <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', alignItems: ai, justifyContent: jc, position: 'relative', border: resolvedBorder, borderRadius: n.style?.borderRadius || '12px', backgroundColor: n.style?.backgroundColor || '#fff', opacity: n.style?.opacity || 1, padding: n.style?.padding || '4px' }}>
               
-              {n.id !== 'center-mark' && (
+              {n.id !== 'center-mark' && !n.data?.isTransparentHelper && (
                 <>
                   <Handle type="target" position={Position.Top} id="top-tgt" className="custom-handle-target custom-handle-offset-top" /><Handle type="target" position={Position.Bottom} id="bottom-tgt" className="custom-handle-target custom-handle-offset-bottom" /><Handle type="target" position={Position.Left} id="left-tgt" className="custom-handle-target custom-handle-offset-left" /><Handle type="target" position={Position.Right} id="right-tgt" className="custom-handle-target custom-handle-offset-right" />
                   <Handle type="source" position={Position.Left} id="left-src" className="custom-handle custom-handle-offset-left" /><Handle type="source" position={Position.Right} id="right-src" className="custom-handle custom-handle-offset-right" /><Handle type="source" position={Position.Top} id="top-src" className="custom-handle custom-handle-offset-top" /><Handle type="source" position={Position.Bottom} id="bottom-src" className="custom-handle custom-handle-offset-bottom" />
@@ -1004,7 +1017,7 @@ function FlowEditor() {
                       />
                   </div>
                 </div>
-              ) : n.id !== 'center-mark' && !n.data?.isTable ? (
+              ) : n.id !== 'center-mark' && !n.data?.isTable && !n.data?.isTransparentHelper ? (
                 <div 
                     id={`edit-${n.id}`} className={"nodrag html-content"} contentEditable={isEditingNode} suppressContentEditableWarning
                     onMouseDown={(e) => { if (isEditingNode) e.stopPropagation(); }} onKeyDown={(e) => { if (isEditingNode) e.stopPropagation(); }}
@@ -1018,7 +1031,7 @@ function FlowEditor() {
                 />
               ) : null}
 
-              {n.id !== 'center-mark' && !n.data?.isTable && !n.data?.isTransparentHelper ? (
+              {n.id !== 'center-mark' && !n.data?.isTransparentHelper ? (
                  <NodeResizer minWidth={30} minHeight={30} keepAspectRatio={!!n.data?.keepRatio} isVisible={n.selected && !isTableAndCellEditing} lineStyle={{ border: n.data?.isCropping ? '2px dashed #ef4444' : '1px solid #3b82f6', zIndex: 100 }} handleStyle={{ background: n.data?.isCropping ? '#ef4444' : '#3b82f6', zIndex: 100, borderRadius: '50%' }} onResizeStart={(_, params) => { takeSnapshot(); if (n.data?.isImage && n.data?.isCropping) { n.data._rsX = params.x; n.data._rsY = params.y; n.data._rsCropOffX = n.data.cropOffsetX || 0; n.data._rsCropOffY = n.data.cropOffsetY || 0; } }} onResize={(_, params) => { if (n.data?.isImage && n.data?.isCropping) { const dx = params.x - n.data._rsX; const dy = params.y - n.data._rsY; setNodes((nds: any[]) => nds.map((node: any) => node.id === n.id ? { ...node, data: { ...node.data, cropOffsetX: n.data._rsCropOffX - dx, cropOffsetY: n.data._rsCropOffY - dy } } : node)); } }} />
               ) : null}
             </div>
@@ -1198,7 +1211,7 @@ function FlowEditor() {
               {/* ★ 論理ブロック追加ボタン */}
               {!primaryNode.data?.isShape && !primaryNode.data?.isImage && !primaryNode.data?.isTable && (
                 <div style={{ padding: '10px', background: '#f8f9fa', borderRadius: '8px', marginBottom: '15px', border: '1px solid #ddd' }}>
-                  <label style={{fontSize: '11px', fontWeight: 'bold', color: '#1d4ed8'}}>論理ブロック追加</label>
+                  <label style={{fontSize: '11px', fontWeight: 'bold', color: '#1d4ed8'}}>論理ブロック追加（証明展開）</label>
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '5px', marginTop: '5px' }}>
                     <button onClick={() => addLogicalDerivationBlock('double_arrow')} style={{ padding: '6px', fontSize: '12px', cursor: 'pointer', borderRadius: '4px', border: '1px solid #ccc', background: '#fff' }}>⇔</button>
                     <button onClick={() => addLogicalDerivationBlock('single_arrow')} style={{ padding: '6px', fontSize: '12px', cursor: 'pointer', borderRadius: '4px', border: '1px solid #ccc', background: '#fff' }}>⇨</button>
@@ -1237,8 +1250,15 @@ function FlowEditor() {
               <label style={{fontSize:'10px', fontWeight: 'bold'}}>全体の透明度</label>
               <input type="range" min="0.1" max="1" step="0.1" value={Number(primaryNode.style?.opacity ?? 1)} onChange={(e) => { takeSnapshot(); updateSelectedNodes({}, { opacity: parseFloat(e.target.value) })}} style={{width:'100%', marginBottom:'10px'}} />
 
+              {/* ★ 枠線の太さ調整スライダーを追加 */}
+              <label style={{fontSize:'10px', fontWeight: 'bold'}}>枠線の太さ (px)</label>
+              <div style={{display:'flex', alignItems:'center', gap:'8px', marginBottom: '10px'}}>
+                <input type="range" min="0" max="10" step="1" value={Number(primaryNode.style?.borderWidth ?? (primaryNode.data?.isImage || primaryNode.data?.isTable ? 0 : 2))} onChange={(e) => { takeSnapshot(); updateSelectedNodes({}, { borderWidth: Number(e.target.value) })}} style={{flex:1}} />
+                <span style={{fontSize: '12px', fontWeight: 'bold', width: '24px', textAlign: 'right'}}>{Number(primaryNode.style?.borderWidth ?? (primaryNode.data?.isImage || primaryNode.data?.isTable ? 0 : 2))}</span>
+              </div>
+
               <label style={{fontSize:'10px', fontWeight: 'bold'}}>枠線の色</label>
-              <input type="color" value={String(primaryNode.style?.borderColor || (primaryNode.data?.isShape ? '#333333' : 'transparent'))} onChange={(e) => { takeSnapshot(); updateSelectedNodes({}, { borderColor: e.target.value })}} style={{width:'100%', height:'24px', cursor: 'pointer', border: 'none', padding: 0, marginBottom:'10px'}} />
+              <input type="color" value={String(primaryNode.style?.borderColor || '#000000')} onChange={(e) => { takeSnapshot(); updateSelectedNodes({}, { borderColor: e.target.value })}} style={{width:'100%', height:'24px', cursor: 'pointer', border: 'none', padding: 0, marginBottom:'10px'}} />
 
               <label style={{fontSize:'10px', fontWeight: 'bold'}}>背景色</label>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: '4px', marginTop: '5px', marginBottom: '10px' }}>
