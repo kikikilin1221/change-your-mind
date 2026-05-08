@@ -117,11 +117,7 @@ const DoubleEdge = ({ id, sourceX, sourceY, targetX, targetY, sourcePosition, ta
                   suppressContentEditableWarning
                   onMouseDown={(e) => { if (isEditing) e.stopPropagation(); }}
                   onKeyDown={(e) => { if (isEditing) e.stopPropagation(); }}
-                  onInput={(e) => { (data as any)._tempContent = e.currentTarget.innerHTML; }}
-                  onBlur={(e) => {
-                      const finalHtml = (data as any)._tempContent ?? e.currentTarget.innerHTML;
-                      window.dispatchEvent(new CustomEvent('custom-edge-blur', { detail: { id, html: finalHtml } }));
-                  }}
+                  onBlur={(e) => window.dispatchEvent(new CustomEvent('custom-edge-blur', { detail: { id, html: e.currentTarget.innerHTML } }))}
                   style={{
                       padding: '2px 4px', fontSize: `${fontSize}px`, fontWeight: 'bold', color: '#333',
                       textShadow: '0 0 3px var(--bg-color, #fff), 0 0 3px var(--bg-color, #fff), 0 0 3px var(--bg-color, #fff)',
@@ -129,8 +125,16 @@ const DoubleEdge = ({ id, sourceX, sourceY, targetX, targetY, sourcePosition, ta
                       writingMode: (style as any)?.writingMode || 'horizontal-tb',
                       ...labelStyle
                   }}
+                  // ★ 究極のIMEバグ対策：Reactの描画システムから完全に切り離し、DOMを直接コントロールする
                   ref={el => {
-                      if (el && isEditing && document.activeElement !== el) {
+                      if (!el) return;
+                      if (!isEditing) {
+                          const newHtml = renderHTMLWithMath(displayLabel);
+                          if (el.innerHTML !== newHtml) el.innerHTML = newHtml;
+                          el.dataset.editing = 'false';
+                      } else if (el.dataset.editing !== 'true') {
+                          el.dataset.editing = 'true';
+                          el.innerHTML = displayLabel;
                           setTimeout(() => {
                               el.focus();
                               if (typeof window.getSelection !== 'undefined') {
@@ -140,7 +144,6 @@ const DoubleEdge = ({ id, sourceX, sourceY, targetX, targetY, sourcePosition, ta
                           }, 10);
                       }
                   }}
-                  dangerouslySetInnerHTML={{ __html: isEditing ? ((data as any)._tempContent ?? displayLabel) : renderHTMLWithMath(displayLabel) }}
               />
           </div>
         </EdgeLabelRenderer>
@@ -237,8 +240,8 @@ function FlowEditor() {
   const isTableEditing = primaryNode?.data?.isTable && (selectedCells[primaryNode.id]?.length || 0) > 0;
 
   const clearSelection = useCallback(() => {
-    setNodes((nds: any[]) => nds.map((n: any) => ({...n, selected: false, data: { ...n.data, isEditing: false, editingCell: null, _tempContent: undefined }})));
-    setEdges((eds: any[]) => eds.map((e: any) => ({...e, selected: false, data: { ...e.data, isEditing: false, _tempContent: undefined }})));
+    setNodes((nds: any[]) => nds.map((n: any) => ({...n, selected: false, data: { ...n.data, isEditing: false, editingCell: null }})));
+    setEdges((eds: any[]) => eds.map((e: any) => ({...e, selected: false, data: { ...e.data, isEditing: false }})));
     setSelectedCells({});
   }, []);
 
@@ -630,7 +633,6 @@ function FlowEditor() {
     const parent = selNodes.length === 1 ? selNodes[0] : null;
 
     let data: any = { content: '項目', previewVisible: false, previewStyle: { opacity: 0.7, offsetX: 0, offsetY: -150, width: 180, height: 120 }, textOffsetX: 0, textOffsetY: 0, isEditing: false, tableTitle: '' };
-    // ★ 完璧なデフォルト設定：ゴシック、黒色、14px、左上ギリギリ
     let style: any = { backgroundColor: '#ffffff', color: '#000000', borderRadius: '12px', fontSize: '14px', fontFamily: 'sans-serif', width: 200, height: 100, alignItems: 'flex-start', justifyContent: 'flex-start', textAlign: 'left', padding: '4px', borderColor: 'transparent', writingMode: 'horizontal-tb' };
     
     if (type === 'image') { fileInputRef.current?.click(); return; }
@@ -642,8 +644,8 @@ function FlowEditor() {
       data = { 
           isTable: true, rows: 2, cols: 2, textOffsetX: 0, textOffsetY: 0, editingCell: null, tableTitle: '',
           cells: {
-              "0-0": { content: "セル", style: { border: '1px solid #ccc', verticalAlign: 'top', textAlign: 'left' } }, "0-1": { content: "セル", style: { border: '1px solid #ccc', verticalAlign: 'top', textAlign: 'left' } },
-              "1-0": { content: "セル", style: { border: '1px solid #333', verticalAlign: 'top', textAlign: 'left' } }, "1-1": { content: "セル", style: { border: '1px solid #333', verticalAlign: 'top', textAlign: 'left' } }
+              "0-0": { content: "セル", style: { border: '1px solid #ccc', verticalAlign: 'top', textAlign: 'left', writingMode: 'horizontal-tb' } }, "0-1": { content: "セル", style: { border: '1px solid #ccc', verticalAlign: 'top', textAlign: 'left', writingMode: 'horizontal-tb' } },
+              "1-0": { content: "セル", style: { border: '1px solid #333', verticalAlign: 'top', textAlign: 'left', writingMode: 'horizontal-tb' } }, "1-1": { content: "セル", style: { border: '1px solid #333', verticalAlign: 'top', textAlign: 'left', writingMode: 'horizontal-tb' } }
           } 
       };
       style = { ...style, width: 300, height: 150, padding: 0, backgroundColor: '#fff', display: 'block', borderRadius: '8px', border: '2px solid #ccc', borderColor: '#ccc' };
@@ -652,7 +654,6 @@ function FlowEditor() {
     if (parent && (type === 'text' || type === 'table')) {
         const sourceHandle = 'bottom-src'; const targetHandle = 'top-tgt';
         const edgeId = `e-${parent.id}-${id}`;
-        // ★ 線の初期ラベルも空（undefinedを出さない）
         setEdges((eds: any[]) => [...eds.map((e: any) => ({...e, selected:false})), { id: edgeId, source: parent.id, target: id, sourceHandle, targetHandle, type: 'default', label: '', style: { strokeWidth: 1 }, zIndex: 0 }]);
         setNodes((nds: any[]) => {
             const maxZ = Math.max(0, ...nds.map((n: any) => Number(n.zIndex) || 0));
@@ -683,14 +684,15 @@ function FlowEditor() {
     }
   }, [takeSnapshot]);
 
-  // ★ 修正：Tabキーによるフォーカス設定を強化し、ReactFlowのキーボードイベント横取りを無効化
+  // ★ 究極のIME＆キーボード対策：編集中はシステムが一切キーボードイベントを奪わないようにする
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       const activeEl = document.activeElement as HTMLElement;
       const isContentEditing = activeEl?.tagName === 'INPUT' || activeEl?.tagName === 'TEXTAREA' || activeEl?.isContentEditable;
       
+      // 編集中でTab以外のキー（文字入力やEnter）が押された場合は、何もせずにそのままブラウザに入力させる
       if (isContentEditing && e.key !== 'Tab') {
-          return; // 編集中の文字入力は絶対に邪魔しない
+          return; 
       }
 
       if (e.key === 'Tab') {
@@ -742,7 +744,7 @@ function FlowEditor() {
   useEffect(() => {
       const handleEdgeBlur = (e: any) => {
           const { id, html } = e.detail;
-          setEdges(eds => eds.map(edge => edge.id === id ? { ...edge, label: html, data: { ...edge.data, isEditing: false, _tempContent: undefined } } : edge));
+          setEdges(eds => eds.map(edge => edge.id === id ? { ...edge, label: html, data: { ...edge.data, isEditing: false } } : edge));
       };
       window.addEventListener('custom-edge-blur', handleEdgeBlur);
       return () => window.removeEventListener('custom-edge-blur', handleEdgeBlur);
@@ -889,7 +891,6 @@ function FlowEditor() {
         previewElement = (
             <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column' }}>
                 <div className="custom-drag-handle" style={{ height: '14px', background: '#e2e8f0', cursor: 'grab', borderTopLeftRadius: '6px', borderTopRightRadius: '6px' }}></div>
-                {/* ★ 追加：表のタイトル入力欄（印刷時は点線が消える） */}
                 <div className="nodrag" style={{ padding: '4px 10px 0', backgroundColor: '#fff' }}>
                     <input
                         type="text"
@@ -927,18 +928,25 @@ function FlowEditor() {
                                                 }}
                                             >
                                                 <div 
-                                                    className="nodrag html-content"
+                                                    className={"nodrag html-content"}
                                                     contentEditable={isCellEditing} suppressContentEditableWarning
                                                     onMouseDown={(e) => { if (isCellEditing) e.stopPropagation(); }}
                                                     onKeyDown={(e) => { if (isCellEditing) e.stopPropagation(); }}
-                                                    onInput={(e) => { cellData._tempContent = e.currentTarget.innerHTML; }}
                                                     onBlur={(e) => {
-                                                        const finalHtml = cellData._tempContent ?? e.currentTarget.innerHTML;
-                                                        setNodes(nds => nds.map(node => node.id === n.id ? { ...node, data: { ...node.data, editingCell: null, cells: { ...node.data.cells, [cellId]: { ...node.data.cells[cellId], content: finalHtml, _tempContent: undefined } } } } : node));
+                                                        const finalHtml = e.currentTarget.innerHTML;
+                                                        setNodes(nds => nds.map(node => node.id === n.id ? { ...node, data: { ...node.data, editingCell: null, cells: { ...node.data.cells, [cellId]: { ...node.data.cells[cellId], content: finalHtml } } } } : node));
                                                     }}
                                                     style={{ outline: 'none', width: '100%', height: '100%' }}
+                                                    // ★ 究極のIMEバグ対策
                                                     ref={el => {
-                                                        if (el && isCellEditing && document.activeElement !== el) {
+                                                        if (!el) return;
+                                                        if (!isCellEditing) {
+                                                            const newHtml = renderHTMLWithMath(cellData.content || '');
+                                                            if (el.innerHTML !== newHtml) el.innerHTML = newHtml;
+                                                            el.dataset.editing = 'false';
+                                                        } else if (el.dataset.editing !== 'true') {
+                                                            el.dataset.editing = 'true';
+                                                            el.innerHTML = cellData.content || '';
                                                             setTimeout(() => {
                                                                 el.focus();
                                                                 if (typeof window.getSelection !== 'undefined') {
@@ -948,7 +956,6 @@ function FlowEditor() {
                                                             }, 10);
                                                         }
                                                     }}
-                                                    dangerouslySetInnerHTML={{ __html: isCellEditing ? (cellData._tempContent ?? cellData.content) : renderHTMLWithMath(cellData.content) }} 
                                                 />
                                             </td>
                                         );
@@ -1023,17 +1030,24 @@ function FlowEditor() {
                           contentEditable={isEditingNode} suppressContentEditableWarning
                           onMouseDown={(e) => { if (isEditingNode) e.stopPropagation(); }}
                           onKeyDown={(e) => { if (isEditingNode) e.stopPropagation(); }}
-                          onInput={(e) => { n.data._tempContent = e.currentTarget.innerHTML; }}
                           onBlur={(e) => {
-                              const finalHtml = n.data._tempContent ?? e.currentTarget.innerHTML;
-                              setNodes(nds => nds.map(node => node.id === n.id ? { ...node, data: { ...node.data, isEditing: false, content: finalHtml, _tempContent: undefined } } : node));
+                              const finalHtml = e.currentTarget.innerHTML;
+                              setNodes(nds => nds.map(node => node.id === n.id ? { ...node, data: { ...node.data, isEditing: false, content: finalHtml } } : node));
                           }}
                           style={{
                               pointerEvents: 'auto', width: '100%', height: 'auto', outline: 'none', cursor: isEditingNode ? 'text' : 'pointer',
                               color: n.style?.color || '#000', fontFamily: n.style?.fontFamily || 'sans-serif', fontSize: n.style?.fontSize || '14px', fontWeight: n.style?.fontWeight || 'normal', textDecoration: n.style?.textDecoration || 'none', whiteSpace: 'pre-wrap', lineHeight: '1.2', textAlign: n.style?.textAlign || 'left', transform: `translate(${textOffX}px, ${textOffY}px)`, writingMode: n.style?.writingMode || 'horizontal-tb'
                           }}
+                          // ★ 究極のIMEバグ対策
                           ref={el => {
-                              if (el && isEditingNode && document.activeElement !== el) {
+                              if (!el) return;
+                              if (!isEditingNode) {
+                                  const newHtml = renderHTMLWithMath(n.data?.content || '');
+                                  if (el.innerHTML !== newHtml) el.innerHTML = newHtml;
+                                  el.dataset.editing = 'false';
+                              } else if (el.dataset.editing !== 'true') {
+                                  el.dataset.editing = 'true';
+                                  el.innerHTML = n.data?.content || '';
                                   setTimeout(() => {
                                       el.focus();
                                       if (typeof window.getSelection !== 'undefined') {
@@ -1043,7 +1057,6 @@ function FlowEditor() {
                                   }, 10);
                               }
                           }}
-                          dangerouslySetInnerHTML={{ __html: isEditingNode ? (n.data._tempContent ?? n.data?.content) : renderHTMLWithMath(n.data?.content) }} 
                       />
                   </div>
                 </div>
@@ -1054,17 +1067,24 @@ function FlowEditor() {
                     contentEditable={isEditingNode} suppressContentEditableWarning
                     onMouseDown={(e) => { if (isEditingNode) e.stopPropagation(); }}
                     onKeyDown={(e) => { if (isEditingNode) e.stopPropagation(); }}
-                    onInput={(e) => { n.data._tempContent = e.currentTarget.innerHTML; }}
                     onBlur={(e) => {
-                        const finalHtml = n.data._tempContent ?? e.currentTarget.innerHTML;
-                        setNodes(nds => nds.map(node => node.id === n.id ? { ...node, data: { ...node.data, isEditing: false, content: finalHtml, _tempContent: undefined } } : node));
+                        const finalHtml = e.currentTarget.innerHTML;
+                        setNodes(nds => nds.map(node => node.id === n.id ? { ...node, data: { ...node.data, isEditing: false, content: finalHtml } } : node));
                     }}
                     style={{ 
                         pointerEvents: 'auto', width: '100%', height: 'auto', outline: 'none', cursor: isEditingNode ? 'text' : 'pointer',
                         color: n.style?.color || '#000', fontFamily: n.style?.fontFamily || 'sans-serif', fontSize: n.style?.fontSize || '14px', fontWeight: n.style?.fontWeight || 'normal', textDecoration: n.style?.textDecoration || 'none', whiteSpace: 'pre-wrap', lineHeight: '1.2', textAlign: n.style?.textAlign || 'left', transform: `translate(${textOffX}px, ${textOffY}px)`, writingMode: n.style?.writingMode || 'horizontal-tb'
                     }}
+                    // ★ 究極のIMEバグ対策
                     ref={el => {
-                        if (el && isEditingNode && document.activeElement !== el) {
+                        if (!el) return;
+                        if (!isEditingNode) {
+                            const newHtml = renderHTMLWithMath(n.data?.content || '');
+                            if (el.innerHTML !== newHtml) el.innerHTML = newHtml;
+                            el.dataset.editing = 'false';
+                        } else if (el.dataset.editing !== 'true') {
+                            el.dataset.editing = 'true';
+                            el.innerHTML = n.data?.content || '';
                             setTimeout(() => {
                                 el.focus();
                                 if (typeof window.getSelection !== 'undefined') {
@@ -1074,7 +1094,6 @@ function FlowEditor() {
                             }, 10);
                         }
                     }}
-                    dangerouslySetInnerHTML={{ __html: isEditingNode ? (n.data._tempContent ?? n.data?.content) : renderHTMLWithMath(n.data?.content) }} 
                 />
               ) : null}
 
