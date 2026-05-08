@@ -33,7 +33,6 @@ const GLOBAL_CSS = `
   .custom-handle-offset-right { right: -4px !important; }
   
   .print-page-wrapper { page-break-after: always; position: relative; overflow: hidden; margin: 0 auto; border: none !important; outline: none !important; }
-  .editing-mode { outline: 2px solid #3b82f6 !important; border-radius: 4px; padding: 2px; }
 `;
 
 const getEdgePoint = (cx: number, cy: number, w: number, h: number, tx: number, ty: number) => {
@@ -51,8 +50,8 @@ const DoubleEdge = ({ id, sourceX, sourceY, targetX, targetY, sourcePosition, ta
   const strokeWidth = Number(style?.strokeWidth) || 1; const edgeColor = (data as any)?.color || '#333';
   const labelStyle = (data as any)?.labelStyle || { textAlign: 'center' }; const fontSize = (data as any)?.fontSize || 14;
   const mType = (data as any)?.markerType;
-  const displayLabel = label === undefined || label === null || label === 'undefined' ? '' : String(label);
 
+  const displayLabel = label === undefined || label === null || label === 'undefined' ? '' : String(label);
   let rMarkerEnd = markerEnd; let rMarkerStart = markerStart;
   if (mType === 'custom-double-arrow' || mType === 'custom-double-both') { rMarkerEnd = `url(#custom-arrow-${id})`; }
   if (mType === 'custom-double-both') { rMarkerStart = `url(#custom-arrow-start-${id})`; }
@@ -137,18 +136,7 @@ const PASTEL_COLORS = ['#FFB7B2', '#FFDAC1', '#E2F0CB', '#B5EAD7', '#C7CEEA', '#
 const QUICK_TEXT_COLORS = ['#000000', '#FF0000', '#008000', '#0000FF', '#FFF000'];
 
 type TableActionType = {
-    id: string;
-    type: string;
-    startX: number;
-    startY: number;
-    startR: number; 
-    startC: number; 
-    minC: number;  
-    maxC: number;  
-    minR: number;  
-    maxR: number;  
-    initWidths: number[];
-    initHeights: number[];
+    id: string; type: string; startX: number; startY: number; startR: number; startC: number; minC: number; maxC: number; minR: number; maxR: number; initWidths: number[]; initHeights: number[];
 };
 
 function FlowEditor() {
@@ -184,9 +172,8 @@ function FlowEditor() {
   
   const previewDragRef = useRef<{ id: string, startX: number, startY: number, initX: number, initY: number, moved: boolean } | null>(null);
   const imageCropDragRef = useRef<{ id: string, startX: number, startY: number, initX: number, initY: number } | null>(null);
-  
   const tableActionRef = useRef<TableActionType | null>(null);
-  const copiedTableCellsRef = useRef<any>(null); // ★ テーブルセル専用のコピペデータ保存箱
+  const copiedTableCellsRef = useRef<any>(null); 
 
   const nodesRef = useRef<any[]>([]);
   const edgesRef = useRef<any[]>([]);
@@ -493,7 +480,6 @@ function FlowEditor() {
   
   const handleDuplicate = useCallback(() => { handleCopy(); setTimeout(handlePaste, 10); }, [handleCopy, handlePaste]);
 
-  // ★ テーブルのセル専用コピー機能
   const handleCellCopy = useCallback(() => {
       if (!primaryNode || !primaryNode.data.isTable) return;
       const cells = selectedCells[primaryNode.id] || [];
@@ -520,7 +506,6 @@ function FlowEditor() {
       copiedTableCellsRef.current = copiedData;
   }, [primaryNode, selectedCells]);
 
-  // ★ テーブルのセル専用ペースト機能
   const handleCellPaste = useCallback(() => {
       if (!primaryNode || !primaryNode.data.isTable || !copiedTableCellsRef.current) return;
       takeSnapshot();
@@ -656,7 +641,6 @@ function FlowEditor() {
       if (isContentEditing) return;
 
       if (e.key === 'Enter') { e.preventDefault(); addNode('text'); }
-      // ★ コピペ処理を統合：テーブル選択時はセルのコピペ、そうでない時は図形のコピペ
       else if ((e.ctrlKey || e.metaKey) && e.key === 'c') { 
           e.preventDefault(); 
           const isTableSelected = primaryNode?.data?.isTable && (selectedCells[primaryNode.id]?.length || 0) > 0;
@@ -677,7 +661,6 @@ function FlowEditor() {
       window.addEventListener('custom-edge-blur', handleEdgeBlur); return () => window.removeEventListener('custom-edge-blur', handleEdgeBlur);
   }, []);
 
-  // ★ 統合ドラッグ＆等間隔リサイズ処理
   useEffect(() => {
     const onMouseMove = (e: MouseEvent) => {
       const zoom = getZoom();
@@ -693,7 +676,6 @@ function FlowEditor() {
                   const newWidths = [...(n.data.colWidths || Array(n.data.cols).fill(100))];
                   const newHeights = [...(n.data.rowHeights || Array(n.data.rows).fill(40))];
                   
-                  // ★ 選択された列幅を等分にリサイズ
                   if (action.type.includes('col') || action.type.includes('xy')) {
                       const numCols = action.maxC - action.minC + 1;
                       const deltaPerCol = dx / numCols;
@@ -701,7 +683,6 @@ function FlowEditor() {
                           newWidths[c] = Math.max(30, action.initWidths[c] + deltaPerCol);
                       }
                   }
-                  // ★ 選択された行高を等分にリサイズ
                   if (action.type.includes('row') || action.type.includes('xy')) {
                       const numRows = action.maxR - action.minR + 1;
                       const deltaPerRow = dy / numRows;
@@ -895,6 +876,10 @@ function FlowEditor() {
       const resolvedBorder = n.data?.isShape ? `3px solid ${bColor || '#333'}` : (hideGrayBorder ? 'none' : `1px solid ${bColor}`);
       const { hAlign: _nh, vAlign: _nv, writingMode: _nw, ...safeNodeStyle } = n.style || {};
 
+      // ★ 修正：NodeResizer の isVisible を「n.selected ではなく !isTableEditing のときだけ表示」にする
+      // これにより、表自体を選択した時は青枠が出て、セルを選択した時は表の青枠が消えてセルの青枠に集中できます
+      const isTableAndCellEditing = n.data?.isTable && (selectedCells[n.id]?.length || 0) > 0;
+
       return {
         ...n, draggable: n.data?.isImage && n.data?.isCropping ? false : true,
         data: {
@@ -942,8 +927,8 @@ function FlowEditor() {
                 />
               ) : null}
 
-              {n.id !== 'center-mark' && !n.data?.isTable ? (
-                 <NodeResizer minWidth={30} minHeight={30} keepAspectRatio={!!n.data?.keepRatio} isVisible={n.selected} lineStyle={{ border: n.data?.isCropping ? '2px dashed #ef4444' : '1px solid #3b82f6', zIndex: 100 }} handleStyle={{ background: n.data?.isCropping ? '#ef4444' : '#3b82f6', zIndex: 100, borderRadius: '50%' }} onResizeStart={(_, params) => { takeSnapshot(); if (n.data?.isImage && n.data?.isCropping) { n.data._rsX = params.x; n.data._rsY = params.y; n.data._rsCropOffX = n.data.cropOffsetX || 0; n.data._rsCropOffY = n.data.cropOffsetY || 0; } }} onResize={(_, params) => { if (n.data?.isImage && n.data?.isCropping) { const dx = params.x - n.data._rsX; const dy = params.y - n.data._rsY; setNodes((nds: any[]) => nds.map((node: any) => node.id === n.id ? { ...node, data: { ...node.data, cropOffsetX: n.data._rsCropOffX - dx, cropOffsetY: n.data._rsCropOffY - dy } } : node)); } }} />
+              {n.id !== 'center-mark' ? (
+                 <NodeResizer minWidth={30} minHeight={30} keepAspectRatio={!!n.data?.keepRatio} isVisible={n.selected && !isTableAndCellEditing} lineStyle={{ border: n.data?.isCropping ? '2px dashed #ef4444' : '1px solid #3b82f6', zIndex: 100 }} handleStyle={{ background: n.data?.isCropping ? '#ef4444' : '#3b82f6', zIndex: 100, borderRadius: '50%' }} onResizeStart={(_, params) => { takeSnapshot(); if (n.data?.isImage && n.data?.isCropping) { n.data._rsX = params.x; n.data._rsY = params.y; n.data._rsCropOffX = n.data.cropOffsetX || 0; n.data._rsCropOffY = n.data.cropOffsetY || 0; } }} onResize={(_, params) => { if (n.data?.isImage && n.data?.isCropping) { const dx = params.x - n.data._rsX; const dy = params.y - n.data._rsY; setNodes((nds: any[]) => nds.map((node: any) => node.id === n.id ? { ...node, data: { ...node.data, cropOffsetX: n.data._rsCropOffX - dx, cropOffsetY: n.data._rsCropOffY - dy } } : node)); } }} />
               ) : null}
             </div>
           ),
