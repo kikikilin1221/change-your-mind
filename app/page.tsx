@@ -81,13 +81,13 @@ const DoubleEdge = ({ id, sourceX, sourceY, targetX, targetY, sourcePosition, ta
       {isDouble && !hideLine && (
         <svg style={{ position: 'absolute', width: 0, height: 0 }}>
           <defs>
-            {/* ★ 背景色と同色のpolygonで二重線の突き抜けを物理的にカット。refXで余白を維持 */}
-            <marker id={`custom-arrow-${id}`} viewBox="0 0 24 24" refX="21" refY="12" markerWidth={customArrowSize} markerHeight={customArrowSize} markerUnits="userSpaceOnUse" orient="auto">
-              <polygon points="2,4 18,12 2,20" fill="var(--bg-color, #f1f1f1)" stroke="none" />
+            {/* ★ 究極の突き抜け防止：線を傘のずっと手前（refX=10）で止め、断面を背景色マスクで完全に覆い隠す */}
+            <marker id={`custom-arrow-${id}`} viewBox="0 0 24 24" refX="10" refY="12" markerWidth={customArrowSize} markerHeight={customArrowSize} markerUnits="userSpaceOnUse" orient="auto">
+              <polygon points="0,0 20,12 0,24" fill="var(--bg-color, #ffffff)" stroke="none" />
               <polyline points="4,4 18,12 4,20" fill="none" stroke={edgeColor} strokeWidth={strokeWidth >= 3 ? 3 : 2} strokeLinecap="round" strokeLinejoin="round" />
             </marker>
-            <marker id={`custom-arrow-start-${id}`} viewBox="0 0 24 24" refX="3" refY="12" markerWidth={customArrowSize} markerHeight={customArrowSize} markerUnits="userSpaceOnUse" orient="auto">
-              <polygon points="22,4 6,12 22,20" fill="var(--bg-color, #f1f1f1)" stroke="none" />
+            <marker id={`custom-arrow-start-${id}`} viewBox="0 0 24 24" refX="14" refY="12" markerWidth={customArrowSize} markerHeight={customArrowSize} markerUnits="userSpaceOnUse" orient="auto">
+              <polygon points="24,0 4,12 24,24" fill="var(--bg-color, #ffffff)" stroke="none" />
               <polyline points="20,4 6,12 20,20" fill="none" stroke={edgeColor} strokeWidth={strokeWidth >= 3 ? 3 : 2} strokeLinecap="round" strokeLinejoin="round" />
             </marker>
           </defs>
@@ -98,7 +98,7 @@ const DoubleEdge = ({ id, sourceX, sourceY, targetX, targetY, sourcePosition, ta
           isDouble ? (
             <>
               <BaseEdge path={edgePath} style={{ ...style, strokeWidth: strokeWidth + 8, stroke: edgeColor }} />
-              <BaseEdge path={edgePath} style={{ ...style, strokeWidth: strokeWidth + 4, stroke: 'var(--bg-color, #f1f1f1)' }} />
+              <BaseEdge path={edgePath} style={{ ...style, strokeWidth: strokeWidth + 4, stroke: 'var(--bg-color, #ffffff)' }} />
               <BaseEdge path={edgePath} markerEnd={rMarkerEnd} markerStart={rMarkerStart} style={{ strokeWidth: strokeWidth, stroke: 'transparent', fill: 'none' }} />
             </>
           ) : ( <BaseEdge id={id} path={edgePath} markerEnd={rMarkerEnd} markerStart={rMarkerStart} style={{ ...style, strokeWidth, stroke: edgeColor }} /> )
@@ -284,7 +284,7 @@ function FlowEditor() {
       }));
   };
 
-  // ★ 最終調整：間隔（gapX）を100に固定し、AND/ORの線を非表示にする
+  // ★ 論理ブロックスタック（証明展開）機能
   const addLogicalDerivationBlock = useCallback((type: 'double_arrow' | 'single_arrow' | 'and' | 'or') => {
     if (!primaryNode) return;
     takeSnapshot();
@@ -296,14 +296,13 @@ function FlowEditor() {
     const y0 = primaryNode.position.y;
 
     const currentNodes = nodesRef.current;
-    
     const isDerivationBlock = (n: any) => n.data?.isDerivationBlock && n.data?.parentNodeId === primaryNode.id;
     const derivationBlocks = currentNodes.filter(n => isDerivationBlock(n) && !n.data?.isTransparentHelper);
     
     const count = derivationBlocks.length;
     
-    // ★ ここを100に固定！
-    const gapX = 100; 
+    // ★ 修正：間隔をきっちり 90px に指定
+    const gapX = 90; 
     const gapY = h0; 
     
     const newX = x0 + w0 + gapX;
@@ -342,7 +341,7 @@ function FlowEditor() {
     const edgeId = `e-${sourceNodeId}-${newNodeId}-${Date.now()}`;
     let edgeProps: any = { type: 'default', label: '', style: { strokeWidth: 2, stroke: '#333' }, data: { color: '#333' } };
     
-    // ★ AND / OR の場合は hideLine: true を付与して線を完全に透明にする
+    // ★ ∧ / ∨ の場合は線を完全に隠すフラグ (hideLine: true)
     if (type === 'double_arrow') { edgeProps.data.markerType = 'custom-double-both'; edgeProps.data.double = true; edgeProps.data.fontSize = 18; } 
     else if (type === 'single_arrow') { edgeProps.data.markerType = 'custom-double-arrow'; edgeProps.data.double = true; edgeProps.data.fontSize = 18; } 
     else if (type === 'and') { edgeProps.data.markerType = 'none'; edgeProps.data.fontSize = 20; edgeProps.label = '∧'; edgeProps.data.hideLine = true; } 
@@ -1000,7 +999,6 @@ function FlowEditor() {
       
       const bColor = n.style?.borderColor || '#000000'; 
       const bWidth = n.style?.borderWidth !== undefined ? Number(n.style.borderWidth) : (n.data?.isImage || n.data?.isTable ? 0 : 0.5);
-      
       const resolvedBorder = n.data?.isTransparentHelper ? 'none' : (bWidth > 0 ? `${bWidth}px solid ${bColor}` : 'none');
       const { hAlign: _nh, vAlign: _nv, writingMode: _nw, borderWidth: _bw, border: _border, ...safeNodeStyle } = n.style || {};
 
