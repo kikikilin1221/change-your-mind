@@ -52,18 +52,29 @@ const DoubleEdge = ({ id, sourceX, sourceY, targetX, targetY, sourcePosition, ta
   const mType = (data as any)?.markerType;
 
   const displayLabel = label === undefined || label === null || label === 'undefined' ? '' : String(label);
+  
+  // ★ 始点の余白（1mm = 4px）を確保
+  const MARGER_SPACING = 4;
+  let sX = sourceX;
+  let sY = sourceY;
+  if (sourcePosition === Position.Left) sX -= MARGER_SPACING;
+  if (sourcePosition === Position.Right) sX += MARGER_SPACING;
+  if (sourcePosition === Position.Top) sY -= MARGER_SPACING;
+  if (sourcePosition === Position.Bottom) sY += MARGER_SPACING;
+
   let rMarkerEnd = markerEnd; let rMarkerStart = markerStart;
   if (mType === 'custom-double-arrow' || mType === 'custom-double-both') { rMarkerEnd = `url(#custom-arrow-${id})`; }
   if (mType === 'custom-double-both') { rMarkerStart = `url(#custom-arrow-start-${id})`; }
-  const customArrowSize = strokeWidth * 1.5 + 16; 
+  const customArrowSize = strokeWidth * 1.5 + 16; // 傘を少し大きく
 
   return (
     <>
       {isDouble && (
         <svg style={{ position: 'absolute', width: 0, height: 0 }}>
           <defs>
-            <marker id={`custom-arrow-${id}`} viewBox="0 0 12 12" refX="2" refY="6" markerWidth={customArrowSize} markerHeight={customArrowSize} markerUnits="userSpaceOnUse" orient="auto"><polyline points="2,2 10,6 2,10" fill="none" stroke={edgeColor} strokeWidth={strokeWidth >= 3 ? 2 : 1.5} strokeLinecap="round" strokeLinejoin="round" /></marker>
-            <marker id={`custom-arrow-start-${id}`} viewBox="0 0 12 12" refX="10" refY="6" markerWidth={customArrowSize} markerHeight={customArrowSize} markerUnits="userSpaceOnUse" orient="auto"><polyline points="10,2 2,6 10,10" fill="none" stroke={edgeColor} strokeWidth={strokeWidth >= 3 ? 2 : 1.5} strokeLinecap="round" strokeLinejoin="round" /></marker>
+            {/* ★ 傘の下を長く、広く調整したマーカー */}
+            <marker id={`custom-arrow-${id}`} viewBox="0 0 14 14" refX="2" refY="7" markerWidth={customArrowSize} markerHeight={customArrowSize} markerUnits="userSpaceOnUse" orient="auto"><polyline points="2,3 12,7 2,11" fill="none" stroke={edgeColor} strokeWidth={strokeWidth >= 3 ? 2 : 1.5} strokeLinecap="round" strokeLinejoin="round" /></marker>
+            <marker id={`custom-arrow-start-${id}`} viewBox="0 0 14 14" refX="12" refY="7" markerWidth={customArrowSize} markerHeight={customArrowSize} markerUnits="userSpaceOnUse" orient="auto"><polyline points="12,3 2,7 12,11" fill="none" stroke={edgeColor} strokeWidth={strokeWidth >= 3 ? 2 : 1.5} strokeLinecap="round" strokeLinejoin="round" /></marker>
           </defs>
         </svg>
       )}
@@ -618,6 +629,67 @@ function FlowEditor() {
     } else { setNodes((nds: any[]) => { const maxZ = Math.max(0, ...nds.map((n: any) => Number(n.zIndex) || 0)); return [...nds.map((n: any) => ({...n, selected: false})), { id, selected: true, position: { x: 100, y: 100 }, data, style, zIndex: maxZ + 1 }]; }); }
   }, [takeSnapshot]);
 
+  // ★ 論理ブロック追加用の共通関数
+  const addLogicalDerivationBlock = useCallback((type: 'double_arrow' | 'single_arrow' | 'and' | 'or') => {
+    if (!primaryNode) return;
+    takeSnapshot();
+
+    // 親ノードの位置とサイズを取得
+    const x0 = primaryNode.position.x;
+    const y0 = primaryNode.position.y;
+    const w0 = Number(primaryNode.style?.width) || 200;
+    const h0 = Number(primaryNode.style?.height) || 100;
+    
+    // 親ノードと同じフォントサイズを取得
+    const parentFontSize = primaryNode.style?.fontSize || '14px';
+
+    // 既存の論理ブロックを取得
+    const currentNodes = levelData[currentLevel]?.nodes || nodes;
+    const isDerivationBlock = (n: any) => n.data?.isDerivationBlock && n.data?.parentNodeId === primaryNode.id;
+    const derivationBlocks = currentNodes.filter(isDerivationBlock);
+    
+    // 配置場所の決定（右側にスタック）
+    const offset_x = derivationBlocks.length * 150; 
+    const isFirstBlock = derivationBlocks.length === 0;
+
+    const newX = x0 + w0 + (isFirstBlock ? 100 : offset_x + 100);
+    const newY = isFirstBlock ? y0 : y0 + offset_x / 1.5;
+
+    // 新しいテキストノードを作成（空欄、同じサイズ）
+    const newNodeId = `logical-${Date.now()}`;
+    const newNodeContent = '';
+    const newData = { ...primaryNode.data, content: newNodeContent, isEditing: true, isDerivationBlock: true, parentNodeId: primaryNode.id };
+    const newStyle = { ...primaryNode.style, width: w0, height: h0, fontSize: parentFontSize };
+    const newNodeZ = Math.max(0, ...nodesRef.current.map((n: any) => Number(n.zIndex) || 0)) + 1;
+    const newNode = { id: newNodeId, selected: true, position: { x: newX, y: newY }, data: newData, style: newStyle, zIndex: newNodeZ };
+
+    setNodes((nds: any[]) => {
+        const updatedNodes = [...nds.map((n: any) => ({...n, selected: false})), newNode];
+        return updatedNodes;
+    });
+
+    // 図形と線の接続
+    let handleSource = derivationBlocks.length % 2 === 0 ? 'top-src' : 'bottom-src';
+    let handleTarget = Position.Left;
+
+    if (type === 'double_arrow' || type === 'single_arrow') {
+        // 矢印の場合：線を引く
+        const edgeId = `e-${primaryNode.id}-${newNodeId}`;
+        const edgeType = type === 'double_arrow' ? 'custom-double-both' : 'arrow';
+        setEdges((eds: any[]) => [...eds.map((e: any) => ({...e, selected:false})), { id: edgeId, source: primaryNode.id, target: newNodeId, sourceHandle: handleSource, targetHandle: 'left-tgt', type: 'default', label: '', style: { strokeWidth: 1 }, data: { markerType: edgeType, double: type === 'double_arrow' }, zIndex: 0 }]);
+    } else {
+        // かつ/または の場合：Katex図形を追加
+        const symbolId = `symbol-${Date.now()}`;
+        const symbolContent = type === 'and' ? '\\wedge' : '\\vee';
+        const symbolNodeData = { ...primaryNode.data, content: `$${symbolContent}$`, isDerivationBlock: true, parentNodeId: primaryNode.id, isLogicalSymbol: true };
+        const symbolNodeStyle = { ...primaryNode.style, width: 30, height: 30, fontSize: '12px', border: 'none', background: 'transparent' };
+        const symbolZ = newNodeZ + 1;
+        const symbolNode = { id: symbolId, selected: false, position: { x: (x0 + w0 + newX) / 2 - 15, y: (y0 + newY) / 2 + (isFirstBlock ? -h0/2 : 0) }, data: symbolNodeData, style: symbolNodeStyle, zIndex: symbolZ };
+        setNodes((nds: any[]) => [...nds, symbolNode]);
+    }
+
+  }, [primaryNode, currentLevel, levelData, nodes, takeSnapshot]);
+
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       const activeEl = document.activeElement as HTMLElement; const isContentEditing = activeEl?.tagName === 'INPUT' || activeEl?.tagName === 'TEXTAREA' || activeEl?.isContentEditable;
@@ -748,7 +820,7 @@ function FlowEditor() {
       let previewElement: React.ReactNode = null;
       const textOffX = Number(n.data?.textOffsetX || 0); const textOffY = Number(n.data?.textOffsetY || 0);
 
-      // ★ 縦書き/横書きとアラインメントの完璧なマッピング
+      // 縦書き/横書きとアラインメントの完璧なマッピング
       const rawHAlign = n.style?.hAlign || 'left'; const rawVAlign = n.style?.vAlign || 'top'; const wMode = n.style?.writingMode || 'horizontal-tb'; const isVertical = wMode === 'vertical-rl';
       const jc = rawVAlign === 'top' ? 'flex-start' : rawVAlign === 'bottom' ? 'flex-end' : 'center';
       const ai = isVertical ? (rawHAlign === 'right' ? 'flex-start' : rawHAlign === 'left' ? 'flex-end' : 'center') : (rawHAlign === 'left' ? 'flex-start' : rawHAlign === 'right' ? 'flex-end' : 'center');
@@ -784,7 +856,6 @@ function FlowEditor() {
             if (cc < selMinC) selMinC = cc; if (cc > selMaxC) selMaxC = cc;
         });
 
-        // ★ 表の全体クリックでセル選択を解除する
         previewElement = (
             <div 
                 style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column' }}
@@ -800,7 +871,6 @@ function FlowEditor() {
                     <input type="text" placeholder="表のタイトル (任意)" value={n.data?.tableTitle || ''} onChange={(e) => setNodes(nds => nds.map(node => node.id === n.id ? { ...node, data: { ...node.data, tableTitle: e.target.value } } : node))} style={{ width: '100%', border: 'none', borderBottom: isExecutingPrint ? 'none' : '1px dashed #ccc', background: 'transparent', textAlign: 'center', fontSize: '12px', fontWeight: 'bold', outline: 'none', color: '#333' }} />
                 </div>
                 <div className="nodrag" style={{ flex: 1, overflow: 'auto', padding: '10px' }}>
-                    {/* ★ 印刷時の幅崩れを防ぐために colgroup を導入 */}
                     <table style={{ borderCollapse: 'collapse', tableLayout: 'fixed', width: 'max-content' }}>
                         <colgroup>
                             <col className="no-print" style={{ width: 30 }} />
@@ -905,7 +975,6 @@ function FlowEditor() {
       const resolvedBorder = n.data?.isShape ? `3px solid ${bColor || '#333'}` : (hideGrayBorder ? 'none' : `1px solid ${bColor}`);
       const { hAlign: _nh, vAlign: _nv, writingMode: _nw, ...safeNodeStyle } = n.style || {};
 
-      // 表自体の選択枠をセル編集中以外で表示する
       const isTableAndCellEditing = n.data?.isTable && (selectedCells[n.id]?.length || 0) > 0;
 
       return {
@@ -1036,7 +1105,7 @@ function FlowEditor() {
                  setNodes((nds: any[]) => applyNodeChanges(u, nds));
              }} 
              onEdgesChange={u => setEdges((eds: any[]) => applyEdgeChanges(u, eds))} 
-             onConnect={p => { takeSnapshot(); setEdges((eds: any[]) => addEdge({...p, type:'default', label: '', style: {strokeWidth: 1}}, eds)); }} 
+             onConnect={p => { takeSnapshot(); setEdges((eds: any[]) => addEdge({...p, type:'default', label: '', style: {strokeWidth: 1}, data: { markerType: 'arrow'}}, eds)); }} 
              onNodeDragStart={() => takeSnapshot()} onNodeDoubleClick={(_, n) => { enterLevel(n.id, extractFirstLineText(n.data?.content)); }} 
              onNodeDrag={onNodeDrag} onNodeDragStop={onNodeDragStop} fitView
           >
@@ -1131,6 +1200,19 @@ function FlowEditor() {
                     <button onMouseDown={(e) => e.preventDefault()} onClick={handleResetFormat} style={{fontSize:'10px', padding:'4px 6px', border:'1px solid #ccc', borderRadius:'4px', cursor:'pointer', background:'#fff', fontWeight:'bold'}}>標準へ</button>
                   </div>
               </div>
+
+              {/* ★ 論理ブロック追加ボタン */}
+              {!primaryNode.data?.isShape && !primaryNode.data?.isImage && !primaryNode.data?.isTable && (
+                <div style={{ padding: '10px', background: '#f8f9fa', borderRadius: '8px', marginBottom: '15px', border: '1px solid #ddd' }}>
+                  <label style={{fontSize: '11px', fontWeight: 'bold', color: '#1d4ed8'}}>論理ブロック追加</label>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '5px', marginTop: '5px' }}>
+                    <button onClick={() => addLogicalDerivationBlock('double_arrow')} style={{ padding: '6px', fontSize: '12px', cursor: 'pointer', borderRadius: '4px', border: '1px solid #ccc', background: '#fff' }}>⇔</button>
+                    <button onClick={() => addLogicalDerivationBlock('single_arrow')} style={{ padding: '6px', fontSize: '12px', cursor: 'pointer', borderRadius: '4px', border: '1px solid #ccc', background: '#fff' }}>⇨</button>
+                    <button onClick={() => addLogicalDerivationBlock('and')} style={{ padding: '6px', fontSize: '12px', cursor: 'pointer', borderRadius: '4px', border: '1px solid #ccc', background: '#fff' }}>∧</button>
+                    <button onClick={() => addLogicalDerivationBlock('or')} style={{ padding: '6px', fontSize: '12px', cursor: 'pointer', borderRadius: '4px', border: '1px solid #ccc', background: '#fff' }}>∨</button>
+                  </div>
+                </div>
+              )}
 
               <hr style={{margin: '10px 0', border: 'none', borderTop: '1px solid #eee'}} />
               <label style={{fontSize: '10px', color: '#666', fontWeight: 'bold'}}>{primaryNode.data?.isTable ? 'レイアウト (選択セルのみ)' : 'レイアウト (図形全体にのみ適用)'}</label>
