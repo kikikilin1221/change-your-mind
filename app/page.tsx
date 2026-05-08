@@ -117,7 +117,11 @@ const DoubleEdge = ({ id, sourceX, sourceY, targetX, targetY, sourcePosition, ta
                   suppressContentEditableWarning
                   onMouseDown={(e) => { if (isEditing) e.stopPropagation(); }}
                   onKeyDown={(e) => { if (isEditing) e.stopPropagation(); }}
-                  onBlur={(e) => window.dispatchEvent(new CustomEvent('custom-edge-blur', { detail: { id, html: e.currentTarget.innerHTML } }))}
+                  onInput={(e) => { (data as any)._tempContent = e.currentTarget.innerHTML; }}
+                  onBlur={(e) => {
+                      const finalHtml = (data as any)._tempContent ?? e.currentTarget.innerHTML;
+                      window.dispatchEvent(new CustomEvent('custom-edge-blur', { detail: { id, html: finalHtml } }));
+                  }}
                   style={{
                       padding: '2px 4px', fontSize: `${fontSize}px`, fontWeight: 'bold', color: '#333',
                       textShadow: '0 0 3px var(--bg-color, #fff), 0 0 3px var(--bg-color, #fff), 0 0 3px var(--bg-color, #fff)',
@@ -125,7 +129,6 @@ const DoubleEdge = ({ id, sourceX, sourceY, targetX, targetY, sourcePosition, ta
                       writingMode: (style as any)?.writingMode || 'horizontal-tb',
                       ...labelStyle
                   }}
-                  // ★ 究極のIMEバグ対策：Reactの描画システムから完全に切り離し、DOMを直接コントロールする
                   ref={el => {
                       if (!el) return;
                       if (!isEditing) {
@@ -240,8 +243,8 @@ function FlowEditor() {
   const isTableEditing = primaryNode?.data?.isTable && (selectedCells[primaryNode.id]?.length || 0) > 0;
 
   const clearSelection = useCallback(() => {
-    setNodes((nds: any[]) => nds.map((n: any) => ({...n, selected: false, data: { ...n.data, isEditing: false, editingCell: null }})));
-    setEdges((eds: any[]) => eds.map((e: any) => ({...e, selected: false, data: { ...e.data, isEditing: false }})));
+    setNodes((nds: any[]) => nds.map((n: any) => ({...n, selected: false, data: { ...n.data, isEditing: false, editingCell: null, _tempContent: undefined }})));
+    setEdges((eds: any[]) => eds.map((e: any) => ({...e, selected: false, data: { ...e.data, isEditing: false, _tempContent: undefined }})));
     setSelectedCells({});
   }, []);
 
@@ -276,8 +279,8 @@ function FlowEditor() {
           const newRows = type === 'row' ? n.data.rows + 1 : n.data.rows;
           const newCols = type === 'col' ? n.data.cols + 1 : n.data.cols;
           const newCells = { ...n.data.cells };
-          if (type === 'row') for(let c=0; c<newCols; c++) newCells[`${newRows-1}-${c}`] = { content: '', style: { border: '1px solid #ccc'} };
-          if (type === 'col') for(let r=0; r<newRows; r++) newCells[`${r}-${newCols-1}`] = { content: '', style: { border: '1px solid #ccc'} };
+          if (type === 'row') for(let c=0; c<newCols; c++) newCells[`${newRows-1}-${c}`] = { content: '', style: { border: '1px solid #ccc', hAlign: 'left', vAlign: 'top', writingMode: 'horizontal-tb' } };
+          if (type === 'col') for(let r=0; r<newRows; r++) newCells[`${r}-${newCols-1}`] = { content: '', style: { border: '1px solid #ccc', hAlign: 'left', vAlign: 'top', writingMode: 'horizontal-tb' } };
           return { ...n, data: { ...n.data, rows: newRows, cols: newCols, cells: newCells } };
       }));
   };
@@ -472,6 +475,7 @@ function FlowEditor() {
     }));
   }, [takeSnapshot]);
 
+  // ★ 究極の部分装飾機能：ブラウザ依存を回避し、文字サイズ変更を確実に適用する
   const applyUnifiedFormat = (type: string, value: any = '') => {
       const activeEl = document.activeElement as HTMLElement;
       if (!activeEl || (!activeEl.isContentEditable && activeEl.tagName !== 'DIV')) {
@@ -480,13 +484,22 @@ function FlowEditor() {
       }
       takeSnapshot();
       if (type === 'fontSize') {
+          // ブラウザの仕様（spanやfontのゆらぎ）を完全吸収する強力な置換
           document.execCommand('fontSize', false, '7');
-          const fonts = activeEl.querySelectorAll('font[size="7"]');
+          const fonts = activeEl.querySelectorAll('font[size="7"], span');
           fonts.forEach((f) => {
               const element = f as HTMLElement;
-              element.removeAttribute('size');
-              element.style.fontSize = value;
-              element.style.lineHeight = '1.2';
+              if (element.tagName === 'FONT' && element.getAttribute('size') === '7') {
+                  element.removeAttribute('size');
+                  element.style.fontSize = value;
+                  element.style.lineHeight = '1.2';
+              } else if (element.tagName === 'SPAN') {
+                  const size = element.style.fontSize;
+                  if (size === '48px' || size === 'xxx-large' || size === '-webkit-xxx-large') {
+                      element.style.fontSize = value;
+                      element.style.lineHeight = '1.2';
+                  }
+              }
           });
       } else {
           document.execCommand(type, false, value);
@@ -502,19 +515,22 @@ function FlowEditor() {
       takeSnapshot();
       document.execCommand('removeFormat');
       document.execCommand('fontSize', false, '7');
-      const fonts = activeEl.querySelectorAll('font[size="7"]');
+      const fonts = activeEl.querySelectorAll('font[size="7"], span');
       fonts.forEach((f) => {
           const element = f as HTMLElement;
-          element.removeAttribute('size');
-          element.style.fontSize = '14px';
-          element.style.color = '#000000';
-          element.style.fontWeight = 'normal';
-          element.style.textDecoration = 'none';
-          element.style.fontFamily = 'sans-serif';
-          element.style.lineHeight = '1.2';
+          if (element.tagName === 'FONT' || element.tagName === 'SPAN') {
+              element.removeAttribute('size');
+              element.style.fontSize = '14px';
+              element.style.color = '#000000';
+              element.style.fontWeight = 'normal';
+              element.style.textDecoration = 'none';
+              element.style.fontFamily = 'sans-serif';
+              element.style.lineHeight = '1.2';
+          }
       });
   };
 
+  // ★ 完璧なレイアウト機能：縦書き・横書きを考慮した上でY軸とX軸を直感的にマッピング
   const handleLayout = (hAlign?: string, vAlign?: string, wMode?: string) => {
       takeSnapshot();
       if (primaryNode?.data?.isTable && (selectedCells[primaryNode.id]?.length || 0) > 0) {
@@ -525,24 +541,34 @@ function FlowEditor() {
               activeCells.forEach(cId => {
                   const cell = newCells[cId] || { content: '', style: {} };
                   let newStyle = { ...cell.style };
-                  if (hAlign) newStyle.textAlign = hAlign;
-                  if (vAlign) newStyle.verticalAlign = vAlign;
+                  // 過去の互換性も考慮して明確なプロパティ名で保存
+                  if (hAlign) newStyle.hAlign = hAlign;
+                  if (vAlign) newStyle.vAlign = vAlign;
                   if (wMode) newStyle.writingMode = wMode;
+                  // 縦書きボタンが押された時のデフォルト補正（右上詰め）
+                  if (wMode === 'vertical-rl') {
+                      if (!hAlign) newStyle.hAlign = 'right';
+                      if (!vAlign) newStyle.vAlign = 'top';
+                  } else if (wMode === 'horizontal-tb') {
+                      if (!hAlign) newStyle.hAlign = 'left';
+                      if (!vAlign) newStyle.vAlign = 'top';
+                  }
                   newCells[cId] = { ...cell, style: newStyle };
               });
               return { ...n, data: { ...n.data, cells: newCells } };
           }));
       } else {
           let styleUpdate: any = {};
-          if (hAlign) {
-              styleUpdate.textAlign = hAlign; 
-              styleUpdate.alignItems = hAlign === 'left' ? 'flex-start' : hAlign === 'right' ? 'flex-end' : 'center';
-          }
-          if (vAlign) {
-              styleUpdate.justifyContent = vAlign === 'top' ? 'flex-start' : vAlign === 'bottom' ? 'flex-end' : 'center';
-          }
-          if (wMode) {
-              styleUpdate.writingMode = wMode;
+          if (hAlign) styleUpdate.hAlign = hAlign;
+          if (vAlign) styleUpdate.vAlign = vAlign;
+          if (wMode) styleUpdate.writingMode = wMode;
+          
+          if (wMode === 'vertical-rl') {
+              if (!hAlign) styleUpdate.hAlign = 'right';
+              if (!vAlign) styleUpdate.vAlign = 'top';
+          } else if (wMode === 'horizontal-tb') {
+              if (!hAlign) styleUpdate.hAlign = 'left';
+              if (!vAlign) styleUpdate.vAlign = 'top';
           }
           updateSelectedNodes({}, styleUpdate);
       }
@@ -633,7 +659,8 @@ function FlowEditor() {
     const parent = selNodes.length === 1 ? selNodes[0] : null;
 
     let data: any = { content: '項目', previewVisible: false, previewStyle: { opacity: 0.7, offsetX: 0, offsetY: -150, width: 180, height: 120 }, textOffsetX: 0, textOffsetY: 0, isEditing: false, tableTitle: '' };
-    let style: any = { backgroundColor: '#ffffff', color: '#000000', borderRadius: '12px', fontSize: '14px', fontFamily: 'sans-serif', width: 200, height: 100, alignItems: 'flex-start', justifyContent: 'flex-start', textAlign: 'left', padding: '4px', borderColor: 'transparent', writingMode: 'horizontal-tb' };
+    // ★ 完璧なデフォルト設定：左上ギリギリ（paddingを減らす）、ゴシック、黒色、14px
+    let style: any = { backgroundColor: '#ffffff', color: '#000000', borderRadius: '12px', fontSize: '14px', fontFamily: 'sans-serif', width: 200, height: 100, hAlign: 'left', vAlign: 'top', writingMode: 'horizontal-tb', padding: '4px', borderColor: 'transparent' };
     
     if (type === 'image') { fileInputRef.current?.click(); return; }
     if (type === 'shape') {
@@ -644,8 +671,8 @@ function FlowEditor() {
       data = { 
           isTable: true, rows: 2, cols: 2, textOffsetX: 0, textOffsetY: 0, editingCell: null, tableTitle: '',
           cells: {
-              "0-0": { content: "セル", style: { border: '1px solid #ccc', verticalAlign: 'top', textAlign: 'left', writingMode: 'horizontal-tb' } }, "0-1": { content: "セル", style: { border: '1px solid #ccc', verticalAlign: 'top', textAlign: 'left', writingMode: 'horizontal-tb' } },
-              "1-0": { content: "セル", style: { border: '1px solid #333', verticalAlign: 'top', textAlign: 'left', writingMode: 'horizontal-tb' } }, "1-1": { content: "セル", style: { border: '1px solid #333', verticalAlign: 'top', textAlign: 'left', writingMode: 'horizontal-tb' } }
+              "0-0": { content: "セル", style: { border: '1px solid #ccc', hAlign: 'left', vAlign: 'top', writingMode: 'horizontal-tb' } }, "0-1": { content: "セル", style: { border: '1px solid #ccc', hAlign: 'left', vAlign: 'top', writingMode: 'horizontal-tb' } },
+              "1-0": { content: "セル", style: { border: '1px solid #333', hAlign: 'left', vAlign: 'top', writingMode: 'horizontal-tb' } }, "1-1": { content: "セル", style: { border: '1px solid #333', hAlign: 'left', vAlign: 'top', writingMode: 'horizontal-tb' } }
           } 
       };
       style = { ...style, width: 300, height: 150, padding: 0, backgroundColor: '#fff', display: 'block', borderRadius: '8px', border: '2px solid #ccc', borderColor: '#ccc' };
@@ -684,13 +711,11 @@ function FlowEditor() {
     }
   }, [takeSnapshot]);
 
-  // ★ 究極のIME＆キーボード対策：編集中はシステムが一切キーボードイベントを奪わないようにする
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       const activeEl = document.activeElement as HTMLElement;
       const isContentEditing = activeEl?.tagName === 'INPUT' || activeEl?.tagName === 'TEXTAREA' || activeEl?.isContentEditable;
       
-      // 編集中でTab以外のキー（文字入力やEnter）が押された場合は、何もせずにそのままブラウザに入力させる
       if (isContentEditing && e.key !== 'Tab') {
           return; 
       }
@@ -744,7 +769,7 @@ function FlowEditor() {
   useEffect(() => {
       const handleEdgeBlur = (e: any) => {
           const { id, html } = e.detail;
-          setEdges(eds => eds.map(edge => edge.id === id ? { ...edge, label: html, data: { ...edge.data, isEditing: false } } : edge));
+          setEdges(eds => eds.map(edge => edge.id === id ? { ...edge, label: html, data: { ...edge.data, isEditing: false, _tempContent: undefined } } : edge));
       };
       window.addEventListener('custom-edge-blur', handleEdgeBlur);
       return () => window.removeEventListener('custom-edge-blur', handleEdgeBlur);
@@ -782,7 +807,7 @@ function FlowEditor() {
           return [...nds.map((n: any) => ({...n, selected: false})), { 
             id: `img-${Date.now()}`, position: { x: 50, y: 50 }, zIndex: maxZ + 1, selected: true,
             data: { isImage: true, imageUrl: ev.target?.result, imgPosX: 0, imgPosY: 0, imgZoom: 1, isCropping: false, cropBaseW: 300, cropBaseH: 200, cropOffsetX: 0, cropOffsetY: 0, textOffsetX: 0, textOffsetY: 0 }, 
-            style: { width: 300, height: 200, background: '#fff', padding: 0, border: '1px solid #ccc', borderColor: '#ccc', writingMode: 'horizontal-tb' } 
+            style: { width: 300, height: 200, background: '#fff', padding: 0, border: '1px solid #ccc', borderColor: '#ccc', hAlign: 'left', vAlign: 'top', writingMode: 'horizontal-tb' } 
           }];
         });
       };
@@ -857,6 +882,17 @@ function FlowEditor() {
       const textOffX = Number(n.data?.textOffsetX || 0);
       const textOffY = Number(n.data?.textOffsetY || 0);
 
+      // ★ 完璧なレイアウト計算：過去データ互換性を持ちつつ、縦書きと横書きのX/Y軸を自動変換
+      const rawHAlign = n.style?.hAlign || (n.style?.alignItems === 'flex-end' ? 'right' : n.style?.alignItems === 'center' ? 'center' : 'left');
+      const rawVAlign = n.style?.vAlign || (n.style?.justifyContent === 'flex-end' ? 'bottom' : n.style?.justifyContent === 'center' ? 'center' : 'top');
+      const wMode = n.style?.writingMode || 'horizontal-tb';
+      const isVertical = wMode === 'vertical-rl';
+      
+      const jc = rawVAlign === 'top' ? 'flex-start' : rawVAlign === 'bottom' ? 'flex-end' : 'center';
+      const ai = isVertical
+          ? (rawHAlign === 'right' ? 'flex-start' : rawHAlign === 'left' ? 'flex-end' : 'center')
+          : (rawHAlign === 'left' ? 'flex-start' : rawHAlign === 'right' ? 'flex-end' : 'center');
+
       if (isPreview) {
         const w1 = Number(n.style?.width) || 200; const h1 = Number(n.style?.height) || 100;
         const cx1 = w1 / 2; const cy1 = h1 / 2;
@@ -890,8 +926,8 @@ function FlowEditor() {
       } else if (n.data?.isTable) {
         previewElement = (
             <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column' }}>
-                <div className="custom-drag-handle" style={{ height: '14px', background: '#e2e8f0', cursor: 'grab', borderTopLeftRadius: '6px', borderTopRightRadius: '6px' }}></div>
-                <div className="nodrag" style={{ padding: '4px 10px 0', backgroundColor: '#fff' }}>
+                <div className="custom-drag-handle" style={{ height: '14px', background: '#e2e8f0', cursor: 'grab', borderTopLeftRadius: '6px', borderTopRightRadius: '6px', flexShrink: 0 }}></div>
+                <div className="nodrag" style={{ padding: '4px 10px 0', backgroundColor: '#fff', flexShrink: 0 }}>
                     <input
                         type="text"
                         placeholder="表のタイトル (任意)"
@@ -900,6 +936,7 @@ function FlowEditor() {
                         style={{ width: '100%', border: 'none', borderBottom: isExecutingPrint ? 'none' : '1px dashed #ccc', background: 'transparent', textAlign: 'center', fontSize: '12px', fontWeight: 'bold', outline: 'none', color: '#333' }}
                     />
                 </div>
+                {/* ★ 修正：セルの自動拡大を抑制し、固定高さを維持するためのCSS調整 */}
                 <div className="nodrag" style={{ flex: 1, overflow: 'auto', padding: '10px' }}>
                     <table style={{ width: '100%', height: '100%', borderCollapse: 'collapse', tableLayout: 'fixed' }}>
                         <tbody>
@@ -907,9 +944,15 @@ function FlowEditor() {
                                 <tr key={r}>
                                     {Array.from({length: n.data.cols || 2}).map((_, c) => {
                                         const cellId = `${r}-${c}`;
-                                        const cellData = n.data.cells?.[cellId] || { content: '', style: { border: '1px solid #ccc', verticalAlign: 'top', textAlign: 'left', writingMode: 'horizontal-tb' } };
+                                        const cellData = n.data.cells?.[cellId] || { content: '', style: { border: '1px solid #ccc', hAlign: 'left', vAlign: 'top', writingMode: 'horizontal-tb' } };
                                         const isSel = selectedCells[n.id]?.includes(cellId);
                                         const isCellEditing = editingCellId === cellId;
+
+                                        const cHAlign = cellData.style?.hAlign || 'left';
+                                        const cVAlign = cellData.style?.vAlign || 'top';
+                                        const cWMode = cellData.style?.writingMode || 'horizontal-tb';
+                                        const tdVerticalAlign = cVAlign === 'center' ? 'middle' : cVAlign;
+
                                         return (
                                             <td
                                                 key={c}
@@ -920,10 +963,13 @@ function FlowEditor() {
                                                         if (e.shiftKey || e.metaKey || e.ctrlKey) { return { ...prev, [n.id]: current.includes(cellId) ? current.filter(id => id !== cellId) : [...current, cellId] }; } 
                                                         else { return { ...prev, [n.id]: [cellId] }; }
                                                     });
-                                                    if (!n.selected) setNodes((nds: any[]) => nds.map((node: any) => node.id === n.id ? { ...node, selected: true } : { ...node, selected: false }));
+                                                    // 表の中の別のセルを選んだら、他の図形の編集状態を強制リセット
+                                                    setNodes((nds: any[]) => nds.map((node: any) => node.id === n.id ? { ...node, selected: true } : { ...node, selected: false, data: { ...node.data, isEditing: false, editingCell: null } }));
                                                 }}
+                                                // ★ セル高さの均等割り付け強制設定（これにより改行で不自然に拡大しない）
                                                 style={{
-                                                    ...cellData.style, position: 'relative', cursor: isCellEditing ? 'text' : 'cell', padding: '8px', wordBreak: 'break-all',
+                                                    ...cellData.style, position: 'relative', cursor: isCellEditing ? 'text' : 'cell', padding: '8px', wordBreak: 'break-all', height: '1px',
+                                                    verticalAlign: tdVerticalAlign, textAlign: cHAlign, writingMode: cWMode,
                                                     outline: isSel && !isCellEditing ? '2px solid #3b82f6' : 'none', outlineOffset: '-2px'
                                                 }}
                                             >
@@ -932,12 +978,13 @@ function FlowEditor() {
                                                     contentEditable={isCellEditing} suppressContentEditableWarning
                                                     onMouseDown={(e) => { if (isCellEditing) e.stopPropagation(); }}
                                                     onKeyDown={(e) => { if (isCellEditing) e.stopPropagation(); }}
+                                                    onInput={(e) => { cellData._tempContent = e.currentTarget.innerHTML; }}
                                                     onBlur={(e) => {
-                                                        const finalHtml = e.currentTarget.innerHTML;
-                                                        setNodes(nds => nds.map(node => node.id === n.id ? { ...node, data: { ...node.data, editingCell: null, cells: { ...node.data.cells, [cellId]: { ...node.data.cells[cellId], content: finalHtml } } } } : node));
+                                                        const finalHtml = cellData._tempContent ?? e.currentTarget.innerHTML;
+                                                        setNodes(nds => nds.map(node => node.id === n.id ? { ...node, data: { ...node.data, editingCell: null, cells: { ...node.data.cells, [cellId]: { ...node.data.cells[cellId], content: finalHtml, _tempContent: undefined } } } } : node));
                                                     }}
-                                                    style={{ outline: 'none', width: '100%', height: '100%' }}
-                                                    // ★ 究極のIMEバグ対策
+                                                    // セル内のdivは中身の大きさに合わせるだけ（tdが配置を担当）
+                                                    style={{ outline: 'none', width: '100%', height: 'auto', textAlign: cHAlign }}
                                                     ref={el => {
                                                         if (!el) return;
                                                         if (!isCellEditing) {
@@ -977,10 +1024,7 @@ function FlowEditor() {
       const isTextNode = !n.data?.isShape && !n.data?.isImage && !n.data?.isTable;
       const bColor = n.style?.borderColor;
       const hideGrayBorder = isTextNode && (!bColor || bColor === '#ccc' || bColor === 'transparent');
-      
-      const resolvedBorder = n.data?.isShape 
-            ? `3px solid ${bColor || '#333'}` 
-            : (hideGrayBorder ? 'none' : `1px solid ${bColor}`);
+      const resolvedBorder = n.data?.isShape ? `3px solid ${bColor || '#333'}` : (hideGrayBorder ? 'none' : `1px solid ${bColor}`);
 
       return {
         ...n,
@@ -988,7 +1032,8 @@ function FlowEditor() {
         data: {
           ...n.data,
           label: (
-            <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', alignItems: n.style?.alignItems || 'flex-start', justifyContent: n.style?.justifyContent || 'flex-start', position: 'relative', border: resolvedBorder, borderRadius: n.style?.borderRadius || '12px', backgroundColor: n.style?.backgroundColor || '#fff', opacity: n.style?.opacity || 1, padding: n.style?.padding || '4px' }}>
+            // ★ 外側の箱：ここで justifyContent と alignItems を使って縦横の配置を完璧に制御
+            <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', alignItems: ai, justifyContent: jc, position: 'relative', border: resolvedBorder, borderRadius: n.style?.borderRadius || '12px', backgroundColor: n.style?.backgroundColor || '#fff', opacity: n.style?.opacity || 1, padding: n.style?.padding || '4px' }}>
               
               {n.id !== 'center-mark' && (
                 <>
@@ -996,7 +1041,6 @@ function FlowEditor() {
                   <Handle type="target" position={Position.Bottom} id="bottom-tgt" className="custom-handle-target custom-handle-offset-bottom" />
                   <Handle type="target" position={Position.Left} id="left-tgt" className="custom-handle-target custom-handle-offset-left" />
                   <Handle type="target" position={Position.Right} id="right-tgt" className="custom-handle-target custom-handle-offset-right" />
-
                   <Handle type="source" position={Position.Left} id="left-src" className="custom-handle custom-handle-offset-left" />
                   <Handle type="source" position={Position.Right} id="right-src" className="custom-handle custom-handle-offset-right" />
                   <Handle type="source" position={Position.Top} id="top-src" className="custom-handle custom-handle-offset-top" />
@@ -1023,22 +1067,22 @@ function FlowEditor() {
                       transform: `translate(${n.data.imgPosX || 0}px, ${n.data.imgPosY || 0}px) scale(${n.data.imgZoom || 1})`, transformOrigin: 'center center', pointerEvents: 'none' 
                   }} alt="img" />
                   
-                  <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', display: 'flex', flexDirection: 'column', alignItems: n.style?.alignItems || 'flex-start', justifyContent: n.style?.justifyContent || 'flex-start', padding: '4px' }}>
+                  <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', display: 'flex', flexDirection: 'column', alignItems: ai, justifyContent: jc, padding: '4px' }}>
                       <div 
                           id={`edit-${n.id}`}
                           className={"html-content"}
                           contentEditable={isEditingNode} suppressContentEditableWarning
                           onMouseDown={(e) => { if (isEditingNode) e.stopPropagation(); }}
                           onKeyDown={(e) => { if (isEditingNode) e.stopPropagation(); }}
+                          onInput={(e) => { n.data._tempContent = e.currentTarget.innerHTML; }}
                           onBlur={(e) => {
-                              const finalHtml = e.currentTarget.innerHTML;
-                              setNodes(nds => nds.map(node => node.id === n.id ? { ...node, data: { ...node.data, isEditing: false, content: finalHtml } } : node));
+                              const finalHtml = n.data._tempContent ?? e.currentTarget.innerHTML;
+                              setNodes(nds => nds.map(node => node.id === n.id ? { ...node, data: { ...node.data, isEditing: false, content: finalHtml, _tempContent: undefined } } : node));
                           }}
                           style={{
                               pointerEvents: 'auto', width: '100%', height: 'auto', outline: 'none', cursor: isEditingNode ? 'text' : 'pointer',
-                              color: n.style?.color || '#000', fontFamily: n.style?.fontFamily || 'sans-serif', fontSize: n.style?.fontSize || '14px', fontWeight: n.style?.fontWeight || 'normal', textDecoration: n.style?.textDecoration || 'none', whiteSpace: 'pre-wrap', lineHeight: '1.2', textAlign: n.style?.textAlign || 'left', transform: `translate(${textOffX}px, ${textOffY}px)`, writingMode: n.style?.writingMode || 'horizontal-tb'
+                              color: n.style?.color || '#000', fontFamily: n.style?.fontFamily || 'sans-serif', fontSize: n.style?.fontSize || '14px', fontWeight: n.style?.fontWeight || 'normal', textDecoration: n.style?.textDecoration || 'none', whiteSpace: 'pre-wrap', lineHeight: '1.2', textAlign: rawHAlign, transform: `translate(${textOffX}px, ${textOffY}px)`, writingMode: wMode
                           }}
-                          // ★ 究極のIMEバグ対策
                           ref={el => {
                               if (!el) return;
                               if (!isEditingNode) {
@@ -1067,15 +1111,15 @@ function FlowEditor() {
                     contentEditable={isEditingNode} suppressContentEditableWarning
                     onMouseDown={(e) => { if (isEditingNode) e.stopPropagation(); }}
                     onKeyDown={(e) => { if (isEditingNode) e.stopPropagation(); }}
+                    onInput={(e) => { n.data._tempContent = e.currentTarget.innerHTML; }}
                     onBlur={(e) => {
-                        const finalHtml = e.currentTarget.innerHTML;
-                        setNodes(nds => nds.map(node => node.id === n.id ? { ...node, data: { ...node.data, isEditing: false, content: finalHtml } } : node));
+                        const finalHtml = n.data._tempContent ?? e.currentTarget.innerHTML;
+                        setNodes(nds => nds.map(node => node.id === n.id ? { ...node, data: { ...node.data, isEditing: false, content: finalHtml, _tempContent: undefined } } : node));
                     }}
                     style={{ 
                         pointerEvents: 'auto', width: '100%', height: 'auto', outline: 'none', cursor: isEditingNode ? 'text' : 'pointer',
-                        color: n.style?.color || '#000', fontFamily: n.style?.fontFamily || 'sans-serif', fontSize: n.style?.fontSize || '14px', fontWeight: n.style?.fontWeight || 'normal', textDecoration: n.style?.textDecoration || 'none', whiteSpace: 'pre-wrap', lineHeight: '1.2', textAlign: n.style?.textAlign || 'left', transform: `translate(${textOffX}px, ${textOffY}px)`, writingMode: n.style?.writingMode || 'horizontal-tb'
+                        color: n.style?.color || '#000', fontFamily: n.style?.fontFamily || 'sans-serif', fontSize: n.style?.fontSize || '14px', fontWeight: n.style?.fontWeight || 'normal', textDecoration: n.style?.textDecoration || 'none', whiteSpace: 'pre-wrap', lineHeight: '1.2', textAlign: rawHAlign, transform: `translate(${textOffX}px, ${textOffY}px)`, writingMode: wMode
                     }}
-                    // ★ 究極のIMEバグ対策
                     ref={el => {
                         if (!el) return;
                         if (!isEditingNode) {
@@ -1214,7 +1258,15 @@ function FlowEditor() {
           <ReactFlow 
              connectionMode={ConnectionMode.Loose}
              nodes={flowNodes} edges={edges} edgeTypes={edgeTypes} elevateNodesOnSelect={false} multiSelectionKeyCode={['Shift', 'Meta', 'Control']}
-             onNodesChange={u => setNodes((nds: any[]) => applyNodeChanges(u, nds))} 
+             // ★ 別の図形をクリックしたら他の編集状態を即座にリセット
+             onNodesChange={u => {
+                 const hasSelect = u.some((c: any) => c.type === 'select' && c.selected);
+                 if (hasSelect) {
+                     setNodes(nds => nds.map(n => ({ ...n, data: { ...n.data, isEditing: false, editingCell: null } })));
+                     setEdges(eds => eds.map(e => ({ ...e, data: { ...e.data, isEditing: false } })));
+                 }
+                 setNodes((nds: any[]) => applyNodeChanges(u, nds));
+             }} 
              onEdgesChange={u => setEdges((eds: any[]) => applyEdgeChanges(u, eds))} 
              onConnect={p => { takeSnapshot(); setEdges((eds: any[]) => addEdge({...p, type:'default', label: '', style: {strokeWidth: 1}}, eds)); }} 
              onNodeDragStart={() => takeSnapshot()}
