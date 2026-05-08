@@ -23,7 +23,7 @@ const GLOBAL_CSS = `
       .react-flow__node { box-shadow: none !important; }
   }
 
-  /* ★ ReactFlowデフォルトの不要な枠線を完全破壊 */
+  /* ★ 改善：ReactFlowが勝手につけるデフォルトの枠線を完全に破壊 */
   .react-flow__node, .react-flow__node-default, .react-flow__node-custom {
       border: none !important;
       box-shadow: none !important;
@@ -64,13 +64,10 @@ const DoubleEdge = ({ id, sourceX, sourceY, targetX, targetY, sourcePosition, ta
 
   const displayLabel = label === undefined || label === null || label === 'undefined' ? '' : String(label);
   
-  // ★ 致命的なエラーの原因だった変数を復活＆再定義
-  let rMarkerEnd = markerEnd; 
-  let rMarkerStart = markerStart;
+  let rMarkerEnd = markerEnd; let rMarkerStart = markerStart;
   if (mType === 'custom-double-arrow' || mType === 'custom-double-both') { rMarkerEnd = `url(#custom-arrow-${id})`; }
   if (mType === 'custom-double-both') { rMarkerStart = `url(#custom-arrow-start-${id})`; }
   
-  // 矢印の傘のサイズを大きめに設定
   const customArrowSize = strokeWidth * 2 + 18; 
 
   return (
@@ -78,14 +75,14 @@ const DoubleEdge = ({ id, sourceX, sourceY, targetX, targetY, sourcePosition, ta
       {isDouble && (
         <svg style={{ position: 'absolute', width: 0, height: 0 }}>
           <defs>
-            {/* ★ 突き抜け防止：polygonでキャンバス色（--bg-color）のマスクを作り、線を隠す */}
-            <marker id={`custom-arrow-${id}`} viewBox="0 0 24 24" refX="21" refY="12" markerWidth={customArrowSize} markerHeight={customArrowSize} markerUnits="userSpaceOnUse" orient="auto">
-              <polygon points="2,4 18,12 2,20" fill="var(--bg-color, #f1f1f1)" stroke="none" />
-              <polyline points="4,4 18,12 4,20" fill="none" stroke={edgeColor} strokeWidth={strokeWidth >= 3 ? 3 : 2} strokeLinecap="round" strokeLinejoin="round" />
+            {/* ★ 改善：キャンバスと同色のマスク(polygon)を敷き、線が突き抜けないように完全にカット */}
+            <marker id={`custom-arrow-${id}`} viewBox="0 0 24 24" refX="15" refY="12" markerWidth={customArrowSize} markerHeight={customArrowSize} markerUnits="userSpaceOnUse" orient="auto">
+              <polygon points="0,0 20,12 0,24" fill="var(--bg-color, #ffffff)" stroke="none" />
+              <polyline points="2,4 18,12 2,20" fill="none" stroke={edgeColor} strokeWidth={strokeWidth >= 3 ? 3 : 2} strokeLinecap="round" strokeLinejoin="round" />
             </marker>
-            <marker id={`custom-arrow-start-${id}`} viewBox="0 0 24 24" refX="3" refY="12" markerWidth={customArrowSize} markerHeight={customArrowSize} markerUnits="userSpaceOnUse" orient="auto">
-              <polygon points="22,4 6,12 22,20" fill="var(--bg-color, #f1f1f1)" stroke="none" />
-              <polyline points="20,4 6,12 20,20" fill="none" stroke={edgeColor} strokeWidth={strokeWidth >= 3 ? 3 : 2} strokeLinecap="round" strokeLinejoin="round" />
+            <marker id={`custom-arrow-start-${id}`} viewBox="0 0 24 24" refX="9" refY="12" markerWidth={customArrowSize} markerHeight={customArrowSize} markerUnits="userSpaceOnUse" orient="auto">
+              <polygon points="24,0 4,12 24,24" fill="var(--bg-color, #ffffff)" stroke="none" />
+              <polyline points="22,4 6,12 22,20" fill="none" stroke={edgeColor} strokeWidth={strokeWidth >= 3 ? 3 : 2} strokeLinecap="round" strokeLinejoin="round" />
             </marker>
           </defs>
         </svg>
@@ -278,7 +275,7 @@ function FlowEditor() {
       }));
   };
 
-  // ★ 魔法の「論理ブロックスタック（証明展開）」機能
+  // ★ 改善：論理ブロック追加。2回目以降も「右へ」繋ぐことで、記号を確実に表示させる
   const addLogicalDerivationBlock = useCallback((type: 'double_arrow' | 'single_arrow' | 'and' | 'or') => {
     if (!primaryNode) return;
     takeSnapshot();
@@ -289,22 +286,22 @@ function FlowEditor() {
     const x0 = primaryNode.position.x;
     const y0 = primaryNode.position.y;
 
-    // 現在のノードから派生した実体ブロックを数える
+    const currentNodes = nodesRef.current;
+    
     const isDerivationBlock = (n: any) => n.data?.isDerivationBlock && n.data?.parentNodeId === primaryNode.id;
-    const derivationBlocks = nodesRef.current.filter(n => isDerivationBlock(n) && !n.data?.isTransparentHelper);
+    const derivationBlocks = currentNodes.filter(n => isDerivationBlock(n) && !n.data?.isTransparentHelper);
     
     const count = derivationBlocks.length;
     const gapX = 120; 
-    const gapY = h0; // ★ 真下に隙間なくスタックさせる（h0をそのまま足す）
+    const gapY = h0; // 隙間なく真下に配置
     
-    // 配置場所
     const newX = x0 + w0 + gapX;
     const newY = y0 + count * gapY; 
 
-    // ★ 新しいテキスト枠は0.5pxの黒枠、背景白
+    // 新しいテキストは0.5px黒枠
     const newNodeId = `logical-n-${Date.now()}-${Math.random()}`;
     const newStyle = { ...primaryNode.style, width: w0, height: h0, fontSize: parentFontSize, borderWidth: 0.5, borderColor: '#000000', backgroundColor: '#ffffff' };
-    const newNodeZ = Math.max(0, ...nodesRef.current.map((n: any) => Number(n.zIndex) || 0)) + 1;
+    const newNodeZ = Math.max(0, ...currentNodes.map((n: any) => Number(n.zIndex) || 0)) + 1;
     const newNode = { 
         id: newNodeId, selected: false, position: { x: newX, y: newY }, 
         data: { ...primaryNode.data, content: '', isEditing: false, isDerivationBlock: true, parentNodeId: primaryNode.id }, 
@@ -314,11 +311,11 @@ function FlowEditor() {
     let sourceNodeId = primaryNode.id;
     let transparentNode = null;
 
-    // 2回目以降は、真下に「透明な起点」を作成してそこから線を引く
+    // 2回目以降は、真下に「透明な起点」を作成する
     if (count > 0) {
         const tNodeId = `logical-t-${Date.now()}-${Math.random()}`;
-        // ★ 完全透明なダミーノード
-        const tStyle = { ...primaryNode.style, width: w0, height: h0, backgroundColor: 'transparent', borderColor: 'transparent', color: 'transparent', borderWidth: 0, opacity: 0 };
+        // 完全透明なダミーノード
+        const tStyle = { ...primaryNode.style, width: w0, height: h0, backgroundColor: 'transparent', borderColor: 'transparent', color: 'transparent', borderWidth: 0, opacity: 0, pointerEvents: 'none' };
         transparentNode = { 
             id: tNodeId, selected: false, position: { x: x0, y: newY }, 
             data: { ...primaryNode.data, content: '', isDerivationBlock: true, parentNodeId: primaryNode.id, isTransparentHelper: true }, 
@@ -328,14 +325,13 @@ function FlowEditor() {
     }
 
     setNodes((nds: any[]) => {
-        // ★ 親玉のテキストの選択状態を維持（青枠キープ）する
+        // 親玉のテキストの選択状態を維持
         let updatedNodes = nds.map((n: any) => n.id === primaryNode.id ? { ...n, selected: true } : { ...n, selected: false, data: {...n.data, isEditing: false} });
         if (transparentNode) updatedNodes.push(transparentNode);
         updatedNodes.push(newNode);
         return updatedNodes;
     });
 
-    // ★ 毎回エッジ（記号付き線）を生成する
     const edgeId = `e-${sourceNodeId}-${newNodeId}-${Date.now()}`;
     let edgeProps: any = { type: 'default', label: '', style: { strokeWidth: 2, stroke: '#333' }, data: { color: '#333' } };
     
@@ -344,6 +340,7 @@ function FlowEditor() {
     else if (type === 'and') { edgeProps.data.markerType = 'none'; edgeProps.data.fontSize = 20; edgeProps.label = '∧'; } 
     else if (type === 'or') { edgeProps.data.markerType = 'none'; edgeProps.data.fontSize = 20; edgeProps.label = '∨'; }
 
+    // ★ 常に右向き（right-src -> left-tgt）に線を出すことで、記号が綺麗に並ぶ
     setEdges((eds: any[]) => [...eds.map((e: any) => ({...e, selected:false})), { 
         id: edgeId, source: sourceNodeId, target: newNodeId, 
         sourceHandle: 'right-src', targetHandle: 'left-tgt', 
@@ -684,7 +681,7 @@ function FlowEditor() {
     takeSnapshot(); const id = `node-${Date.now()}`; const selNodes = nodesRef.current.filter(n => n.selected); const parent = selNodes.length === 1 ? selNodes[0] : null;
 
     let data: any = { content: '項目', previewVisible: false, previewStyle: { opacity: 0.7, offsetX: 0, offsetY: -150, width: 180, height: 120 }, textOffsetX: 0, textOffsetY: 0, isEditing: false, tableTitle: '' };
-    // ★ 完璧なデフォルト設定：0.5px黒枠
+    // ★ デフォルト設定：0.5px黒枠
     let style: any = { backgroundColor: '#ffffff', color: '#000000', borderRadius: '12px', fontSize: '14px', fontFamily: 'sans-serif', width: 200, height: 100, hAlign: 'left', vAlign: 'top', writingMode: 'horizontal-tb', padding: '4px', borderColor: '#000000', borderWidth: 0.5 };
     
     if (type === 'image') { fileInputRef.current?.click(); return; }
@@ -1270,6 +1267,7 @@ function FlowEditor() {
               <label style={{fontSize:'10px', fontWeight: 'bold'}}>全体の透明度</label>
               <input type="range" min="0.1" max="1" step="0.1" value={Number(primaryNode.style?.opacity ?? 1)} onChange={(e) => { takeSnapshot(); updateSelectedNodes({}, { opacity: parseFloat(e.target.value) })}} style={{width:'100%', marginBottom:'10px'}} />
 
+              {/* ★ 枠線の太さ調整スライダー（0.5px単位） */}
               <label style={{fontSize:'10px', fontWeight: 'bold'}}>枠線の太さ (px)</label>
               <div style={{display:'flex', alignItems:'center', gap:'8px', marginBottom: '10px'}}>
                 <input type="range" min="0" max="10" step="0.5" value={Number(primaryNode.style?.borderWidth ?? (primaryNode.data?.isImage || primaryNode.data?.isTable ? 0 : 0.5))} onChange={(e) => { takeSnapshot(); updateSelectedNodes({}, { borderWidth: Number(e.target.value) })}} style={{flex:1}} />
