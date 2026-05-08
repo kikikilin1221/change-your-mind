@@ -13,6 +13,12 @@ const GLOBAL_CSS = `
   .html-content strike { text-decoration: line-through double !important; }
   .html-content * { line-height: 1.2 !important; vertical-align: baseline !important; }
   
+  /* ★ 修正：文字をマウスでドラッグ選択できるように強制設定 */
+  .html-content {
+      user-select: text !important;
+      -webkit-user-select: text !important;
+  }
+  
   @media print {
       .no-print { display: none !important; }
       .react-flow__background { display: none !important; }
@@ -40,8 +46,6 @@ const GLOBAL_CSS = `
   .custom-handle-offset-right { right: -4px !important; }
   
   .print-page-wrapper { page-break-after: always; position: relative; overflow: hidden; margin: 0 auto; border: none !important; outline: none !important; }
-  
-  .editing-mode { outline: 2px solid #3b82f6 !important; border-radius: 4px; padding: 2px; }
 `;
 
 const getEdgePoint = (cx: number, cy: number, w: number, h: number, tx: number, ty: number) => {
@@ -70,6 +74,9 @@ const DoubleEdge = ({ id, sourceX, sourceY, targetX, targetY, sourcePosition, ta
   const labelStyle = (data as any)?.labelStyle || { textAlign: 'center' };
   const fontSize = (data as any)?.fontSize || 14;
   const mType = (data as any)?.markerType;
+
+  // ★ 修正：undefined の場合は空文字にして何も表示しない
+  const displayLabel = label === undefined || label === null ? '' : String(label);
 
   let rMarkerEnd = markerEnd;
   let rMarkerStart = markerStart;
@@ -102,35 +109,40 @@ const DoubleEdge = ({ id, sourceX, sourceY, targetX, targetY, sourcePosition, ta
         <BaseEdge id={id} path={edgePath} markerEnd={markerEnd} markerStart={markerStart} style={{ ...style, strokeWidth, stroke: edgeColor }} />
       )}
 
-      <EdgeLabelRenderer>
-        <div className="no-print" style={{ position: 'absolute', transform: `translate(-50%, -50%) translate(${labelX}px,${labelY}px)`, zIndex: 1000, pointerEvents: 'auto' }}>
-            <div
-                id={`edit-edge-${id}`}
-                className={isEditing ? "nodrag html-content editing-mode" : "nodrag html-content"}
-                contentEditable={isEditing}
-                suppressContentEditableWarning
-                onBlur={(e) => window.dispatchEvent(new CustomEvent('custom-edge-blur', { detail: { id, html: e.currentTarget.innerHTML } }))}
-                style={{
-                    padding: '2px 4px', fontSize: `${fontSize}px`, fontWeight: 'bold', color: '#333',
-                    textShadow: '0 0 3px var(--bg-color, #fff), 0 0 3px var(--bg-color, #fff), 0 0 3px var(--bg-color, #fff)',
-                    width: '200px', cursor: isEditing ? 'text' : 'pointer', minHeight: '1.2em', outline: 'none',
-                    ...labelStyle
-                }}
-                ref={el => {
-                    if (el && isEditing && document.activeElement !== el) {
-                        setTimeout(() => {
-                            el.focus();
-                            if (typeof window.getSelection !== 'undefined') {
-                                const range = document.createRange(); const sel = window.getSelection();
-                                range.selectNodeContents(el); range.collapse(false); sel?.removeAllRanges(); sel?.addRange(range);
-                            }
-                        }, 10);
-                    }
-                }}
-                dangerouslySetInnerHTML={{ __html: isEditing ? String(label) : renderHTMLWithMath(String(label)) }}
-            />
-        </div>
-      </EdgeLabelRenderer>
+      {/* 修正：文字が空っぽ（undefinedなど）の場合は枠すら表示しない */}
+      {displayLabel || isEditing ? (
+        <EdgeLabelRenderer>
+          <div className="no-print" style={{ position: 'absolute', transform: `translate(-50%, -50%) translate(${labelX}px,${labelY}px)`, zIndex: 1000, pointerEvents: 'auto' }}>
+              <div
+                  id={`edit-edge-${id}`}
+                  className={"nodrag html-content"}
+                  contentEditable={isEditing}
+                  suppressContentEditableWarning
+                  onMouseDown={(e) => { if (isEditing) e.stopPropagation(); }}
+                  onKeyDown={(e) => { if (isEditing) e.stopPropagation(); }}
+                  onBlur={(e) => window.dispatchEvent(new CustomEvent('custom-edge-blur', { detail: { id, html: e.currentTarget.innerHTML } }))}
+                  style={{
+                      padding: '2px 4px', fontSize: `${fontSize}px`, fontWeight: 'bold', color: '#333',
+                      textShadow: '0 0 3px var(--bg-color, #fff), 0 0 3px var(--bg-color, #fff), 0 0 3px var(--bg-color, #fff)',
+                      width: '200px', cursor: isEditing ? 'text' : 'pointer', minHeight: '1.2em', outline: 'none',
+                      ...labelStyle
+                  }}
+                  ref={el => {
+                      if (el && isEditing && document.activeElement !== el) {
+                          setTimeout(() => {
+                              el.focus();
+                              if (typeof window.getSelection !== 'undefined') {
+                                  const range = document.createRange(); const sel = window.getSelection();
+                                  range.selectNodeContents(el); range.collapse(false); sel?.removeAllRanges(); sel?.addRange(range);
+                              }
+                          }, 50);
+                      }
+                  }}
+                  dangerouslySetInnerHTML={{ __html: isEditing ? displayLabel : renderHTMLWithMath(displayLabel) }}
+              />
+          </div>
+        </EdgeLabelRenderer>
+      ) : null}
     </>
   );
 };
@@ -220,7 +232,6 @@ function FlowEditor() {
   const primaryNode = selectedNodes.length > 0 ? selectedNodes[0] : null;
   const selectedEdge = useMemo(() => edges.find((e: any) => e.selected) || null, [edges]);
 
-  // ★ここで確実に関数を定義します
   const isTableEditing = primaryNode?.data?.isTable && (selectedCells[primaryNode.id]?.length || 0) > 0;
 
   const clearSelection = useCallback(() => {
@@ -252,7 +263,6 @@ function FlowEditor() {
       setEdges(safeCloneEdges(next.edges));
   }, [future]);
 
-  // ★ 表の行・列追加関数を確実に定義します
   const addTableRowCol = (type: 'row' | 'col') => {
       takeSnapshot();
       if (!primaryNode || !primaryNode.data.isTable) return;
@@ -665,11 +675,16 @@ function FlowEditor() {
     }
   }, [takeSnapshot]);
 
+  // ★ 修正：Tabキーによるフォーカス設定を強化し、ReactFlowのキーボードイベント横取りを無効化
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       const activeEl = document.activeElement as HTMLElement;
       const isContentEditing = activeEl?.tagName === 'INPUT' || activeEl?.tagName === 'TEXTAREA' || activeEl?.isContentEditable;
       
+      if (isContentEditing && e.key !== 'Tab') {
+          return; // 編集中の文字入力は絶対に邪魔しない
+      }
+
       if (e.key === 'Tab') {
           const isNodeEditing = nodesRef.current.some(n => n.data?.isEditing || n.data?.editingCell);
           const isEdgeEditing = edgesRef.current.some(edge => edge.data?.isEditing);
@@ -894,8 +909,10 @@ function FlowEditor() {
                                                 }}
                                             >
                                                 <div 
-                                                    className={isCellEditing ? "nodrag html-content editing-mode" : "nodrag html-content"}
+                                                    className={isCellEditing ? "nodrag html-content" : "nodrag html-content"}
                                                     contentEditable={isCellEditing} suppressContentEditableWarning
+                                                    onMouseDown={(e) => { if (isCellEditing) e.stopPropagation(); }}
+                                                    onKeyDown={(e) => { if (isCellEditing) e.stopPropagation(); }}
                                                     onBlur={(e) => {
                                                         setNodes(nds => nds.map(node => node.id === n.id ? { ...node, data: { ...node.data, editingCell: null, cells: { ...node.data.cells, [cellId]: { ...node.data.cells[cellId], content: e.currentTarget.innerHTML } } } } : node));
                                                     }}
@@ -907,7 +924,7 @@ function FlowEditor() {
                                                                     const range = document.createRange(); const sel = window.getSelection();
                                                                     range.selectNodeContents(el); range.collapse(false); sel?.removeAllRanges(); sel?.addRange(range);
                                                                 }
-                                                            }, 10);
+                                                            }, 50);
                                                         }
                                                     }}
                                                     dangerouslySetInnerHTML={{ __html: isCellEditing ? cellData.content : renderHTMLWithMath(cellData.content) }} 
@@ -981,8 +998,10 @@ function FlowEditor() {
                   <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', display: 'flex', flexDirection: 'column', alignItems: n.style?.alignItems || 'flex-start', justifyContent: n.style?.justifyContent || 'flex-start', padding: '4px' }}>
                       <div 
                           id={`edit-${n.id}`}
-                          className={isEditingNode ? "nodrag html-content editing-mode" : "html-content"}
+                          className={isEditingNode ? "nodrag html-content" : "html-content"}
                           contentEditable={isEditingNode} suppressContentEditableWarning
+                          onMouseDown={(e) => { if (isEditingNode) e.stopPropagation(); }}
+                          onKeyDown={(e) => { if (isEditingNode) e.stopPropagation(); }}
                           onBlur={(e) => setNodes(nds => nds.map(node => node.id === n.id ? { ...node, data: { ...node.data, isEditing: false, content: e.currentTarget.innerHTML } } : node))}
                           style={{
                               pointerEvents: 'auto', width: '100%', height: 'auto', outline: 'none', cursor: isEditingNode ? 'text' : 'pointer',
@@ -996,7 +1015,7 @@ function FlowEditor() {
                                           const range = document.createRange(); const sel = window.getSelection();
                                           range.selectNodeContents(el); range.collapse(false); sel?.removeAllRanges(); sel?.addRange(range);
                                       }
-                                  }, 10);
+                                  }, 50);
                               }
                           }}
                           dangerouslySetInnerHTML={{ __html: isEditingNode ? n.data?.content : renderHTMLWithMath(n.data?.content) }} 
@@ -1006,8 +1025,10 @@ function FlowEditor() {
               ) : n.id !== 'center-mark' && !n.data?.isTable ? (
                 <div 
                     id={`edit-${n.id}`}
-                    className={isEditingNode ? "nodrag html-content editing-mode" : "html-content"}
+                    className={isEditingNode ? "nodrag html-content" : "html-content"}
                     contentEditable={isEditingNode} suppressContentEditableWarning
+                    onMouseDown={(e) => { if (isEditingNode) e.stopPropagation(); }}
+                    onKeyDown={(e) => { if (isEditingNode) e.stopPropagation(); }}
                     onBlur={(e) => setNodes(nds => nds.map(node => node.id === n.id ? { ...node, data: { ...node.data, isEditing: false, content: e.currentTarget.innerHTML } } : node))}
                     style={{ 
                         pointerEvents: 'auto', width: '100%', height: 'auto', outline: 'none', cursor: isEditingNode ? 'text' : 'pointer',
@@ -1021,7 +1042,7 @@ function FlowEditor() {
                                     const range = document.createRange(); const sel = window.getSelection();
                                     range.selectNodeContents(el); range.collapse(false); sel?.removeAllRanges(); sel?.addRange(range);
                                 }
-                            }, 10);
+                            }, 50);
                         }
                     }}
                     dangerouslySetInnerHTML={{ __html: isEditingNode ? n.data?.content : renderHTMLWithMath(n.data?.content) }} 
