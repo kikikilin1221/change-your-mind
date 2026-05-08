@@ -57,7 +57,7 @@ const DoubleEdge = ({ id, sourceX, sourceY, targetX, targetY, sourcePosition, ta
   if (mType === 'custom-double-arrow' || mType === 'custom-double-both') { rMarkerEnd = `url(#custom-arrow-${id})`; }
   if (mType === 'custom-double-both') { rMarkerStart = `url(#custom-arrow-start-${id})`; }
   
-  // 矢印の傘のサイズを大きくし、傘の下（尾）を広げる
+  // ★ 傘のサイズを大きくし、視認性を高める
   const customArrowSize = strokeWidth * 2 + 18; 
 
   return (
@@ -65,14 +65,14 @@ const DoubleEdge = ({ id, sourceX, sourceY, targetX, targetY, sourcePosition, ta
       {isDouble && (
         <svg style={{ position: 'absolute', width: 0, height: 0 }}>
           <defs>
-            {/* ★ 改善：傘の付け根を少し引いて見やすくし、rectで二重線をマスキングして1mm(約4px)の余白を強制確保 */}
+            {/* ★ 改善：傘の付け根を引き、polygonで二重線をマスキングして串刺しを防止。refXをずらして1mmの余白を確保 */}
             <marker id={`custom-arrow-${id}`} viewBox="0 0 24 24" refX="22" refY="12" markerWidth={customArrowSize} markerHeight={customArrowSize} markerUnits="userSpaceOnUse" orient="auto">
-              <rect x="-10" y="0" width="34" height="24" fill="var(--bg-color, #ffffff)" stroke="none" />
-              <polyline points="2,5 18,12 2,19" fill="none" stroke={edgeColor} strokeWidth={strokeWidth >= 3 ? 3 : 2} strokeLinecap="round" strokeLinejoin="round" />
+              <polygon points="4,4 20,12 4,20" fill="var(--bg-color, #f1f1f1)" stroke="none" />
+              <polyline points="6,4 20,12 6,20" fill="none" stroke={edgeColor} strokeWidth={strokeWidth >= 3 ? 3 : 2} strokeLinecap="round" strokeLinejoin="round" />
             </marker>
             <marker id={`custom-arrow-start-${id}`} viewBox="0 0 24 24" refX="2" refY="12" markerWidth={customArrowSize} markerHeight={customArrowSize} markerUnits="userSpaceOnUse" orient="auto">
-              <rect x="-10" y="0" width="34" height="24" fill="var(--bg-color, #ffffff)" stroke="none" />
-              <polyline points="22,5 6,12 22,19" fill="none" stroke={edgeColor} strokeWidth={strokeWidth >= 3 ? 3 : 2} strokeLinecap="round" strokeLinejoin="round" />
+              <polygon points="20,4 4,12 20,20" fill="var(--bg-color, #f1f1f1)" stroke="none" />
+              <polyline points="18,4 4,12 18,20" fill="none" stroke={edgeColor} strokeWidth={strokeWidth >= 3 ? 3 : 2} strokeLinecap="round" strokeLinejoin="round" />
             </marker>
           </defs>
         </svg>
@@ -276,7 +276,7 @@ function FlowEditor() {
     const h0 = Number(primaryNode.style?.height) || 100;
     const parentFontSize = primaryNode.style?.fontSize || '14px';
 
-    const currentNodes = levelData[currentLevel]?.nodes || nodes;
+    const currentNodes = nodesRef.current;
     
     // 現在のノードから派生した実体ブロックのみを数える
     const isDerivationBlock = (n: any) => n.data?.isDerivationBlock && n.data?.parentNodeId === primaryNode.id;
@@ -284,16 +284,17 @@ function FlowEditor() {
     
     const count = derivationBlocks.length;
     const gapX = 120; 
-    const gapY = h0 + 4; // 詰め詰め
+    const gapY = h0 + 10; // 詰め詰め配置
     
     // 常に右側に配置し、回数に応じて下へスタックする
     const newX = x0 + w0 + gapX;
     const newY = y0 + count * gapY; 
 
-    const newNodeId = `logical-n-${Date.now()}`;
+    const newNodeId = `logical-n-${Date.now()}-${Math.random()}`;
     const newData = { ...primaryNode.data, content: '', isEditing: true, isDerivationBlock: true, parentNodeId: primaryNode.id };
-    const newStyle = { ...primaryNode.style, width: w0, height: h0, fontSize: parentFontSize };
-    const newNodeZ = Math.max(0, ...nodesRef.current.map((n: any) => Number(n.zIndex) || 0)) + 1;
+    // ★ 新しいテキスト枠も透明に
+    const newStyle = { ...primaryNode.style, width: w0, height: h0, fontSize: parentFontSize, borderWidth: 0, borderColor: 'transparent', backgroundColor: 'transparent' };
+    const newNodeZ = Math.max(0, ...currentNodes.map((n: any) => Number(n.zIndex) || 0)) + 1;
     const newNode = { id: newNodeId, selected: false, position: { x: newX, y: newY }, data: newData, style: newStyle, zIndex: newNodeZ };
 
     let transparentNode = null;
@@ -301,16 +302,16 @@ function FlowEditor() {
 
     // 2回目以降は、真下に「透明な起点」を作成してそこから線を引く
     if (count > 0) {
-        const tNodeId = `logical-t-${Date.now()}`;
+        const tNodeId = `logical-t-${Date.now()}-${Math.random()}`;
         const tData = { ...primaryNode.data, content: '', isDerivationBlock: true, parentNodeId: primaryNode.id, isTransparentHelper: true };
-        const tStyle = { ...primaryNode.style, width: w0, height: h0, opacity: 0, pointerEvents: 'none', border: 'none', backgroundColor: 'transparent', borderWidth: 0 };
+        const tStyle = { ...primaryNode.style, width: w0, height: h0, opacity: 0, pointerEvents: 'none', border: 'none', borderWidth: 0, backgroundColor: 'transparent' };
         transparentNode = { id: tNodeId, selected: false, position: { x: x0, y: newY }, data: tData, style: tStyle, zIndex: -10 };
         sourceNodeId = tNodeId;
     }
 
     setNodes((nds: any[]) => {
         // ★ 親玉のテキストの選択状態を維持（青枠キープ）する
-        let updatedNodes = nds.map((n: any) => n.id === primaryNode.id ? { ...n, selected: true } : { ...n, selected: false });
+        let updatedNodes = nds.map((n: any) => n.id === primaryNode.id ? { ...n, selected: true } : { ...n, selected: false, data: {...n.data, isEditing: false} });
         if (transparentNode) updatedNodes.push(transparentNode);
         updatedNodes.push(newNode);
         return updatedNodes;
@@ -329,7 +330,7 @@ function FlowEditor() {
         sourceHandle: 'right-src', targetHandle: 'left-tgt', 
         ...edgeProps, zIndex: 0 
     }]);
-  }, [primaryNode, currentLevel, levelData, nodes, takeSnapshot]);
+  }, [primaryNode, takeSnapshot]);
 
 
   useEffect(() => {
@@ -664,17 +665,17 @@ function FlowEditor() {
     takeSnapshot(); const id = `node-${Date.now()}`; const selNodes = nodesRef.current.filter(n => n.selected); const parent = selNodes.length === 1 ? selNodes[0] : null;
 
     let data: any = { content: '項目', previewVisible: false, previewStyle: { opacity: 0.7, offsetX: 0, offsetY: -150, width: 180, height: 120 }, textOffsetX: 0, textOffsetY: 0, isEditing: false, tableTitle: '' };
-    // ★ 完璧なデフォルト設定：黒色枠線（2px）を標準にする
-    let style: any = { backgroundColor: '#ffffff', color: '#000000', borderRadius: '12px', fontSize: '14px', fontFamily: 'sans-serif', width: 200, height: 100, hAlign: 'left', vAlign: 'top', writingMode: 'horizontal-tb', padding: '4px', borderColor: '#000000', borderWidth: 2 };
+    // ★ 完璧なデフォルト設定：0.5px黒枠
+    let style: any = { backgroundColor: '#ffffff', color: '#000000', borderRadius: '12px', fontSize: '14px', fontFamily: 'sans-serif', width: 200, height: 100, hAlign: 'left', vAlign: 'top', writingMode: 'horizontal-tb', padding: '4px', borderColor: '#000000', borderWidth: 0.5 };
     
     if (type === 'image') { fileInputRef.current?.click(); return; }
-    if (type === 'shape') { data = { content: '', isShape: true, shapeType: 'rect', keepRatio: false, textOffsetX: 0, textOffsetY: 0, isEditing: false }; style = { ...style, backgroundColor: '#eee', borderRadius: '4px', borderColor: '#000000', borderWidth: 2 }; }
+    if (type === 'shape') { data = { content: '', isShape: true, shapeType: 'rect', keepRatio: false, textOffsetX: 0, textOffsetY: 0, isEditing: false }; style = { ...style, backgroundColor: '#eee', borderRadius: '4px', borderColor: '#000000', borderWidth: 0.5 }; }
     if (type === 'table') {
       data = { 
           isTable: true, rows: 2, cols: 2, textOffsetX: 0, textOffsetY: 0, editingCell: null, tableTitle: '',
           cells: { "0-0": { content: "セル", style: { border: '1px solid #ccc', hAlign: 'left', vAlign: 'top', writingMode: 'horizontal-tb' } }, "0-1": { content: "セル", style: { border: '1px solid #ccc', hAlign: 'left', vAlign: 'top', writingMode: 'horizontal-tb' } }, "1-0": { content: "セル", style: { border: '1px solid #333', hAlign: 'left', vAlign: 'top', writingMode: 'horizontal-tb' } }, "1-1": { content: "セル", style: { border: '1px solid #333', hAlign: 'left', vAlign: 'top', writingMode: 'horizontal-tb' } } } 
       };
-      style = { ...style, width: 300, height: 150, padding: 0, backgroundColor: '#fff', display: 'block', borderRadius: '8px', borderColor: '#000000', borderWidth: 2 };
+      style = { ...style, width: 300, height: 150, padding: 0, backgroundColor: '#fff', display: 'block', borderRadius: '8px', borderColor: '#000000', borderWidth: 0 };
     }
 
     if (parent && (type === 'text' || type === 'table')) {
@@ -823,7 +824,6 @@ function FlowEditor() {
       let previewElement: React.ReactNode = null;
       const textOffX = Number(n.data?.textOffsetX || 0); const textOffY = Number(n.data?.textOffsetY || 0);
 
-      // ★ 縦書き/横書きとアラインメントの完璧なマッピング
       const rawHAlign = n.style?.hAlign || 'left'; const rawVAlign = n.style?.vAlign || 'top'; const wMode = n.style?.writingMode || 'horizontal-tb'; const isVertical = wMode === 'vertical-rl';
       const jc = rawVAlign === 'top' ? 'flex-start' : rawVAlign === 'bottom' ? 'flex-end' : 'center';
       const ai = isVertical ? (rawHAlign === 'right' ? 'flex-start' : rawHAlign === 'left' ? 'flex-end' : 'center') : (rawHAlign === 'left' ? 'flex-start' : rawHAlign === 'right' ? 'flex-end' : 'center');
@@ -974,13 +974,12 @@ function FlowEditor() {
       const baseW = n.data?.cropBaseW ?? (Number(n.style?.width) || 300); const baseH = n.data?.cropBaseH ?? (Number(n.style?.height) || 200);
       const offX = n.data?.cropOffsetX || 0; const offY = n.data?.cropOffsetY || 0;
       
-      const isTextNode = !n.data?.isShape && !n.data?.isImage && !n.data?.isTable;
       const bColor = n.style?.borderColor || '#000000'; 
-      // ★ 枠線の太さをプロパティから取得（デフォルト：テキスト・図形は2px、画像は0px）
-      const bWidth = n.style?.borderWidth !== undefined ? Number(n.style.borderWidth) : (n.data?.isImage || n.data?.isTable ? 0 : 2);
+      const bWidth = n.style?.borderWidth !== undefined ? Number(n.style.borderWidth) : (n.data?.isImage || n.data?.isTable ? 0 : 0.5);
       const resolvedBorder = n.data?.isTransparentHelper ? 'none' : (bWidth > 0 ? `${bWidth}px solid ${bColor}` : 'none');
 
-      const { hAlign: _nh, vAlign: _nv, writingMode: _nw, borderWidth: _bw, ...safeNodeStyle } = n.style || {};
+      // 余計なプロパティがReact Flow標準のstyleに混ざらないように分離
+      const { hAlign: _nh, vAlign: _nv, writingMode: _nw, borderWidth: _bw, border: _border, ...safeNodeStyle } = n.style || {};
 
       const isTableAndCellEditing = n.data?.isTable && (selectedCells[n.id]?.length || 0) > 0;
 
@@ -1208,15 +1207,16 @@ function FlowEditor() {
                   </div>
               </div>
 
-              {/* ★ 論理ブロック追加ボタン */}
+              {/* ★ 論理ブロック（証明展開）追加ボタン */}
               {!primaryNode.data?.isShape && !primaryNode.data?.isImage && !primaryNode.data?.isTable && (
                 <div style={{ padding: '10px', background: '#f8f9fa', borderRadius: '8px', marginBottom: '15px', border: '1px solid #ddd' }}>
                   <label style={{fontSize: '11px', fontWeight: 'bold', color: '#1d4ed8'}}>論理ブロック追加（証明展開）</label>
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '5px', marginTop: '5px' }}>
-                    <button onClick={() => addLogicalDerivationBlock('double_arrow')} style={{ padding: '6px', fontSize: '12px', cursor: 'pointer', borderRadius: '4px', border: '1px solid #ccc', background: '#fff' }}>⇔</button>
-                    <button onClick={() => addLogicalDerivationBlock('single_arrow')} style={{ padding: '6px', fontSize: '12px', cursor: 'pointer', borderRadius: '4px', border: '1px solid #ccc', background: '#fff' }}>⇨</button>
-                    <button onClick={() => addLogicalDerivationBlock('and')} style={{ padding: '6px', fontSize: '12px', cursor: 'pointer', borderRadius: '4px', border: '1px solid #ccc', background: '#fff' }}>∧</button>
-                    <button onClick={() => addLogicalDerivationBlock('or')} style={{ padding: '6px', fontSize: '12px', cursor: 'pointer', borderRadius: '4px', border: '1px solid #ccc', background: '#fff' }}>∨</button>
+                  <p style={{fontSize: '9px', color: '#666', marginTop: '2px', marginBottom: '6px'}}>※連続で押すと真下に自動スタックされます</p>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '5px' }}>
+                    <button onClick={() => addLogicalDerivationBlock('double_arrow')} style={{ padding: '6px', fontSize: '14px', cursor: 'pointer', borderRadius: '4px', border: '1px solid #ccc', background: '#fff' }}>⇔</button>
+                    <button onClick={() => addLogicalDerivationBlock('single_arrow')} style={{ padding: '6px', fontSize: '14px', cursor: 'pointer', borderRadius: '4px', border: '1px solid #ccc', background: '#fff' }}>⇨</button>
+                    <button onClick={() => addLogicalDerivationBlock('and')} style={{ padding: '6px', fontSize: '14px', cursor: 'pointer', borderRadius: '4px', border: '1px solid #ccc', background: '#fff' }}>∧</button>
+                    <button onClick={() => addLogicalDerivationBlock('or')} style={{ padding: '6px', fontSize: '14px', cursor: 'pointer', borderRadius: '4px', border: '1px solid #ccc', background: '#fff' }}>∨</button>
                   </div>
                 </div>
               )}
@@ -1253,8 +1253,8 @@ function FlowEditor() {
               {/* ★ 枠線の太さ調整スライダーを追加 */}
               <label style={{fontSize:'10px', fontWeight: 'bold'}}>枠線の太さ (px)</label>
               <div style={{display:'flex', alignItems:'center', gap:'8px', marginBottom: '10px'}}>
-                <input type="range" min="0" max="10" step="1" value={Number(primaryNode.style?.borderWidth ?? (primaryNode.data?.isImage || primaryNode.data?.isTable ? 0 : 2))} onChange={(e) => { takeSnapshot(); updateSelectedNodes({}, { borderWidth: Number(e.target.value) })}} style={{flex:1}} />
-                <span style={{fontSize: '12px', fontWeight: 'bold', width: '24px', textAlign: 'right'}}>{Number(primaryNode.style?.borderWidth ?? (primaryNode.data?.isImage || primaryNode.data?.isTable ? 0 : 2))}</span>
+                <input type="range" min="0" max="10" step="0.5" value={Number(primaryNode.style?.borderWidth ?? (primaryNode.data?.isImage || primaryNode.data?.isTable ? 0 : 0.5))} onChange={(e) => { takeSnapshot(); updateSelectedNodes({}, { borderWidth: Number(e.target.value) })}} style={{flex:1}} />
+                <span style={{fontSize: '12px', fontWeight: 'bold', width: '24px', textAlign: 'right'}}>{Number(primaryNode.style?.borderWidth ?? (primaryNode.data?.isImage || primaryNode.data?.isTable ? 0 : 0.5))}</span>
               </div>
 
               <label style={{fontSize:'10px', fontWeight: 'bold'}}>枠線の色</label>
