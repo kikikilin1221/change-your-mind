@@ -13,7 +13,6 @@ const GLOBAL_CSS = `
   .html-content strike { text-decoration: line-through double !important; }
   .html-content * { line-height: 1.2 !important; vertical-align: baseline !important; }
   
-  /* ★ 修正：文字をマウスでドラッグ選択できるように強制設定 */
   .html-content {
       user-select: text !important;
       -webkit-user-select: text !important;
@@ -75,8 +74,7 @@ const DoubleEdge = ({ id, sourceX, sourceY, targetX, targetY, sourcePosition, ta
   const fontSize = (data as any)?.fontSize || 14;
   const mType = (data as any)?.markerType;
 
-  // ★ 修正：undefined の場合は空文字にして何も表示しない
-  const displayLabel = label === undefined || label === null ? '' : String(label);
+  const displayLabel = label === undefined || label === null || label === 'undefined' ? '' : String(label);
 
   let rMarkerEnd = markerEnd;
   let rMarkerStart = markerStart;
@@ -109,7 +107,6 @@ const DoubleEdge = ({ id, sourceX, sourceY, targetX, targetY, sourcePosition, ta
         <BaseEdge id={id} path={edgePath} markerEnd={markerEnd} markerStart={markerStart} style={{ ...style, strokeWidth, stroke: edgeColor }} />
       )}
 
-      {/* 修正：文字が空っぽ（undefinedなど）の場合は枠すら表示しない */}
       {displayLabel || isEditing ? (
         <EdgeLabelRenderer>
           <div className="no-print" style={{ position: 'absolute', transform: `translate(-50%, -50%) translate(${labelX}px,${labelY}px)`, zIndex: 1000, pointerEvents: 'auto' }}>
@@ -120,11 +117,16 @@ const DoubleEdge = ({ id, sourceX, sourceY, targetX, targetY, sourcePosition, ta
                   suppressContentEditableWarning
                   onMouseDown={(e) => { if (isEditing) e.stopPropagation(); }}
                   onKeyDown={(e) => { if (isEditing) e.stopPropagation(); }}
-                  onBlur={(e) => window.dispatchEvent(new CustomEvent('custom-edge-blur', { detail: { id, html: e.currentTarget.innerHTML } }))}
+                  onInput={(e) => { (data as any)._tempContent = e.currentTarget.innerHTML; }}
+                  onBlur={(e) => {
+                      const finalHtml = (data as any)._tempContent ?? e.currentTarget.innerHTML;
+                      window.dispatchEvent(new CustomEvent('custom-edge-blur', { detail: { id, html: finalHtml } }));
+                  }}
                   style={{
                       padding: '2px 4px', fontSize: `${fontSize}px`, fontWeight: 'bold', color: '#333',
                       textShadow: '0 0 3px var(--bg-color, #fff), 0 0 3px var(--bg-color, #fff), 0 0 3px var(--bg-color, #fff)',
                       width: '200px', cursor: isEditing ? 'text' : 'pointer', minHeight: '1.2em', outline: 'none',
+                      writingMode: (style as any)?.writingMode || 'horizontal-tb',
                       ...labelStyle
                   }}
                   ref={el => {
@@ -135,10 +137,10 @@ const DoubleEdge = ({ id, sourceX, sourceY, targetX, targetY, sourcePosition, ta
                                   const range = document.createRange(); const sel = window.getSelection();
                                   range.selectNodeContents(el); range.collapse(false); sel?.removeAllRanges(); sel?.addRange(range);
                               }
-                          }, 50);
+                          }, 10);
                       }
                   }}
-                  dangerouslySetInnerHTML={{ __html: isEditing ? displayLabel : renderHTMLWithMath(displayLabel) }}
+                  dangerouslySetInnerHTML={{ __html: isEditing ? ((data as any)._tempContent ?? displayLabel) : renderHTMLWithMath(displayLabel) }}
               />
           </div>
         </EdgeLabelRenderer>
@@ -235,8 +237,8 @@ function FlowEditor() {
   const isTableEditing = primaryNode?.data?.isTable && (selectedCells[primaryNode.id]?.length || 0) > 0;
 
   const clearSelection = useCallback(() => {
-    setNodes((nds: any[]) => nds.map((n: any) => ({...n, selected: false, data: { ...n.data, isEditing: false, editingCell: null }})));
-    setEdges((eds: any[]) => eds.map((e: any) => ({...e, selected: false, data: { ...e.data, isEditing: false }})));
+    setNodes((nds: any[]) => nds.map((n: any) => ({...n, selected: false, data: { ...n.data, isEditing: false, editingCell: null, _tempContent: undefined }})));
+    setEdges((eds: any[]) => eds.map((e: any) => ({...e, selected: false, data: { ...e.data, isEditing: false, _tempContent: undefined }})));
     setSelectedCells({});
   }, []);
 
@@ -510,7 +512,7 @@ function FlowEditor() {
       });
   };
 
-  const handleLayout = (hAlign?: string, vAlign?: string) => {
+  const handleLayout = (hAlign?: string, vAlign?: string, wMode?: string) => {
       takeSnapshot();
       if (primaryNode?.data?.isTable && (selectedCells[primaryNode.id]?.length || 0) > 0) {
           const activeCells = selectedCells[primaryNode.id];
@@ -522,6 +524,7 @@ function FlowEditor() {
                   let newStyle = { ...cell.style };
                   if (hAlign) newStyle.textAlign = hAlign;
                   if (vAlign) newStyle.verticalAlign = vAlign;
+                  if (wMode) newStyle.writingMode = wMode;
                   newCells[cId] = { ...cell, style: newStyle };
               });
               return { ...n, data: { ...n.data, cells: newCells } };
@@ -534,6 +537,9 @@ function FlowEditor() {
           }
           if (vAlign) {
               styleUpdate.justifyContent = vAlign === 'top' ? 'flex-start' : vAlign === 'bottom' ? 'flex-end' : 'center';
+          }
+          if (wMode) {
+              styleUpdate.writingMode = wMode;
           }
           updateSelectedNodes({}, styleUpdate);
       }
@@ -623,8 +629,9 @@ function FlowEditor() {
     const selNodes = nodesRef.current.filter(n => n.selected);
     const parent = selNodes.length === 1 ? selNodes[0] : null;
 
-    let data: any = { content: '項目', previewVisible: false, previewStyle: { opacity: 0.7, offsetX: 0, offsetY: -150, width: 180, height: 120 }, textOffsetX: 0, textOffsetY: 0, isEditing: false };
-    let style: any = { backgroundColor: '#ffffff', color: '#000000', borderRadius: '12px', fontSize: '14px', fontFamily: 'sans-serif', width: 200, height: 100, alignItems: 'flex-start', justifyContent: 'flex-start', textAlign: 'left', padding: '4px', borderColor: 'transparent' };
+    let data: any = { content: '項目', previewVisible: false, previewStyle: { opacity: 0.7, offsetX: 0, offsetY: -150, width: 180, height: 120 }, textOffsetX: 0, textOffsetY: 0, isEditing: false, tableTitle: '' };
+    // ★ 完璧なデフォルト設定：ゴシック、黒色、14px、左上ギリギリ
+    let style: any = { backgroundColor: '#ffffff', color: '#000000', borderRadius: '12px', fontSize: '14px', fontFamily: 'sans-serif', width: 200, height: 100, alignItems: 'flex-start', justifyContent: 'flex-start', textAlign: 'left', padding: '4px', borderColor: 'transparent', writingMode: 'horizontal-tb' };
     
     if (type === 'image') { fileInputRef.current?.click(); return; }
     if (type === 'shape') {
@@ -633,10 +640,10 @@ function FlowEditor() {
     }
     if (type === 'table') {
       data = { 
-          isTable: true, rows: 2, cols: 2, textOffsetX: 0, textOffsetY: 0, editingCell: null,
+          isTable: true, rows: 2, cols: 2, textOffsetX: 0, textOffsetY: 0, editingCell: null, tableTitle: '',
           cells: {
-              "0-0": { content: "セル", style: { border: '1px solid #ccc' } }, "0-1": { content: "セル", style: { border: '1px solid #ccc' } },
-              "1-0": { content: "セル", style: { border: '1px solid #333' } }, "1-1": { content: "セル", style: { border: '1px solid #333' } }
+              "0-0": { content: "セル", style: { border: '1px solid #ccc', verticalAlign: 'top', textAlign: 'left' } }, "0-1": { content: "セル", style: { border: '1px solid #ccc', verticalAlign: 'top', textAlign: 'left' } },
+              "1-0": { content: "セル", style: { border: '1px solid #333', verticalAlign: 'top', textAlign: 'left' } }, "1-1": { content: "セル", style: { border: '1px solid #333', verticalAlign: 'top', textAlign: 'left' } }
           } 
       };
       style = { ...style, width: 300, height: 150, padding: 0, backgroundColor: '#fff', display: 'block', borderRadius: '8px', border: '2px solid #ccc', borderColor: '#ccc' };
@@ -645,7 +652,8 @@ function FlowEditor() {
     if (parent && (type === 'text' || type === 'table')) {
         const sourceHandle = 'bottom-src'; const targetHandle = 'top-tgt';
         const edgeId = `e-${parent.id}-${id}`;
-        setEdges((eds: any[]) => [...eds.map((e: any) => ({...e, selected:false})), { id: edgeId, source: parent.id, target: id, sourceHandle, targetHandle, type: 'default', style: { strokeWidth: 1 }, zIndex: 0 }]);
+        // ★ 線の初期ラベルも空（undefinedを出さない）
+        setEdges((eds: any[]) => [...eds.map((e: any) => ({...e, selected:false})), { id: edgeId, source: parent.id, target: id, sourceHandle, targetHandle, type: 'default', label: '', style: { strokeWidth: 1 }, zIndex: 0 }]);
         setNodes((nds: any[]) => {
             const maxZ = Math.max(0, ...nds.map((n: any) => Number(n.zIndex) || 0));
             const parentW = Number(parent.style?.width || 200); const parentH = Number(parent.style?.height || 100);
@@ -734,7 +742,7 @@ function FlowEditor() {
   useEffect(() => {
       const handleEdgeBlur = (e: any) => {
           const { id, html } = e.detail;
-          setEdges(eds => eds.map(edge => edge.id === id ? { ...edge, label: html, data: { ...edge.data, isEditing: false } } : edge));
+          setEdges(eds => eds.map(edge => edge.id === id ? { ...edge, label: html, data: { ...edge.data, isEditing: false, _tempContent: undefined } } : edge));
       };
       window.addEventListener('custom-edge-blur', handleEdgeBlur);
       return () => window.removeEventListener('custom-edge-blur', handleEdgeBlur);
@@ -772,7 +780,7 @@ function FlowEditor() {
           return [...nds.map((n: any) => ({...n, selected: false})), { 
             id: `img-${Date.now()}`, position: { x: 50, y: 50 }, zIndex: maxZ + 1, selected: true,
             data: { isImage: true, imageUrl: ev.target?.result, imgPosX: 0, imgPosY: 0, imgZoom: 1, isCropping: false, cropBaseW: 300, cropBaseH: 200, cropOffsetX: 0, cropOffsetY: 0, textOffsetX: 0, textOffsetY: 0 }, 
-            style: { width: 300, height: 200, background: '#fff', padding: 0, border: '1px solid #ccc', borderColor: '#ccc' } 
+            style: { width: 300, height: 200, background: '#fff', padding: 0, border: '1px solid #ccc', borderColor: '#ccc', writingMode: 'horizontal-tb' } 
           }];
         });
       };
@@ -869,7 +877,7 @@ function FlowEditor() {
                 <div style={{ transform: 'scale(0.15)', transformOrigin: 'top left', width: '1200px', height: '800px', position: 'relative', pointerEvents: 'none' }}>
                   {levelData[n.id].nodes.map((cn: any) => cn.id !== 'center-mark' ? (
                     <div key={cn.id} style={{ position: 'absolute', left: cn.position.x, top: cn.position.y, width: cn.style?.width || 200, height: cn.style?.height || 100, backgroundColor: cn.style?.backgroundColor || '#fff', border: cn.style?.border || '4px solid #333', borderRadius: cn.style?.borderRadius || '12px', display: 'flex', flexDirection: 'column', alignItems: cn.style?.alignItems || 'flex-start', justifyContent: cn.style?.justifyContent || 'flex-start', fontSize: '32px', color: cn.style?.color || '#000', overflow: 'hidden' }}>
-                      {cn.data?.isImage ? <img src={cn.data.imageUrl as string} style={{width:'100%', height:'100%', objectFit:'cover'}} alt="mini" /> : cn.data?.isShape ? null : <div className="html-content" style={{padding:'15px', width:'100%', fontWeight: cn.style?.fontWeight || 'normal', textAlign: cn.style?.textAlign || 'center', color: cn.style?.color || '#000', fontFamily: cn.style?.fontFamily || 'sans-serif', fontSize: cn.style?.fontSize || '14px', textDecoration: cn.style?.textDecoration || 'none'}} dangerouslySetInnerHTML={{ __html: renderHTMLWithMath(cn.data?.content) }} />}
+                      {cn.data?.isImage ? <img src={cn.data.imageUrl as string} style={{width:'100%', height:'100%', objectFit:'cover'}} alt="mini" /> : cn.data?.isShape ? null : <div className="html-content" style={{padding:'15px', width:'100%', fontWeight: cn.style?.fontWeight || 'normal', textAlign: cn.style?.textAlign || 'center', color: cn.style?.color || '#000', fontFamily: cn.style?.fontFamily || 'sans-serif', fontSize: cn.style?.fontSize || '14px', textDecoration: cn.style?.textDecoration || 'none', writingMode: cn.style?.writingMode || 'horizontal-tb'}} dangerouslySetInnerHTML={{ __html: renderHTMLWithMath(cn.data?.content) }} />}
                     </div>
                   ) : null)}
                 </div>
@@ -881,6 +889,16 @@ function FlowEditor() {
         previewElement = (
             <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column' }}>
                 <div className="custom-drag-handle" style={{ height: '14px', background: '#e2e8f0', cursor: 'grab', borderTopLeftRadius: '6px', borderTopRightRadius: '6px' }}></div>
+                {/* ★ 追加：表のタイトル入力欄（印刷時は点線が消える） */}
+                <div className="nodrag" style={{ padding: '4px 10px 0', backgroundColor: '#fff' }}>
+                    <input
+                        type="text"
+                        placeholder="表のタイトル (任意)"
+                        value={n.data?.tableTitle || ''}
+                        onChange={(e) => setNodes(nds => nds.map(node => node.id === n.id ? { ...node, data: { ...node.data, tableTitle: e.target.value } } : node))}
+                        style={{ width: '100%', border: 'none', borderBottom: isExecutingPrint ? 'none' : '1px dashed #ccc', background: 'transparent', textAlign: 'center', fontSize: '12px', fontWeight: 'bold', outline: 'none', color: '#333' }}
+                    />
+                </div>
                 <div className="nodrag" style={{ flex: 1, overflow: 'auto', padding: '10px' }}>
                     <table style={{ width: '100%', height: '100%', borderCollapse: 'collapse', tableLayout: 'fixed' }}>
                         <tbody>
@@ -888,7 +906,7 @@ function FlowEditor() {
                                 <tr key={r}>
                                     {Array.from({length: n.data.cols || 2}).map((_, c) => {
                                         const cellId = `${r}-${c}`;
-                                        const cellData = n.data.cells?.[cellId] || { content: '', style: { border: '1px solid #ccc' } };
+                                        const cellData = n.data.cells?.[cellId] || { content: '', style: { border: '1px solid #ccc', verticalAlign: 'top', textAlign: 'left', writingMode: 'horizontal-tb' } };
                                         const isSel = selectedCells[n.id]?.includes(cellId);
                                         const isCellEditing = editingCellId === cellId;
                                         return (
@@ -909,13 +927,16 @@ function FlowEditor() {
                                                 }}
                                             >
                                                 <div 
-                                                    className={isCellEditing ? "nodrag html-content" : "nodrag html-content"}
+                                                    className="nodrag html-content"
                                                     contentEditable={isCellEditing} suppressContentEditableWarning
                                                     onMouseDown={(e) => { if (isCellEditing) e.stopPropagation(); }}
                                                     onKeyDown={(e) => { if (isCellEditing) e.stopPropagation(); }}
+                                                    onInput={(e) => { cellData._tempContent = e.currentTarget.innerHTML; }}
                                                     onBlur={(e) => {
-                                                        setNodes(nds => nds.map(node => node.id === n.id ? { ...node, data: { ...node.data, editingCell: null, cells: { ...node.data.cells, [cellId]: { ...node.data.cells[cellId], content: e.currentTarget.innerHTML } } } } : node));
+                                                        const finalHtml = cellData._tempContent ?? e.currentTarget.innerHTML;
+                                                        setNodes(nds => nds.map(node => node.id === n.id ? { ...node, data: { ...node.data, editingCell: null, cells: { ...node.data.cells, [cellId]: { ...node.data.cells[cellId], content: finalHtml, _tempContent: undefined } } } } : node));
                                                     }}
+                                                    style={{ outline: 'none', width: '100%', height: '100%' }}
                                                     ref={el => {
                                                         if (el && isCellEditing && document.activeElement !== el) {
                                                             setTimeout(() => {
@@ -924,10 +945,10 @@ function FlowEditor() {
                                                                     const range = document.createRange(); const sel = window.getSelection();
                                                                     range.selectNodeContents(el); range.collapse(false); sel?.removeAllRanges(); sel?.addRange(range);
                                                                 }
-                                                            }, 50);
+                                                            }, 10);
                                                         }
                                                     }}
-                                                    dangerouslySetInnerHTML={{ __html: isCellEditing ? cellData.content : renderHTMLWithMath(cellData.content) }} 
+                                                    dangerouslySetInnerHTML={{ __html: isCellEditing ? (cellData._tempContent ?? cellData.content) : renderHTMLWithMath(cellData.content) }} 
                                                 />
                                             </td>
                                         );
@@ -998,14 +1019,18 @@ function FlowEditor() {
                   <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', display: 'flex', flexDirection: 'column', alignItems: n.style?.alignItems || 'flex-start', justifyContent: n.style?.justifyContent || 'flex-start', padding: '4px' }}>
                       <div 
                           id={`edit-${n.id}`}
-                          className={isEditingNode ? "nodrag html-content" : "html-content"}
+                          className={"html-content"}
                           contentEditable={isEditingNode} suppressContentEditableWarning
                           onMouseDown={(e) => { if (isEditingNode) e.stopPropagation(); }}
                           onKeyDown={(e) => { if (isEditingNode) e.stopPropagation(); }}
-                          onBlur={(e) => setNodes(nds => nds.map(node => node.id === n.id ? { ...node, data: { ...node.data, isEditing: false, content: e.currentTarget.innerHTML } } : node))}
+                          onInput={(e) => { n.data._tempContent = e.currentTarget.innerHTML; }}
+                          onBlur={(e) => {
+                              const finalHtml = n.data._tempContent ?? e.currentTarget.innerHTML;
+                              setNodes(nds => nds.map(node => node.id === n.id ? { ...node, data: { ...node.data, isEditing: false, content: finalHtml, _tempContent: undefined } } : node));
+                          }}
                           style={{
                               pointerEvents: 'auto', width: '100%', height: 'auto', outline: 'none', cursor: isEditingNode ? 'text' : 'pointer',
-                              color: n.style?.color || '#000', fontFamily: n.style?.fontFamily || 'sans-serif', fontSize: n.style?.fontSize || '14px', fontWeight: n.style?.fontWeight || 'normal', textDecoration: n.style?.textDecoration || 'none', whiteSpace: 'pre-wrap', lineHeight: '1.2', textAlign: n.style?.textAlign || 'left', transform: `translate(${textOffX}px, ${textOffY}px)`
+                              color: n.style?.color || '#000', fontFamily: n.style?.fontFamily || 'sans-serif', fontSize: n.style?.fontSize || '14px', fontWeight: n.style?.fontWeight || 'normal', textDecoration: n.style?.textDecoration || 'none', whiteSpace: 'pre-wrap', lineHeight: '1.2', textAlign: n.style?.textAlign || 'left', transform: `translate(${textOffX}px, ${textOffY}px)`, writingMode: n.style?.writingMode || 'horizontal-tb'
                           }}
                           ref={el => {
                               if (el && isEditingNode && document.activeElement !== el) {
@@ -1015,24 +1040,28 @@ function FlowEditor() {
                                           const range = document.createRange(); const sel = window.getSelection();
                                           range.selectNodeContents(el); range.collapse(false); sel?.removeAllRanges(); sel?.addRange(range);
                                       }
-                                  }, 50);
+                                  }, 10);
                               }
                           }}
-                          dangerouslySetInnerHTML={{ __html: isEditingNode ? n.data?.content : renderHTMLWithMath(n.data?.content) }} 
+                          dangerouslySetInnerHTML={{ __html: isEditingNode ? (n.data._tempContent ?? n.data?.content) : renderHTMLWithMath(n.data?.content) }} 
                       />
                   </div>
                 </div>
               ) : n.id !== 'center-mark' && !n.data?.isTable ? (
                 <div 
                     id={`edit-${n.id}`}
-                    className={isEditingNode ? "nodrag html-content" : "html-content"}
+                    className={"nodrag html-content"}
                     contentEditable={isEditingNode} suppressContentEditableWarning
                     onMouseDown={(e) => { if (isEditingNode) e.stopPropagation(); }}
                     onKeyDown={(e) => { if (isEditingNode) e.stopPropagation(); }}
-                    onBlur={(e) => setNodes(nds => nds.map(node => node.id === n.id ? { ...node, data: { ...node.data, isEditing: false, content: e.currentTarget.innerHTML } } : node))}
+                    onInput={(e) => { n.data._tempContent = e.currentTarget.innerHTML; }}
+                    onBlur={(e) => {
+                        const finalHtml = n.data._tempContent ?? e.currentTarget.innerHTML;
+                        setNodes(nds => nds.map(node => node.id === n.id ? { ...node, data: { ...node.data, isEditing: false, content: finalHtml, _tempContent: undefined } } : node));
+                    }}
                     style={{ 
                         pointerEvents: 'auto', width: '100%', height: 'auto', outline: 'none', cursor: isEditingNode ? 'text' : 'pointer',
-                        color: n.style?.color || '#000', fontFamily: n.style?.fontFamily || 'sans-serif', fontSize: n.style?.fontSize || '14px', fontWeight: n.style?.fontWeight || 'normal', textDecoration: n.style?.textDecoration || 'none', whiteSpace: 'pre-wrap', lineHeight: '1.2', textAlign: n.style?.textAlign || 'left', transform: `translate(${textOffX}px, ${textOffY}px)` 
+                        color: n.style?.color || '#000', fontFamily: n.style?.fontFamily || 'sans-serif', fontSize: n.style?.fontSize || '14px', fontWeight: n.style?.fontWeight || 'normal', textDecoration: n.style?.textDecoration || 'none', whiteSpace: 'pre-wrap', lineHeight: '1.2', textAlign: n.style?.textAlign || 'left', transform: `translate(${textOffX}px, ${textOffY}px)`, writingMode: n.style?.writingMode || 'horizontal-tb'
                     }}
                     ref={el => {
                         if (el && isEditingNode && document.activeElement !== el) {
@@ -1042,10 +1071,10 @@ function FlowEditor() {
                                     const range = document.createRange(); const sel = window.getSelection();
                                     range.selectNodeContents(el); range.collapse(false); sel?.removeAllRanges(); sel?.addRange(range);
                                 }
-                            }, 50);
+                            }, 10);
                         }
                     }}
-                    dangerouslySetInnerHTML={{ __html: isEditingNode ? n.data?.content : renderHTMLWithMath(n.data?.content) }} 
+                    dangerouslySetInnerHTML={{ __html: isEditingNode ? (n.data._tempContent ?? n.data?.content) : renderHTMLWithMath(n.data?.content) }} 
                 />
               ) : null}
 
@@ -1168,7 +1197,7 @@ function FlowEditor() {
              nodes={flowNodes} edges={edges} edgeTypes={edgeTypes} elevateNodesOnSelect={false} multiSelectionKeyCode={['Shift', 'Meta', 'Control']}
              onNodesChange={u => setNodes((nds: any[]) => applyNodeChanges(u, nds))} 
              onEdgesChange={u => setEdges((eds: any[]) => applyEdgeChanges(u, eds))} 
-             onConnect={p => { takeSnapshot(); setEdges((eds: any[]) => addEdge({...p, type:'default', style: {strokeWidth: 1}}, eds)); }} 
+             onConnect={p => { takeSnapshot(); setEdges((eds: any[]) => addEdge({...p, type:'default', label: '', style: {strokeWidth: 1}}, eds)); }} 
              onNodeDragStart={() => takeSnapshot()}
              onNodeDoubleClick={(_, n) => {
                 enterLevel(n.id, extractFirstLineText(n.data?.content));
@@ -1291,10 +1320,14 @@ function FlowEditor() {
                 <button onClick={() => handleLayout('center', undefined)} style={{flex:1, cursor:'pointer', border:'1px solid #ccc', padding: '4px', fontSize:'11px', borderRadius: '4px'}}>中央</button>
                 <button onClick={() => handleLayout('right', undefined)} style={{flex:1, cursor:'pointer', border:'1px solid #ccc', padding: '4px', fontSize:'11px', borderRadius: '4px'}}>右</button>
               </div>
-              <div style={{ display:'flex', gap:'5px', marginBottom:'15px' }}>
+              <div style={{ display:'flex', gap:'5px', marginBottom:'5px' }}>
                 <button onClick={() => handleLayout(undefined, 'top')} style={{flex:1, cursor:'pointer', border:'1px solid #ccc', padding: '4px', fontSize:'11px', borderRadius: '4px'}}>上</button>
                 <button onClick={() => handleLayout(undefined, 'center')} style={{flex:1, cursor:'pointer', border:'1px solid #ccc', padding: '4px', fontSize:'11px', borderRadius: '4px'}}>中</button>
                 <button onClick={() => handleLayout(undefined, 'bottom')} style={{flex:1, cursor:'pointer', border:'1px solid #ccc', padding: '4px', fontSize:'11px', borderRadius: '4px'}}>下</button>
+              </div>
+              <div style={{ display:'flex', gap:'5px', marginBottom:'15px' }}>
+                <button onClick={() => handleLayout(undefined, undefined, 'horizontal-tb')} style={{flex:1, cursor:'pointer', border:'1px solid #ccc', padding: '4px', fontSize:'11px', borderRadius: '4px', fontWeight: 'bold'}}>📝 横書き</button>
+                <button onClick={() => handleLayout(undefined, undefined, 'vertical-rl')} style={{flex:1, cursor:'pointer', border:'1px solid #ccc', padding: '4px', fontSize:'11px', borderRadius: '4px', fontWeight: 'bold'}}>📜 縦書き</button>
               </div>
 
               {!primaryNode.data?.isTable && (
