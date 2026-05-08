@@ -2,7 +2,7 @@
 import React, { useState, useCallback, useMemo, useRef, useEffect } from 'react';
 import { 
   ReactFlow, Background, Controls, applyNodeChanges, applyEdgeChanges, addEdge,
-  NodeResizer, ReactFlowProvider, useStore, MarkerType, getBezierPath, EdgeProps, BaseEdge, EdgeLabelRenderer, useReactFlow, Position, Handle, ConnectionMode
+  NodeResizer, ReactFlowProvider, useStore, MarkerType, getBezierPath, EdgeProps, BaseEdge, EdgeLabelRenderer, useReactFlow, Position, Handle, ConnectionMode, SelectionMode
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import katex from 'katex';
@@ -45,8 +45,11 @@ const GLOBAL_CSS = `
   .custom-handle-offset-right { right: -4px !important; }
   
   .print-page-wrapper { page-break-after: always; position: relative; overflow: hidden; margin: 0 auto; border: none !important; outline: none !important; }
+  
+  .editing-mode { outline: 2px solid #3b82f6 !important; border-radius: 4px; padding: 2px; }
 `;
 
+// --- 計算関数 ---
 const getEdgePoint = (cx: number, cy: number, w: number, h: number, tx: number, ty: number) => {
   const dx = tx - cx;
   const dy = ty - cy;
@@ -63,6 +66,7 @@ const getEdgePoint = (cx: number, cy: number, w: number, h: number, tx: number, 
   return { x: px, y: py };
 };
 
+// --- エッジ（線）コンポーネント ---
 const DoubleEdge = ({ id, sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, style = {}, markerEnd, markerStart, data, label }: EdgeProps) => {
   const [edgePath, labelX, labelY] = getBezierPath({ sourceX, sourceY, sourcePosition, targetX, targetY, targetPosition });
   
@@ -78,8 +82,13 @@ const DoubleEdge = ({ id, sourceX, sourceY, targetX, targetY, sourcePosition, ta
 
   let rMarkerEnd = markerEnd;
   let rMarkerStart = markerStart;
-  if (mType === 'custom-double-arrow' || mType === 'custom-double-both') { rMarkerEnd = `url(#custom-arrow-${id})`; }
-  if (mType === 'custom-double-both') { rMarkerStart = `url(#custom-arrow-start-${id})`; }
+  if (mType === 'custom-double-arrow' || mType === 'custom-double-both') {
+    rMarkerEnd = `url(#custom-arrow-${id})`;
+  }
+  if (mType === 'custom-double-both') {
+    rMarkerStart = `url(#custom-arrow-start-${id})`;
+  }
+
   const customArrowSize = strokeWidth * 1.5 + 16; 
 
   return (
@@ -112,7 +121,7 @@ const DoubleEdge = ({ id, sourceX, sourceY, targetX, targetY, sourcePosition, ta
           <div className="no-print" style={{ position: 'absolute', transform: `translate(-50%, -50%) translate(${labelX}px,${labelY}px)`, zIndex: 1000, pointerEvents: 'auto' }}>
               <div
                   id={`edit-edge-${id}`}
-                  className={"nodrag html-content"}
+                  className={isEditing ? "nodrag html-content editing-mode" : "nodrag html-content"}
                   contentEditable={isEditing}
                   suppressContentEditableWarning
                   onMouseDown={(e) => { if (isEditing) e.stopPropagation(); }}
@@ -155,6 +164,7 @@ const DoubleEdge = ({ id, sourceX, sourceY, targetX, targetY, sourcePosition, ta
   );
 };
 
+// --- スマートガイド ---
 function SmartGuides({ guides }: { guides: { lineX?: number, lineY?: number } }) {
   const transform = useStore(s => s.transform);
   if (guides.lineX === undefined && guides.lineY === undefined) return null;
@@ -191,6 +201,7 @@ const edgeTypes = { default: DoubleEdge };
 const PASTEL_COLORS = ['#FFB7B2', '#FFDAC1', '#E2F0CB', '#B5EAD7', '#C7CEEA', '#F3E5F5', '#E1F5FE', '#FFF9C4', '#FCE4EC', '#E8F5E9'];
 const QUICK_TEXT_COLORS = ['#000000', '#FF0000', '#008000', '#0000FF', '#FFF000'];
 
+// --- メインエディタ ---
 function FlowEditor() {
   const { setViewport, getZoom } = useReactFlow();
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -202,6 +213,7 @@ function FlowEditor() {
   
   const [isPrintMode, setIsPrintMode] = useState(false);
   const [isExecutingPrint, setIsExecutingPrint] = useState(false);
+  const [isLassoMode, setIsLassoMode] = useState(false);
 
   const [files, setFiles] = useState<Record<string, any>>({});
   const [activeFileId, setActiveFileId] = useState<string>('default');
@@ -223,6 +235,20 @@ function FlowEditor() {
   
   const previewDragRef = useRef<{ id: string, startX: number, startY: number, initX: number, initY: number, moved: boolean } | null>(null);
   const imageCropDragRef = useRef<{ id: string, startX: number, startY: number, initX: number, initY: number } | null>(null);
+
+  // ★ TypeScriptエラー解決：変数の型を厳格に指定しました
+  type TableActionType = {
+      id: string;
+      type: string;
+      startX: number;
+      startY: number;
+      startR: number;
+      startC: number;
+      initWidths: number[];
+      initHeights: number[];
+  };
+  
+  const tableActionRef = useRef<TableActionType | null>(null);
 
   const nodesRef = useRef<any[]>([]);
   const edgesRef = useRef<any[]>([]);
@@ -271,6 +297,24 @@ function FlowEditor() {
       setEdges(safeCloneEdges(next.edges));
   }, [future]);
 
+  // ★ 複数セルを一括選択する強力な関数（TypeScriptエラー解決のため明示的な string[] を指定）
+  const selectCellsBox = useCallback((nodeId: string, r1: number, c1: number, r2: number, c2: number, append: boolean) => {
+      const minR = Math.min(r1, r2); const maxR = Math.max(r1, r2);
+      const minC = Math.min(c1, c2); const maxC = Math.max(c1, c2);
+      const newSel: string[] = [];
+      for(let i=minR; i<=maxR; i++) {
+          for(let j=minC; j<=maxC; j++) {
+              newSel.push(`${i}-${j}`);
+          }
+      }
+      setSelectedCells(prev => {
+          if (append) return { ...prev, [nodeId]: Array.from(new Set([...(prev[nodeId]||[]), ...newSel])) };
+          return { ...prev, [nodeId]: newSel };
+      });
+      setNodes((nds: any[]) => nds.map((node: any) => node.id === nodeId ? { ...node, selected: true } : { ...node, selected: false, data: { ...node.data, isEditing: false, editingCell: null } }));
+  }, []);
+
+  // ★ 表の行・列追加関数
   const addTableRowCol = (type: 'row' | 'col') => {
       takeSnapshot();
       if (!primaryNode || !primaryNode.data.isTable) return;
@@ -279,36 +323,45 @@ function FlowEditor() {
           const newRows = type === 'row' ? n.data.rows + 1 : n.data.rows;
           const newCols = type === 'col' ? n.data.cols + 1 : n.data.cols;
           const newCells = { ...n.data.cells };
-          if (type === 'row') for(let c=0; c<newCols; c++) newCells[`${newRows-1}-${c}`] = { content: '', style: { border: '1px solid #ccc', hAlign: 'left', vAlign: 'top', writingMode: 'horizontal-tb' } };
-          if (type === 'col') for(let r=0; r<newRows; r++) newCells[`${r}-${newCols-1}`] = { content: '', style: { border: '1px solid #ccc', hAlign: 'left', vAlign: 'top', writingMode: 'horizontal-tb' } };
-          return { ...n, data: { ...n.data, rows: newRows, cols: newCols, cells: newCells } };
+          const newColWidths = [...(n.data.colWidths || Array(n.data.cols).fill(100))];
+          const newRowHeights = [...(n.data.rowHeights || Array(n.data.rows).fill(40))];
+          
+          if (type === 'row') {
+              newRowHeights.push(40);
+              for(let c=0; c<newCols; c++) newCells[`${newRows-1}-${c}`] = { content: '', style: { border: '1px solid #ccc', hAlign: 'left', vAlign: 'top', writingMode: 'horizontal-tb' } };
+          }
+          if (type === 'col') {
+              newColWidths.push(100);
+              for(let r=0; r<newRows; r++) newCells[`${r}-${newCols-1}`] = { content: '', style: { border: '1px solid #ccc', hAlign: 'left', vAlign: 'top', writingMode: 'horizontal-tb' } };
+          }
+          return { ...n, data: { ...n.data, rows: newRows, cols: newCols, cells: newCells, colWidths: newColWidths, rowHeights: newRowHeights } };
       }));
   };
 
   useEffect(() => {
     if (primaryNode && !primaryNode.data?.isTable) {
-        setPartialFontSize(parseInt(String(primaryNode.style?.fontSize || 14)));
+        // スタイルプロパティからフォントサイズを取得
+        let size = primaryNode.style?.fontSize;
+        if (typeof size === 'string') size = size.replace('px', '');
+        setPartialFontSize(parseInt(String(size || 14)));
     }
   }, [primaryNode?.id, primaryNode?.style?.fontSize, primaryNode?.data?.isTable]);
 
   useEffect(() => {
     const saved = localStorage.getItem('my-logic-files');
     if (saved) {
-      const parsed = JSON.parse(saved);
-      setFiles(parsed);
+      const parsed = JSON.parse(saved); setFiles(parsed);
       const lastId = localStorage.getItem('my-logic-active-id') || 'default';
       if (parsed[lastId]) loadFileInitial(lastId, parsed);
     } else {
       const initial = { 'default': { name: '無題のノート', levelData: { root: { nodes: [], edges: [], bgColor: '#ffffff', label: 'TOP層' } }, currentLevel: 'root', currentLabel: 'TOP層' } };
-      setFiles(initial); 
-      localStorage.setItem('my-logic-files', JSON.stringify(initial));
+      setFiles(initial); localStorage.setItem('my-logic-files', JSON.stringify(initial));
     }
   }, []);
 
   const handleManualSave = useCallback(() => {
     setFiles(prev => {
-        const currentFileData = prev[activeFileId];
-        if (!currentFileData) return prev;
+        const currentFileData = prev[activeFileId]; if (!currentFileData) return prev;
         const updatedLevelData = { ...levelData, [currentLevel]: { nodes: safeCloneNodes(nodesRef.current), edges: safeCloneEdges(edgesRef.current), bgColor: levelData[currentLevel]?.bgColor, label: currentLabelRef.current } };
         const updatedFiles = { ...prev, [activeFileId]: { ...currentFileData, levelData: updatedLevelData, currentLevel, currentLabel: currentLabelRef.current } };
         localStorage.setItem('my-logic-files', JSON.stringify(updatedFiles));
@@ -321,41 +374,28 @@ function FlowEditor() {
   const exportData = useCallback(() => {
       handleManualSave(); 
       setTimeout(() => {
-          const currentData = localStorage.getItem('my-logic-files');
-          if (!currentData) return;
-          const blob = new Blob([currentData], { type: "application/json" });
-          const url = URL.createObjectURL(blob);
-          const a = document.createElement('a');
-          a.href = url;
-          a.download = `logic-notes-backup-${new Date().toISOString().slice(0,10)}.json`;
-          document.body.appendChild(a);
-          a.click();
-          document.body.removeChild(a);
-          URL.revokeObjectURL(url);
+          const currentData = localStorage.getItem('my-logic-files'); if (!currentData) return;
+          const blob = new Blob([currentData], { type: "application/json" }); const url = URL.createObjectURL(blob);
+          const a = document.createElement('a'); a.href = url; a.download = `logic-notes-backup-${new Date().toISOString().slice(0,10)}.json`;
+          document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
       }, 100);
   }, [handleManualSave]);
 
   const importData = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-      const file = e.target.files?.[0];
-      if (!file) return;
+      const file = e.target.files?.[0]; if (!file) return;
       const reader = new FileReader();
       reader.onload = (ev) => {
           try {
               const parsed = JSON.parse(ev.target?.result as string);
               if (parsed && typeof parsed === 'object') {
-                  setFiles(parsed);
-                  localStorage.setItem('my-logic-files', JSON.stringify(parsed));
+                  setFiles(parsed); localStorage.setItem('my-logic-files', JSON.stringify(parsed));
                   const firstId = Object.keys(parsed)[0];
-                  if (firstId) {
-                      localStorage.setItem('my-logic-active-id', firstId);
-                      loadFileInitial(firstId, parsed);
-                  }
+                  if (firstId) { localStorage.setItem('my-logic-active-id', firstId); loadFileInitial(firstId, parsed); }
                   alert('🎉 データを正常に読み込みました！');
               }
           } catch(err) { alert('❌ ファイルの読み込みに失敗しました。'); }
       };
-      reader.readAsText(file);
-      if (jsonImportRef.current) jsonImportRef.current.value = ''; 
+      reader.readAsText(file); if (jsonImportRef.current) jsonImportRef.current.value = ''; 
   }, []);
 
   const togglePrintMode = useCallback(() => {
@@ -366,9 +406,7 @@ function FlowEditor() {
                   if (nds.some(n => n.type === 'printZone')) return nds;
                   return [...nds, { id: `print-zone-${Date.now()}`, type: 'printZone', position: { x: 0, y: 0 }, data: { label: '印刷範囲 1' }, style: { width: 800, height: 1130 }, width: 800, height: 1130, zIndex: 99999 }];
               });
-          } else {
-              setNodes(nds => nds.filter(n => n.type !== 'printZone'));
-          }
+          } else { setNodes(nds => nds.filter(n => n.type !== 'printZone')); }
           return next;
       });
   }, []);
@@ -380,20 +418,14 @@ function FlowEditor() {
       });
   }, []);
 
-  const executePrint = useCallback(() => {
-      clearSelection();
-      setIsExecutingPrint(true);
-      setTimeout(() => { window.print(); setTimeout(() => { setIsExecutingPrint(false); }, 500); }, 1500); 
-  }, [clearSelection]);
+  const executePrint = useCallback(() => { clearSelection(); setIsExecutingPrint(true); setTimeout(() => { window.print(); setTimeout(() => { setIsExecutingPrint(false); }, 500); }, 1500); }, [clearSelection]);
 
   const loadFileInitial = (id: string, allFiles = files) => {
     const target = allFiles[id]; if (!target) return;
     const loadedLevelData = target.levelData || { root: { nodes: [], edges: [], bgColor: '#ffffff', label: 'TOP層' } };
     const initialLevel = target.currentLevel || 'root';
-    setActiveFileId(id); setLevelData(loadedLevelData); setCurrentLevel(initialLevel); 
-    setCurrentLabel(loadedLevelData[initialLevel]?.label || target.currentLabel || 'TOP層');
-    setNodes(loadedLevelData[initialLevel]?.nodes || []); setEdges(loadedLevelData[initialLevel]?.edges || []);
-    setHistoryLevel([]); setPast([]); setFuture([]); setSelectedCells({});
+    setActiveFileId(id); setLevelData(loadedLevelData); setCurrentLevel(initialLevel); setCurrentLabel(loadedLevelData[initialLevel]?.label || target.currentLabel || 'TOP層');
+    setNodes(loadedLevelData[initialLevel]?.nodes || []); setEdges(loadedLevelData[initialLevel]?.edges || []); setHistoryLevel([]); setPast([]); setFuture([]); setSelectedCells({});
   };
 
   const switchFile = (newId: string) => {
@@ -405,18 +437,13 @@ function FlowEditor() {
         }
         return prev;
     });
-
     setTimeout(() => {
       setFiles(currentFiles => {
         const target = currentFiles[newId];
         if (target) {
-          setActiveFileId(newId);
-          const nextLevelData = target.levelData || { root: { nodes: [], edges: [], bgColor: '#ffffff', label: 'TOP層' } };
-          const nextLevel = target.currentLevel || 'root';
-          setLevelData(nextLevelData); setCurrentLevel(nextLevel); 
-          setCurrentLabel(nextLevelData[nextLevel]?.label || target.currentLabel || 'TOP層');
-          setNodes(nextLevelData[nextLevel]?.nodes || []); setEdges(nextLevelData[nextLevel]?.edges || []);
-          setPast([]); setFuture([]); setSelectedCells({});
+          setActiveFileId(newId); const nextLevelData = target.levelData || { root: { nodes: [], edges: [], bgColor: '#ffffff', label: 'TOP層' } }; const nextLevel = target.currentLevel || 'root';
+          setLevelData(nextLevelData); setCurrentLevel(nextLevel); setCurrentLabel(nextLevelData[nextLevel]?.label || target.currentLabel || 'TOP層');
+          setNodes(nextLevelData[nextLevel]?.nodes || []); setEdges(nextLevelData[nextLevel]?.edges || []); setPast([]); setFuture([]); setSelectedCells({});
         }
         return currentFiles;
       });
@@ -424,26 +451,18 @@ function FlowEditor() {
   };
 
   const createNewFile = () => {
-    const name = prompt("ファイル名", `ノート ${Object.keys(files).length + 1}`);
-    if (!name) return;
-    const newId = `file-${Date.now()}`;
-    const newF = { name, levelData: { root: { nodes: [], edges: [], bgColor: '#ffffff', label: 'TOP層' } }, currentLevel: 'root', currentLabel: 'TOP層' };
+    const name = prompt("ファイル名", `ノート ${Object.keys(files).length + 1}`); if (!name) return;
+    const newId = `file-${Date.now()}`; const newF = { name, levelData: { root: { nodes: [], edges: [], bgColor: '#ffffff', label: 'TOP層' } }, currentLevel: 'root', currentLabel: 'TOP層' };
     setFiles(prev => ({ ...prev, [newId]: newF })); switchFile(newId);
   };
 
   const deleteFile = (id: string) => {
-    if (Object.keys(files).length <= 1) return;
-    if (!confirm("削除しますか？")) return;
-    const updated = { ...files }; delete updated[id];
-    setFiles(updated); if (id === activeFileId) switchFile(Object.keys(updated)[0]);
+    if (Object.keys(files).length <= 1) return; if (!confirm("削除しますか？")) return;
+    const updated = { ...files }; delete updated[id]; setFiles(updated); if (id === activeFileId) switchFile(Object.keys(updated)[0]);
   };
 
   const updateSelectedNodes = useCallback((newData: any, newStyle: any = {}) => {
-    setNodes((nds: any[]) => nds.map((n: any) => n.selected ? {
-        ...n,
-        data: { ...(n.data || {}), ...(typeof newData === 'function' ? newData(n.data) : newData) },
-        style: { ...(n.style || {}), ...newStyle }
-    } : n));
+    setNodes((nds: any[]) => nds.map((n: any) => n.selected ? { ...n, data: { ...(n.data || {}), ...(typeof newData === 'function' ? newData(n.data) : newData) }, style: { ...(n.style || {}), ...newStyle } } : n));
   }, []);
 
   const updateEdgeDesign = useCallback((config: any) => {
@@ -452,39 +471,29 @@ function FlowEditor() {
       if (!e.selected) return e;
       const newStrokeWidth = config.strokeWidth !== undefined ? config.strokeWidth : (Number(e.style?.strokeWidth) || 1);
       const newColor = config.color !== undefined ? config.color : (e.data?.color || '#333');
-      const mSize = Math.max(12, newStrokeWidth * 3); 
-      const baseMarker = { type: MarkerType.ArrowClosed, color: newColor, width: mSize, height: mSize };
+      const mSize = Math.max(12, newStrokeWidth * 3); const baseMarker = { type: MarkerType.ArrowClosed, color: newColor, width: mSize, height: mSize };
       
-      let newDouble = config.double !== undefined ? config.double : e.data?.double;
-      let newMarkerType = config.markerType !== undefined ? config.markerType : e.data?.markerType;
-      let newLabel = config.label !== undefined ? config.label : e.label;
+      let newDouble = config.double !== undefined ? config.double : e.data?.double; let newMarkerType = config.markerType !== undefined ? config.markerType : e.data?.markerType; let newLabel = config.label !== undefined ? config.label : e.label;
       if (config.resetDesign) { newDouble = config.double || false; newMarkerType = config.markerType || 'none'; if(config.label !== undefined) newLabel = config.label; }
 
       let mEnd = undefined; let mStart = undefined;
-      if (newMarkerType === 'arrow') { mEnd = baseMarker; }
-      if (newMarkerType === 'both') { mEnd = baseMarker; mStart = baseMarker; }
+      if (newMarkerType === 'arrow') { mEnd = baseMarker; } if (newMarkerType === 'both') { mEnd = baseMarker; mStart = baseMarker; }
 
       const newLabelStyle = config.labelStyle !== undefined ? config.labelStyle : e.data?.labelStyle;
       const newFontSize = config.fontSize !== undefined ? config.fontSize : (e.data?.fontSize || 14);
 
-      return { 
-          ...e, style: { ...e.style, strokeWidth: newStrokeWidth, stroke: newColor },
-          data: { ...(e.data || {}), double: newDouble, color: newColor, labelStyle: newLabelStyle, fontSize: newFontSize, markerType: newMarkerType }, 
-          markerEnd: mEnd, markerStart: mStart, label: newLabel 
-      };
+      return { ...e, style: { ...e.style, strokeWidth: newStrokeWidth, stroke: newColor }, data: { ...(e.data || {}), double: newDouble, color: newColor, labelStyle: newLabelStyle, fontSize: newFontSize, markerType: newMarkerType }, markerEnd: mEnd, markerStart: mStart, label: newLabel };
     }));
   }, [takeSnapshot]);
 
-  // ★ 究極の部分装飾機能：ブラウザ依存を回避し、文字サイズ変更を確実に適用する
+  // ★ 部分装飾機能
   const applyUnifiedFormat = (type: string, value: any = '') => {
       const activeEl = document.activeElement as HTMLElement;
       if (!activeEl || (!activeEl.isContentEditable && activeEl.tagName !== 'DIV')) {
-          alert('文字を選択してから実行してください。\n（図形をクリック → Tabキーで編集モードにする → 文字をなぞる）');
-          return;
+          alert('文字を選択してから実行してください。\n（図形をクリック → Tabキーで編集モードにする → 文字をなぞる）'); return;
       }
       takeSnapshot();
       if (type === 'fontSize') {
-          // ブラウザの仕様（spanやfontのゆらぎ）を完全吸収する強力な置換
           document.execCommand('fontSize', false, '7');
           const fonts = activeEl.querySelectorAll('font[size="7"], span');
           fonts.forEach((f) => {
@@ -530,7 +539,7 @@ function FlowEditor() {
       });
   };
 
-  // ★ 完璧なレイアウト機能：縦書き・横書きを考慮した上でY軸とX軸を直感的にマッピング
+  // ★ 完璧なレイアウト機能
   const handleLayout = (hAlign?: string, vAlign?: string, wMode?: string) => {
       takeSnapshot();
       if (primaryNode?.data?.isTable && (selectedCells[primaryNode.id]?.length || 0) > 0) {
@@ -541,11 +550,9 @@ function FlowEditor() {
               activeCells.forEach(cId => {
                   const cell = newCells[cId] || { content: '', style: {} };
                   let newStyle = { ...cell.style };
-                  // 過去の互換性も考慮して明確なプロパティ名で保存
                   if (hAlign) newStyle.hAlign = hAlign;
                   if (vAlign) newStyle.vAlign = vAlign;
                   if (wMode) newStyle.writingMode = wMode;
-                  // 縦書きボタンが押された時のデフォルト補正（右上詰め）
                   if (wMode === 'vertical-rl') {
                       if (!hAlign) newStyle.hAlign = 'right';
                       if (!vAlign) newStyle.vAlign = 'top';
@@ -659,7 +666,6 @@ function FlowEditor() {
     const parent = selNodes.length === 1 ? selNodes[0] : null;
 
     let data: any = { content: '項目', previewVisible: false, previewStyle: { opacity: 0.7, offsetX: 0, offsetY: -150, width: 180, height: 120 }, textOffsetX: 0, textOffsetY: 0, isEditing: false, tableTitle: '' };
-    // ★ 完璧なデフォルト設定：左上ギリギリ（paddingを減らす）、ゴシック、黒色、14px
     let style: any = { backgroundColor: '#ffffff', color: '#000000', borderRadius: '12px', fontSize: '14px', fontFamily: 'sans-serif', width: 200, height: 100, hAlign: 'left', vAlign: 'top', writingMode: 'horizontal-tb', padding: '4px', borderColor: 'transparent' };
     
     if (type === 'image') { fileInputRef.current?.click(); return; }
@@ -711,14 +717,13 @@ function FlowEditor() {
     }
   }, [takeSnapshot]);
 
+  // ★ キーボード操作イベント
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       const activeEl = document.activeElement as HTMLElement;
       const isContentEditing = activeEl?.tagName === 'INPUT' || activeEl?.tagName === 'TEXTAREA' || activeEl?.isContentEditable;
       
-      if (isContentEditing && e.key !== 'Tab') {
-          return; 
-      }
+      if (isContentEditing && e.key !== 'Tab') return;
 
       if (e.key === 'Tab') {
           const isNodeEditing = nodesRef.current.some(n => n.data?.isEditing || n.data?.editingCell);
@@ -775,9 +780,33 @@ function FlowEditor() {
       return () => window.removeEventListener('custom-edge-blur', handleEdgeBlur);
   }, []);
 
+  // ★ 統合された強力なドラッグ＆リサイズ処理
   useEffect(() => {
     const onMouseMove = (e: MouseEvent) => {
       const zoom = getZoom();
+      
+      const action = tableActionRef.current;
+      if (action) {
+          const dx = (e.clientX - action.startX) / zoom;
+          const dy = (e.clientY - action.startY) / zoom;
+          
+          if (action.type.startsWith('resize')) {
+              setNodes((nds: any[]) => nds.map((n: any) => {
+                  if (n.id !== action.id) return n;
+                  const newWidths = [...(n.data.colWidths || Array(n.data.cols).fill(100))];
+                  const newHeights = [...(n.data.rowHeights || Array(n.data.rows).fill(40))];
+                  
+                  if (action.type.includes('col') || action.type.includes('xy')) {
+                      newWidths[action.startC] = Math.max(30, action.initWidths[action.startC] + dx);
+                  }
+                  if (action.type.includes('row') || action.type.includes('xy')) {
+                      newHeights[action.startR] = Math.max(20, action.initHeights[action.startR] + dy);
+                  }
+                  return { ...n, data: { ...n.data, colWidths: newWidths, rowHeights: newHeights } };
+              }));
+          }
+      }
+
       const drag = previewDragRef.current;
       if (drag) {
         const dx = (e.clientX - drag.startX) / zoom; const dy = (e.clientY - drag.startY) / zoom;
@@ -790,7 +819,7 @@ function FlowEditor() {
         setNodes((nds: any[]) => nds.map((n: any) => n.id === imgDrag.id ? { ...n, data: { ...(n.data || {}), imgPosX: imgDrag.initX + dx, imgPosY: imgDrag.initY + dy } } : n));
       }
     };
-    const onMouseUp = () => { setTimeout(() => { previewDragRef.current = null; }, 50); imageCropDragRef.current = null; };
+    const onMouseUp = () => { setTimeout(() => { previewDragRef.current = null; }, 50); imageCropDragRef.current = null; tableActionRef.current = null; };
     window.addEventListener('mousemove', onMouseMove);
     window.addEventListener('mouseup', onMouseUp);
     return () => { window.removeEventListener('mousemove', onMouseMove); window.removeEventListener('mouseup', onMouseUp); };
@@ -853,7 +882,8 @@ function FlowEditor() {
     return [centerNode, ...nodes.map(n => {
       if (n.type === 'printZone') {
         return {
-          ...n, draggable: true,
+          ...n,
+          draggable: true,
           data: {
             label: (
               <div style={{ width: '100%', height: '100%', border: '4px dashed #3b82f6', backgroundColor: 'rgba(59, 130, 246, 0.05)', position: 'relative' }}>
@@ -924,9 +954,24 @@ function FlowEditor() {
           </React.Fragment>
         );
       } else if (n.data?.isTable) {
+        const colWidths = n.data.colWidths || Array(n.data.cols || 2).fill(100);
+        const rowHeights = n.data.rowHeights || Array(n.data.rows || 2).fill(40);
+        const headerStyle = { background: '#f8fafc', border: '1px solid #cbd5e1', textAlign: 'center' as const, fontSize: '12px', color: '#64748b', fontWeight: 'bold', userSelect: 'none' as const, position: 'relative' as const };
+
+        // 選択範囲の四隅を計算
+        const selCells = selectedCells[n.id] || [];
+        let selMinR = 9999, selMaxR = -1, selMinC = 9999, selMaxC = -1;
+        selCells.forEach(cellId => {
+            const [cr, cc] = cellId.split('-').map(Number);
+            if (cr < selMinR) selMinR = cr;
+            if (cr > selMaxR) selMaxR = cr;
+            if (cc < selMinC) selMinC = cc;
+            if (cc > selMaxC) selMaxC = cc;
+        });
+
         previewElement = (
             <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column' }}>
-                <div className="custom-drag-handle" style={{ height: '14px', background: '#e2e8f0', cursor: 'grab', borderTopLeftRadius: '6px', borderTopRightRadius: '6px', flexShrink: 0 }}></div>
+                <div className="custom-drag-handle no-print" style={{ height: '14px', background: '#e2e8f0', cursor: 'grab', borderTopLeftRadius: '6px', borderTopRightRadius: '6px', flexShrink: 0 }}></div>
                 <div className="nodrag" style={{ padding: '4px 10px 0', backgroundColor: '#fff', flexShrink: 0 }}>
                     <input
                         type="text"
@@ -936,12 +981,59 @@ function FlowEditor() {
                         style={{ width: '100%', border: 'none', borderBottom: isExecutingPrint ? 'none' : '1px dashed #ccc', background: 'transparent', textAlign: 'center', fontSize: '12px', fontWeight: 'bold', outline: 'none', color: '#333' }}
                     />
                 </div>
-                {/* ★ 修正：セルの自動拡大を抑制し、固定高さを維持するためのCSS調整 */}
                 <div className="nodrag" style={{ flex: 1, overflow: 'auto', padding: '10px' }}>
-                    <table style={{ width: '100%', height: '100%', borderCollapse: 'collapse', tableLayout: 'fixed' }}>
+                    <table style={{ borderCollapse: 'collapse', tableLayout: 'fixed', width: 'max-content' }}>
+                        <thead className="no-print">
+                            <tr>
+                                <th onClick={(e) => { 
+                                    e.stopPropagation(); 
+                                    const all: string[] = []; 
+                                    for(let i=0; i<n.data.rows; i++) for(let j=0; j<n.data.cols; j++) all.push(`${i}-${j}`); 
+                                    setSelectedCells({[n.id]: all}); 
+                                    if (!n.selected) setNodes(nds => nds.map(node => node.id === n.id ? { ...node, selected: true } : node)); 
+                                }} style={{...headerStyle, width: 30, cursor: 'pointer'}}>◢</th>
+                                {Array.from({length: n.data.cols || 2}).map((_, c) => (
+                                    <th key={c} 
+                                        onMouseDown={e => { 
+                                            e.stopPropagation(); 
+                                            // ★ 型エラー解消：正しく代入
+                                            tableActionRef.current = { id: n.id, type: 'select-cols', startC: c, startR: 0, startX:0, startY:0, initWidths:[], initHeights:[] }; 
+                                            selectCellsBox(n.id, 0, c, n.data.rows-1, c, e.shiftKey || e.metaKey || e.ctrlKey); 
+                                        }}
+                                        onMouseEnter={e => { 
+                                            const action = tableActionRef.current;
+                                            if (action && action.id === n.id && action.type === 'select-cols') { 
+                                                selectCellsBox(n.id, 0, action.startC, n.data.rows-1, c, false); 
+                                            } 
+                                        }}
+                                        style={{...headerStyle, width: colWidths[c], cursor: 'pointer'}}
+                                    >
+                                        {String.fromCharCode(65 + c)}
+                                        <div className="nodrag" onMouseDown={(e) => { e.stopPropagation(); takeSnapshot(); tableActionRef.current = {id: n.id, type: 'resize-col', startC: c, startX: e.clientX, startY: 0, startR: 0, initWidths: colWidths, initHeights: []}; }} style={{position: 'absolute', right: -3, top: 0, bottom: 0, width: 6, cursor: 'col-resize', zIndex: 10}} />
+                                    </th>
+                                ))}
+                            </tr>
+                        </thead>
                         <tbody>
                             {Array.from({length: n.data.rows || 2}).map((_, r) => (
-                                <tr key={r}>
+                                <tr key={r} style={{ height: rowHeights[r] }}>
+                                    <th className="no-print" 
+                                        onMouseDown={e => { 
+                                            e.stopPropagation(); 
+                                            tableActionRef.current = { id: n.id, type: 'select-rows', startR: r, startC: 0, startX:0, startY:0, initWidths:[], initHeights:[] }; 
+                                            selectCellsBox(n.id, r, 0, r, n.data.cols-1, e.shiftKey || e.metaKey || e.ctrlKey); 
+                                        }}
+                                        onMouseEnter={e => { 
+                                            const action = tableActionRef.current;
+                                            if (action && action.id === n.id && action.type === 'select-rows') { 
+                                                selectCellsBox(n.id, action.startR, 0, r, n.data.cols-1, false); 
+                                            } 
+                                        }}
+                                        style={{...headerStyle, cursor: 'pointer'}}
+                                    >
+                                        {r + 1}
+                                        <div className="nodrag" onMouseDown={(e) => { e.stopPropagation(); takeSnapshot(); tableActionRef.current = {id: n.id, type: 'resize-row', startR: r, startY: e.clientY, startX: 0, startC: 0, initWidths: [], initHeights: rowHeights}; }} style={{position: 'absolute', bottom: -3, left: 0, right: 0, height: 6, cursor: 'row-resize', zIndex: 10}} />
+                                    </th>
                                     {Array.from({length: n.data.cols || 2}).map((_, c) => {
                                         const cellId = `${r}-${c}`;
                                         const cellData = n.data.cells?.[cellId] || { content: '', style: { border: '1px solid #ccc', hAlign: 'left', vAlign: 'top', writingMode: 'horizontal-tb' } };
@@ -953,26 +1045,52 @@ function FlowEditor() {
                                         const cWMode = cellData.style?.writingMode || 'horizontal-tb';
                                         const tdVerticalAlign = cVAlign === 'center' ? 'middle' : cVAlign;
 
+                                        // 複数選択の青枠（エクセル風に外枠だけ描画）
+                                        let cellBoxShadow = 'none';
+                                        if (isSel && !isCellEditing) {
+                                            const t = !selectedCells[n.id]?.includes(`${r-1}-${c}`);
+                                            const b = !selectedCells[n.id]?.includes(`${r+1}-${c}`);
+                                            const l = !selectedCells[n.id]?.includes(`${r}-${c-1}`);
+                                            const ri = !selectedCells[n.id]?.includes(`${r}-${c+1}`);
+                                            cellBoxShadow = `${t?'inset 0 2px 0 0 #3b82f6,':''}${b?'inset 0 -2px 0 0 #3b82f6,':''}${l?'inset 2px 0 0 0 #3b82f6,':''}${ri?'inset -2px 0 0 0 #3b82f6,':''}`;
+                                            cellBoxShadow = cellBoxShadow ? cellBoxShadow.slice(0, -1) : 'inset 0 0 0 1px rgba(59, 130, 246, 0.3)';
+                                        }
+
+                                        // ★ エラー解消：Reactのstyleに未知のプロパティを渡さないように分割
+                                        const { hAlign: _h, vAlign: _v, writingMode: _w, ...safeDomStyle } = cellData.style;
+
                                         return (
                                             <td
                                                 key={c}
-                                                onClick={(e) => {
-                                                    e.stopPropagation();
-                                                    setSelectedCells(prev => {
-                                                        const current = prev[n.id] || [];
-                                                        if (e.shiftKey || e.metaKey || e.ctrlKey) { return { ...prev, [n.id]: current.includes(cellId) ? current.filter(id => id !== cellId) : [...current, cellId] }; } 
-                                                        else { return { ...prev, [n.id]: [cellId] }; }
-                                                    });
-                                                    // 表の中の別のセルを選んだら、他の図形の編集状態を強制リセット
-                                                    setNodes((nds: any[]) => nds.map((node: any) => node.id === n.id ? { ...node, selected: true } : { ...node, selected: false, data: { ...node.data, isEditing: false, editingCell: null } }));
+                                                onMouseDown={(e) => { 
+                                                    e.stopPropagation(); 
+                                                    if (isCellEditing) return; 
+                                                    tableActionRef.current = { id: n.id, type: 'select-cells', startR: r, startC: c, startX:0, startY:0, initWidths:[], initHeights:[] }; 
+                                                    selectCellsBox(n.id, r, c, r, c, e.shiftKey || e.metaKey || e.ctrlKey); 
                                                 }}
-                                                // ★ セル高さの均等割り付け強制設定（これにより改行で不自然に拡大しない）
-                                                style={{
-                                                    ...cellData.style, position: 'relative', cursor: isCellEditing ? 'text' : 'cell', padding: '8px', wordBreak: 'break-all', height: '1px',
-                                                    verticalAlign: tdVerticalAlign, textAlign: cHAlign, writingMode: cWMode,
-                                                    outline: isSel && !isCellEditing ? '2px solid #3b82f6' : 'none', outlineOffset: '-2px'
+                                                onMouseEnter={(e) => {
+                                                    const action = tableActionRef.current;
+                                                    if (action && action.id === n.id && action.type === 'select-cells') {
+                                                        selectCellsBox(n.id, action.startR, action.startC, r, c, false);
+                                                    }
+                                                }}
+                                                style={{ 
+                                                    ...safeDomStyle, position: 'relative', cursor: isCellEditing ? 'text' : 'cell', padding: '8px', wordBreak: 'break-all', height: '1px', 
+                                                    verticalAlign: tdVerticalAlign, textAlign: cHAlign, writingMode: cWMode, boxShadow: cellBoxShadow, 
+                                                    border: isSel && !isCellEditing ? 'none' : cellData.style.border 
                                                 }}
                                             >
+                                                {/* 選択枠のリサイズハンドル */}
+                                                {isSel && !isCellEditing && c === selMaxC && (
+                                                    <div className="nodrag" style={{position:'absolute', right:-4, top:0, bottom:0, width:8, cursor:'col-resize', zIndex:20}} onMouseDown={e => { e.stopPropagation(); takeSnapshot(); tableActionRef.current = { id: n.id, type: 'resize-col', startC: c, startX: e.clientX, startY: 0, startR: 0, initWidths: colWidths, initHeights: [] }; }} />
+                                                )}
+                                                {isSel && !isCellEditing && r === selMaxR && (
+                                                    <div className="nodrag" style={{position:'absolute', bottom:-4, left:0, right:0, height:8, cursor:'row-resize', zIndex:20}} onMouseDown={e => { e.stopPropagation(); takeSnapshot(); tableActionRef.current = { id: n.id, type: 'resize-row', startR: r, startY: e.clientY, startX: 0, startC: 0, initWidths: [], initHeights: rowHeights }; }} />
+                                                )}
+                                                {isSel && !isCellEditing && r === selMaxR && c === selMaxC && (
+                                                    <div className="nodrag" style={{position:'absolute', bottom:-5, right:-5, width:10, height:10, background:'#3b82f6', border:'1px solid #fff', cursor:'nwse-resize', zIndex:21, borderRadius:'50%'}} onMouseDown={e => { e.stopPropagation(); takeSnapshot(); tableActionRef.current = { id: n.id, type: 'resize-xy', startC: c, startR: r, startX: e.clientX, startY: e.clientY, initWidths: colWidths, initHeights: rowHeights }; }} />
+                                                )}
+
                                                 <div 
                                                     className={"nodrag html-content"}
                                                     contentEditable={isCellEditing} suppressContentEditableWarning
@@ -983,7 +1101,6 @@ function FlowEditor() {
                                                         const finalHtml = cellData._tempContent ?? e.currentTarget.innerHTML;
                                                         setNodes(nds => nds.map(node => node.id === n.id ? { ...node, data: { ...node.data, editingCell: null, cells: { ...node.data.cells, [cellId]: { ...node.data.cells[cellId], content: finalHtml, _tempContent: undefined } } } } : node));
                                                     }}
-                                                    // セル内のdivは中身の大きさに合わせるだけ（tdが配置を担当）
                                                     style={{ outline: 'none', width: '100%', height: 'auto', textAlign: cHAlign }}
                                                     ref={el => {
                                                         if (!el) return;
@@ -1026,13 +1143,15 @@ function FlowEditor() {
       const hideGrayBorder = isTextNode && (!bColor || bColor === '#ccc' || bColor === 'transparent');
       const resolvedBorder = n.data?.isShape ? `3px solid ${bColor || '#333'}` : (hideGrayBorder ? 'none' : `1px solid ${bColor}`);
 
+      // ★ エラー解消：Reactのstyleに未知のプロパティを渡さないように分割
+      const { hAlign: _nh, vAlign: _nv, writingMode: _nw, ...safeNodeStyle } = n.style || {};
+
       return {
         ...n,
         draggable: n.data?.isImage && n.data?.isCropping ? false : true,
         data: {
           ...n.data,
           label: (
-            // ★ 外側の箱：ここで justifyContent と alignItems を使って縦横の配置を完璧に制御
             <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', alignItems: ai, justifyContent: jc, position: 'relative', border: resolvedBorder, borderRadius: n.style?.borderRadius || '12px', backgroundColor: n.style?.backgroundColor || '#fff', opacity: n.style?.opacity || 1, padding: n.style?.padding || '4px' }}>
               
               {n.id !== 'center-mark' && (
@@ -1041,6 +1160,7 @@ function FlowEditor() {
                   <Handle type="target" position={Position.Bottom} id="bottom-tgt" className="custom-handle-target custom-handle-offset-bottom" />
                   <Handle type="target" position={Position.Left} id="left-tgt" className="custom-handle-target custom-handle-offset-left" />
                   <Handle type="target" position={Position.Right} id="right-tgt" className="custom-handle-target custom-handle-offset-right" />
+
                   <Handle type="source" position={Position.Left} id="left-src" className="custom-handle custom-handle-offset-left" />
                   <Handle type="source" position={Position.Right} id="right-src" className="custom-handle custom-handle-offset-right" />
                   <Handle type="source" position={Position.Top} id="top-src" className="custom-handle custom-handle-offset-top" />
@@ -1118,7 +1238,7 @@ function FlowEditor() {
                     }}
                     style={{ 
                         pointerEvents: 'auto', width: '100%', height: 'auto', outline: 'none', cursor: isEditingNode ? 'text' : 'pointer',
-                        color: n.style?.color || '#000', fontFamily: n.style?.fontFamily || 'sans-serif', fontSize: n.style?.fontSize || '14px', fontWeight: n.style?.fontWeight || 'normal', textDecoration: n.style?.textDecoration || 'none', whiteSpace: 'pre-wrap', lineHeight: '1.2', textAlign: rawHAlign, transform: `translate(${textOffX}px, ${textOffY}px)`, writingMode: wMode
+                        color: n.style?.color || '#000', fontFamily: n.style?.fontFamily || 'sans-serif', fontSize: n.style?.fontSize || '14px', fontWeight: n.style?.fontWeight || 'normal', textDecoration: n.style?.textDecoration || 'none', whiteSpace: 'pre-wrap', lineHeight: '1.2', textAlign: rawHAlign, transform: `translate(${textOffX}px, ${textOffY}px)`, writingMode: wMode 
                     }}
                     ref={el => {
                         if (!el) return;
@@ -1163,7 +1283,7 @@ function FlowEditor() {
               ) : null}
             </div>
           ),
-          style: { ...n.style, border: 'none', backgroundColor: 'transparent', padding: 0 }
+          style: { ...safeNodeStyle, border: 'none', backgroundColor: 'transparent', padding: 0 }
         }
       };
     })];
@@ -1258,7 +1378,7 @@ function FlowEditor() {
           <ReactFlow 
              connectionMode={ConnectionMode.Loose}
              nodes={flowNodes} edges={edges} edgeTypes={edgeTypes} elevateNodesOnSelect={false} multiSelectionKeyCode={['Shift', 'Meta', 'Control']}
-             // ★ 別の図形をクリックしたら他の編集状態を即座にリセット
+             panOnDrag={!isLassoMode} selectionOnDrag={isLassoMode} selectionMode={SelectionMode.Partial}
              onNodesChange={u => {
                  const hasSelect = u.some((c: any) => c.type === 'select' && c.selected);
                  if (hasSelect) {
@@ -1541,6 +1661,12 @@ function FlowEditor() {
                  <button onClick={goBack} disabled={isRoot} style={{ ...actionBtnStyle, opacity: isRoot ? 0.4 : 1, cursor: isRoot ? 'default' : 'pointer' }}>🔙 前へ</button>
                  <button onClick={goTop} disabled={isRoot} style={{ ...actionBtnStyle, opacity: isRoot ? 0.4 : 1, cursor: isRoot ? 'default' : 'pointer' }}>🏠 TOP</button>
                  <div style={{ width: '1px', height: '24px', backgroundColor: '#ddd', margin: '0 2px' }} />
+                 
+                 <button onClick={() => setIsLassoMode(!isLassoMode)} style={{ ...actionBtnStyle, backgroundColor: isLassoMode ? '#ef4444' : '#fff', color: isLassoMode ? '#fff' : '#333', border: isLassoMode ? 'none' : '1px solid #ccc' }}>
+                     {isLassoMode ? '🔓 画面ロック解除' : '🔒 一括選択(ロック)'}
+                 </button>
+
+                 <div style={{ width: '1px', height: '24px', backgroundColor: '#ddd', margin: '0 2px' }} />
                  <button onClick={() => setViewport({ x: 0, y: 0, zoom: 1 }, { duration: 800 })} style={actionBtnStyle}>🎯 中央</button>
                  <button onClick={togglePrintMode} style={{ ...actionBtnStyle, backgroundColor: '#f1f5f9' }}>🖨️ 印刷設定</button>
                  <div style={{ width: '1px', height: '24px', backgroundColor: '#ddd', margin: '0 2px' }} />
@@ -1552,8 +1678,7 @@ function FlowEditor() {
                  <div style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '11px', fontWeight: 'bold', color: '#555', backgroundColor: '#fff', padding: '4px 8px', borderRadius: '6px', border: '1px solid #ccc' }}>
                    <span>🎨 背景</span>
                    <input type="color" value={levelData[currentLevel]?.bgColor || '#ffffff'} onChange={(e) => {
-                     const newColor = e.target.value;
-                     setLevelData(prev => ({ ...prev, [currentLevel]: { ...(prev[currentLevel] || {}), bgColor: newColor } }));
+                     const newColor = e.target.value; setLevelData(prev => ({ ...prev, [currentLevel]: { ...(prev[currentLevel] || {}), bgColor: newColor } }));
                    }} style={{width:'16px', height:'16px', cursor:'pointer', border: 'none', padding: 0, borderRadius: '4px'}} />
                  </div>
                  <button onClick={() => setIsBottomBarOpen(false)} style={{ padding: '4px 8px', marginLeft: 'auto', fontSize: '10px', background: '#e2e8f0', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold', color: '#475569' }}>▼ 隠す</button>
