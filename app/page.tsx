@@ -13,7 +13,7 @@ const GLOBAL_CSS = `
   .html-content strike { text-decoration: line-through double !important; }
   .html-content * { line-height: 1.2 !important; vertical-align: baseline !important; }
   
-  .html-content { user-select: text !important; -webkit-user-select: text !important; }
+  .html-content { user-select: text !important; -webkit-user-select: text !important; outline: none !important; border: none !important; }
   
   @media print {
       .no-print { display: none !important; }
@@ -21,6 +21,16 @@ const GLOBAL_CSS = `
       * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
       .react-flow__handle { display: none !important; }
       .react-flow__node { box-shadow: none !important; }
+  }
+
+  /* ★ ReactFlowデフォルトの忌まわしき枠線と影を完全破壊 */
+  .react-flow__node, .react-flow__node-default, .react-flow__node-custom {
+      border: none !important;
+      box-shadow: none !important;
+      background: transparent !important;
+      border-radius: 0 !important;
+      padding: 0 !important;
+      outline: none !important;
   }
 
   .react-flow__handle { background: transparent !important; border: none !important; width: 1px !important; height: 1px !important; min-width: 0 !important; min-height: 0 !important; box-shadow: none !important; }
@@ -33,6 +43,7 @@ const GLOBAL_CSS = `
   .custom-handle-offset-right { right: -4px !important; }
   
   .print-page-wrapper { page-break-after: always; position: relative; overflow: hidden; margin: 0 auto; border: none !important; outline: none !important; }
+  .editing-mode { outline: 2px solid #3b82f6 !important; border-radius: 4px; padding: 2px; }
 `;
 
 const getEdgePoint = (cx: number, cy: number, w: number, h: number, tx: number, ty: number) => {
@@ -65,14 +76,14 @@ const DoubleEdge = ({ id, sourceX, sourceY, targetX, targetY, sourcePosition, ta
       {isDouble && (
         <svg style={{ position: 'absolute', width: 0, height: 0 }}>
           <defs>
-            {/* ★ 改善：傘の付け根を引き、polygonで二重線をマスキングして串刺しを防止。refXをずらして1mmの余白を確保 */}
-            <marker id={`custom-arrow-${id}`} viewBox="0 0 24 24" refX="22" refY="12" markerWidth={customArrowSize} markerHeight={customArrowSize} markerUnits="userSpaceOnUse" orient="auto">
+            {/* ★ 改善：傘の付け根を引き、polygonで二重線をマスキングして串刺しを防止。refXをずらして1mm(4px)の余白を強制確保 */}
+            <marker id={`custom-arrow-${id}`} viewBox="0 0 24 24" refX="21" refY="12" markerWidth={customArrowSize} markerHeight={customArrowSize} markerUnits="userSpaceOnUse" orient="auto">
               <polygon points="4,4 20,12 4,20" fill="var(--bg-color, #f1f1f1)" stroke="none" />
-              <polyline points="6,4 20,12 6,20" fill="none" stroke={edgeColor} strokeWidth={strokeWidth >= 3 ? 3 : 2} strokeLinecap="round" strokeLinejoin="round" />
+              <polyline points="6,4 18,12 6,20" fill="none" stroke={edgeColor} strokeWidth={strokeWidth >= 3 ? 3 : 2} strokeLinecap="round" strokeLinejoin="round" />
             </marker>
-            <marker id={`custom-arrow-start-${id}`} viewBox="0 0 24 24" refX="2" refY="12" markerWidth={customArrowSize} markerHeight={customArrowSize} markerUnits="userSpaceOnUse" orient="auto">
+            <marker id={`custom-arrow-start-${id}`} viewBox="0 0 24 24" refX="3" refY="12" markerWidth={customArrowSize} markerHeight={customArrowSize} markerUnits="userSpaceOnUse" orient="auto">
               <polygon points="20,4 4,12 20,20" fill="var(--bg-color, #f1f1f1)" stroke="none" />
-              <polyline points="18,4 4,12 18,20" fill="none" stroke={edgeColor} strokeWidth={strokeWidth >= 3 ? 3 : 2} strokeLinecap="round" strokeLinejoin="round" />
+              <polyline points="18,4 6,12 18,20" fill="none" stroke={edgeColor} strokeWidth={strokeWidth >= 3 ? 3 : 2} strokeLinecap="round" strokeLinejoin="round" />
             </marker>
           </defs>
         </svg>
@@ -89,7 +100,7 @@ const DoubleEdge = ({ id, sourceX, sourceY, targetX, targetY, sourcePosition, ta
         <EdgeLabelRenderer>
           <div className="no-print" style={{ position: 'absolute', transform: `translate(-50%, -50%) translate(${labelX}px,${labelY}px)`, zIndex: 1000, pointerEvents: 'auto' }}>
               <div
-                  id={`edit-edge-${id}`} className={"nodrag html-content"} contentEditable={isEditing} suppressContentEditableWarning
+                  id={`edit-edge-${id}`} className={isEditing ? "nodrag html-content editing-mode" : "nodrag html-content"} contentEditable={isEditing} suppressContentEditableWarning
                   onMouseDown={(e) => { if (isEditing) e.stopPropagation(); }} onKeyDown={(e) => { if (isEditing) e.stopPropagation(); }}
                   onInput={(e) => { (data as any)._tempContent = e.currentTarget.innerHTML; }}
                   onBlur={(e) => { const finalHtml = (data as any)._tempContent ?? e.currentTarget.innerHTML; window.dispatchEvent(new CustomEvent('custom-edge-blur', { detail: { id, html: finalHtml } })); }}
@@ -284,16 +295,17 @@ function FlowEditor() {
     
     const count = derivationBlocks.length;
     const gapX = 120; 
-    const gapY = h0 + 10; // 詰め詰め配置
+    const gapY = h0 + 4; // 詰め詰め配置
     
     // 常に右側に配置し、回数に応じて下へスタックする
     const newX = x0 + w0 + gapX;
     const newY = y0 + count * gapY; 
 
     const newNodeId = `logical-n-${Date.now()}-${Math.random()}`;
-    const newData = { ...primaryNode.data, content: '', isEditing: true, isDerivationBlock: true, parentNodeId: primaryNode.id };
-    // ★ 新しいテキスト枠も透明に
-    const newStyle = { ...primaryNode.style, width: w0, height: h0, fontSize: parentFontSize, borderWidth: 0, borderColor: 'transparent', backgroundColor: 'transparent' };
+    const newData = { ...primaryNode.data, content: '', isEditing: false, isDerivationBlock: true, parentNodeId: primaryNode.id };
+    
+    // ★ 新しいテキスト枠は枠線透明、背景白に
+    const newStyle = { ...primaryNode.style, width: w0, height: h0, fontSize: parentFontSize, borderWidth: 0, borderColor: 'transparent', backgroundColor: '#ffffff' };
     const newNodeZ = Math.max(0, ...currentNodes.map((n: any) => Number(n.zIndex) || 0)) + 1;
     const newNode = { id: newNodeId, selected: false, position: { x: newX, y: newY }, data: newData, style: newStyle, zIndex: newNodeZ };
 
@@ -978,7 +990,6 @@ function FlowEditor() {
       const bWidth = n.style?.borderWidth !== undefined ? Number(n.style.borderWidth) : (n.data?.isImage || n.data?.isTable ? 0 : 0.5);
       const resolvedBorder = n.data?.isTransparentHelper ? 'none' : (bWidth > 0 ? `${bWidth}px solid ${bColor}` : 'none');
 
-      // 余計なプロパティがReact Flow標準のstyleに混ざらないように分離
       const { hAlign: _nh, vAlign: _nv, writingMode: _nw, borderWidth: _bw, border: _border, ...safeNodeStyle } = n.style || {};
 
       const isTableAndCellEditing = n.data?.isTable && (selectedCells[n.id]?.length || 0) > 0;
@@ -1250,7 +1261,7 @@ function FlowEditor() {
               <label style={{fontSize:'10px', fontWeight: 'bold'}}>全体の透明度</label>
               <input type="range" min="0.1" max="1" step="0.1" value={Number(primaryNode.style?.opacity ?? 1)} onChange={(e) => { takeSnapshot(); updateSelectedNodes({}, { opacity: parseFloat(e.target.value) })}} style={{width:'100%', marginBottom:'10px'}} />
 
-              {/* ★ 枠線の太さ調整スライダーを追加 */}
+              {/* ★ 枠線の太さ調整スライダー（0.5px単位） */}
               <label style={{fontSize:'10px', fontWeight: 'bold'}}>枠線の太さ (px)</label>
               <div style={{display:'flex', alignItems:'center', gap:'8px', marginBottom: '10px'}}>
                 <input type="range" min="0" max="10" step="0.5" value={Number(primaryNode.style?.borderWidth ?? (primaryNode.data?.isImage || primaryNode.data?.isTable ? 0 : 0.5))} onChange={(e) => { takeSnapshot(); updateSelectedNodes({}, { borderWidth: Number(e.target.value) })}} style={{flex:1}} />
