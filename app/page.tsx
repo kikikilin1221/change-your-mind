@@ -61,7 +61,7 @@ const DoubleEdge = ({ id, sourceX, sourceY, targetX, targetY, sourcePosition, ta
   const [edgePath, labelX, labelY] = getBezierPath({ sourceX, sourceY, sourcePosition, targetX, targetY, targetPosition });
   const isDouble = (data as any)?.double; 
   const isEditing = Boolean((data as any)?.isEditing);
-  const hideLine = Boolean((data as any)?.hideLine); // ★ 追加：線を消すフラグ
+  const hideLine = Boolean((data as any)?.hideLine); 
   const strokeWidth = Number(style?.strokeWidth) || 1; 
   const edgeColor = (data as any)?.color || '#333';
   const labelStyle = (data as any)?.labelStyle || { textAlign: 'center' }; 
@@ -74,7 +74,6 @@ const DoubleEdge = ({ id, sourceX, sourceY, targetX, targetY, sourcePosition, ta
   if (mType === 'custom-double-arrow' || mType === 'custom-double-both') { rMarkerEnd = `url(#custom-arrow-${id})`; }
   if (mType === 'custom-double-both') { rMarkerStart = `url(#custom-arrow-start-${id})`; }
   
-  // 傘を大きめに
   const customArrowSize = strokeWidth * 2 + 18; 
 
   return (
@@ -82,31 +81,29 @@ const DoubleEdge = ({ id, sourceX, sourceY, targetX, targetY, sourcePosition, ta
       {isDouble && !hideLine && (
         <svg style={{ position: 'absolute', width: 0, height: 0 }}>
           <defs>
-            {/* ★ 1つ目の改善：一番綺麗だった「rectマスク」で突き抜けを完全に防止するバージョンに復元！ */}
-            <marker id={`custom-arrow-${id}`} viewBox="0 0 24 24" refX="22" refY="12" markerWidth={customArrowSize} markerHeight={customArrowSize} markerUnits="userSpaceOnUse" orient="auto">
-              <rect x="0" y="0" width="24" height="24" fill="var(--bg-color, #ffffff)" stroke="none" />
-              <polyline points="4,3 18,12 4,21" fill="none" stroke={edgeColor} strokeWidth={strokeWidth >= 3 ? 3 : 2} strokeLinecap="round" strokeLinejoin="round" />
+            {/* ★ 背景色と同色のpolygonで二重線の突き抜けを物理的にカット。refXで余白を維持 */}
+            <marker id={`custom-arrow-${id}`} viewBox="0 0 24 24" refX="21" refY="12" markerWidth={customArrowSize} markerHeight={customArrowSize} markerUnits="userSpaceOnUse" orient="auto">
+              <polygon points="2,4 18,12 2,20" fill="var(--bg-color, #f1f1f1)" stroke="none" />
+              <polyline points="4,4 18,12 4,20" fill="none" stroke={edgeColor} strokeWidth={strokeWidth >= 3 ? 3 : 2} strokeLinecap="round" strokeLinejoin="round" />
             </marker>
-            <marker id={`custom-arrow-start-${id}`} viewBox="0 0 24 24" refX="2" refY="12" markerWidth={customArrowSize} markerHeight={customArrowSize} markerUnits="userSpaceOnUse" orient="auto">
-              <rect x="0" y="0" width="24" height="24" fill="var(--bg-color, #ffffff)" stroke="none" />
-              <polyline points="20,3 6,12 20,21" fill="none" stroke={edgeColor} strokeWidth={strokeWidth >= 3 ? 3 : 2} strokeLinecap="round" strokeLinejoin="round" />
+            <marker id={`custom-arrow-start-${id}`} viewBox="0 0 24 24" refX="3" refY="12" markerWidth={customArrowSize} markerHeight={customArrowSize} markerUnits="userSpaceOnUse" orient="auto">
+              <polygon points="22,4 6,12 22,20" fill="var(--bg-color, #f1f1f1)" stroke="none" />
+              <polyline points="20,4 6,12 20,20" fill="none" stroke={edgeColor} strokeWidth={strokeWidth >= 3 ? 3 : 2} strokeLinecap="round" strokeLinejoin="round" />
             </marker>
           </defs>
         </svg>
       )}
       
-      {/* ★ 2つ目の改善：hideLineがtrueの場合は線（BaseEdge）を一切描画しない！ */}
       {!hideLine && (
           isDouble ? (
             <>
               <BaseEdge path={edgePath} style={{ ...style, strokeWidth: strokeWidth + 8, stroke: edgeColor }} />
-              <BaseEdge path={edgePath} style={{ ...style, strokeWidth: strokeWidth + 4, stroke: 'var(--bg-color, #ffffff)' }} />
+              <BaseEdge path={edgePath} style={{ ...style, strokeWidth: strokeWidth + 4, stroke: 'var(--bg-color, #f1f1f1)' }} />
               <BaseEdge path={edgePath} markerEnd={rMarkerEnd} markerStart={rMarkerStart} style={{ strokeWidth: strokeWidth, stroke: 'transparent', fill: 'none' }} />
             </>
           ) : ( <BaseEdge id={id} path={edgePath} markerEnd={rMarkerEnd} markerStart={rMarkerStart} style={{ ...style, strokeWidth, stroke: edgeColor }} /> )
       )}
 
-      {/* テキストラベル（論理記号）は線の有無に関わらず描画する */}
       {displayLabel || isEditing ? (
         <EdgeLabelRenderer>
           <div className="no-print" style={{ position: 'absolute', transform: `translate(-50%, -50%) translate(${labelX}px,${labelY}px)`, zIndex: 1000, pointerEvents: 'auto' }}>
@@ -287,7 +284,7 @@ function FlowEditor() {
       }));
   };
 
-  // ★ 論理ブロックスタック（証明展開）機能
+  // ★ 最終調整：間隔（gapX）を100に固定し、AND/ORの線を非表示にする
   const addLogicalDerivationBlock = useCallback((type: 'double_arrow' | 'single_arrow' | 'and' | 'or') => {
     if (!primaryNode) return;
     takeSnapshot();
@@ -299,13 +296,14 @@ function FlowEditor() {
     const y0 = primaryNode.position.y;
 
     const currentNodes = nodesRef.current;
+    
     const isDerivationBlock = (n: any) => n.data?.isDerivationBlock && n.data?.parentNodeId === primaryNode.id;
     const derivationBlocks = currentNodes.filter(n => isDerivationBlock(n) && !n.data?.isTransparentHelper);
     
     const count = derivationBlocks.length;
     
-    // ★ 修正：絶妙な間隔（80px）に設定
-    const gapX = 80; 
+    // ★ ここを100に固定！
+    const gapX = 100; 
     const gapY = h0; 
     
     const newX = x0 + w0 + gapX;
@@ -344,7 +342,7 @@ function FlowEditor() {
     const edgeId = `e-${sourceNodeId}-${newNodeId}-${Date.now()}`;
     let edgeProps: any = { type: 'default', label: '', style: { strokeWidth: 2, stroke: '#333' }, data: { color: '#333' } };
     
-    // ★ 修正：AND / OR の場合は hideLine: true を付与して線を完全に透明にする
+    // ★ AND / OR の場合は hideLine: true を付与して線を完全に透明にする
     if (type === 'double_arrow') { edgeProps.data.markerType = 'custom-double-both'; edgeProps.data.double = true; edgeProps.data.fontSize = 18; } 
     else if (type === 'single_arrow') { edgeProps.data.markerType = 'custom-double-arrow'; edgeProps.data.double = true; edgeProps.data.fontSize = 18; } 
     else if (type === 'and') { edgeProps.data.markerType = 'none'; edgeProps.data.fontSize = 20; edgeProps.label = '∧'; edgeProps.data.hideLine = true; } 
@@ -494,7 +492,6 @@ function FlowEditor() {
       
       let newDouble = config.double !== undefined ? config.double : e.data?.double; let newMarkerType = config.markerType !== undefined ? config.markerType : e.data?.markerType; let newLabel = config.label !== undefined ? config.label : e.label;
       
-      // ★ 修正：AND/ORで引いた「線のない矢印」も、クイックメニューで普通の線に戻せるように hideLine を false にリセット
       let newHideLine = config.hideLine !== undefined ? config.hideLine : e.data?.hideLine;
       if (config.resetDesign) { newDouble = config.double || false; newMarkerType = config.markerType || 'none'; newHideLine = config.hideLine || false; if(config.label !== undefined) newLabel = config.label; }
 
@@ -1002,10 +999,8 @@ function FlowEditor() {
       const offX = n.data?.cropOffsetX || 0; const offY = n.data?.cropOffsetY || 0;
       
       const bColor = n.style?.borderColor || '#000000'; 
-      // 枠線の太さをプロパティから取得（デフォルト：0.5px）
       const bWidth = n.style?.borderWidth !== undefined ? Number(n.style.borderWidth) : (n.data?.isImage || n.data?.isTable ? 0 : 0.5);
       
-      // ★ 最重要：内側のdivにだけ単線のborderを適用
       const resolvedBorder = n.data?.isTransparentHelper ? 'none' : (bWidth > 0 ? `${bWidth}px solid ${bColor}` : 'none');
       const { hAlign: _nh, vAlign: _nv, writingMode: _nw, borderWidth: _bw, border: _border, ...safeNodeStyle } = n.style || {};
 
@@ -1018,7 +1013,6 @@ function FlowEditor() {
           label: (
             <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', alignItems: ai, justifyContent: jc, position: 'relative', border: resolvedBorder, borderRadius: n.style?.borderRadius || '12px', backgroundColor: n.style?.backgroundColor || '#fff', opacity: n.style?.opacity || 1, padding: n.style?.padding || '4px' }}>
               
-              {/* ★ 修正：isTransparentHelper（透明なダミーノード）であっても、絶対にハンドルは描画する！ これがないと2回目以降の線が引かれない */}
               {n.id !== 'center-mark' && (
                 <>
                   <Handle type="target" position={Position.Top} id="top-tgt" className="custom-handle-target custom-handle-offset-top" /><Handle type="target" position={Position.Bottom} id="bottom-tgt" className="custom-handle-target custom-handle-offset-bottom" /><Handle type="target" position={Position.Left} id="left-tgt" className="custom-handle-target custom-handle-offset-left" /><Handle type="target" position={Position.Right} id="right-tgt" className="custom-handle-target custom-handle-offset-right" />
