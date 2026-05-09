@@ -38,11 +38,18 @@ const GLOBAL_CSS = `
   .custom-handle::before, .custom-handle-target::before { content: ""; display: block; width: 0px; height: 0px; background: #3b82f6; border-radius: 50%; transition: all 0.2s cubic-bezier(0.34, 1.56, 0.64, 1); border: 2px solid #fff; opacity: 0; }
   .custom-handle:hover::before, .custom-handle-target:hover::before { width: 14px; height: 14px; opacity: 1; box-shadow: 0 1px 3px rgba(0,0,0,0.2); }
   
-  /* ★ 改善：枠線と線の間の空白距離を 3px に調整 */
+  /* ★ 改善：普通の線が繋がる距離を枠線ギリギリの 3px に縮小 */
   .custom-handle-offset-top { top: -3px !important; }
   .custom-handle-offset-bottom { bottom: -3px !important; }
   .custom-handle-offset-left { left: -3px !important; }
   .custom-handle-offset-right { right: -3px !important; }
+
+  /* ★ 論理ブロック専用の隠しハンドル（論理記号の距離や見た目は絶対に維持する） */
+  .logical-handle { width: 0px !important; height: 0px !important; min-width: 0 !important; min-height: 0 !important; border: none !important; background: transparent !important; }
+  .logical-handle-offset-top { top: -8px !important; }
+  .logical-handle-offset-bottom { bottom: -8px !important; }
+  .logical-handle-offset-left { left: -8px !important; }
+  .logical-handle-offset-right { right: -8px !important; }
   
   .print-page-wrapper { page-break-after: always; position: relative; overflow: hidden; margin: 0 auto; border: none !important; outline: none !important; }
   .editing-mode { outline: 2px solid #3b82f6 !important; border-radius: 4px; padding: 2px; }
@@ -81,14 +88,14 @@ const DoubleEdge = ({ id, sourceX, sourceY, targetX, targetY, sourcePosition, ta
       {isDouble && !hideLine && (
         <svg style={{ position: 'absolute', width: 0, height: 0 }}>
           <defs>
-            {/* ★ デザイン維持：突き抜けを物理カットするマスク構造（背景色 #fff3dd） */}
-            <marker id={`custom-arrow-${id}`} viewBox="0 0 24 24" refX="22" refY="12" markerWidth={customArrowSize} markerHeight={customArrowSize} markerUnits="userSpaceOnUse" orient="auto">
-              <rect x="0" y="0" width="24" height="24" fill="#fff3dd" stroke="none" />
-              <polyline points="4,3 18,12 4,21" fill="none" stroke={edgeColor} strokeWidth={strokeWidth >= 3 ? 3 : 2} strokeLinecap="round" strokeLinejoin="round" />
+            {/* ★ お客様から頂いた「完璧な矢印」のコードを一切変更せずにそのまま使用 */}
+            <marker id={`custom-arrow-${id}`} viewBox="0 0 24 24" refX="10" refY="12" markerWidth={customArrowSize} markerHeight={customArrowSize} markerUnits="userSpaceOnUse" orient="auto">
+              <polygon points="0,0 20,12 0,24" fill="var(--bg-color, #ffffff)" stroke="none" />
+              <polyline points="4,4 18,12 4,20" fill="none" stroke={edgeColor} strokeWidth={strokeWidth >= 3 ? 3 : 2} strokeLinecap="round" strokeLinejoin="round" />
             </marker>
-            <marker id={`custom-arrow-start-${id}`} viewBox="0 0 24 24" refX="2" refY="12" markerWidth={customArrowSize} markerHeight={customArrowSize} markerUnits="userSpaceOnUse" orient="auto">
-              <rect x="0" y="0" width="24" height="24" fill="#fff3dd" stroke="none" />
-              <polyline points="20,3 6,12 20,21" fill="none" stroke={edgeColor} strokeWidth={strokeWidth >= 3 ? 3 : 2} strokeLinecap="round" strokeLinejoin="round" />
+            <marker id={`custom-arrow-start-${id}`} viewBox="0 0 24 24" refX="14" refY="12" markerWidth={customArrowSize} markerHeight={customArrowSize} markerUnits="userSpaceOnUse" orient="auto">
+              <polygon points="24,0 4,12 24,24" fill="var(--bg-color, #ffffff)" stroke="none" />
+              <polyline points="20,4 6,12 20,20" fill="none" stroke={edgeColor} strokeWidth={strokeWidth >= 3 ? 3 : 2} strokeLinecap="round" strokeLinejoin="round" />
             </marker>
           </defs>
         </svg>
@@ -98,7 +105,7 @@ const DoubleEdge = ({ id, sourceX, sourceY, targetX, targetY, sourcePosition, ta
           isDouble ? (
             <>
               <BaseEdge path={edgePath} style={{ ...style, strokeWidth: strokeWidth + 8, stroke: edgeColor }} />
-              <BaseEdge path={edgePath} style={{ ...style, strokeWidth: strokeWidth + 4, stroke: '#fff3dd' }} />
+              <BaseEdge path={edgePath} style={{ ...style, strokeWidth: strokeWidth + 4, stroke: 'var(--bg-color, #ffffff)' }} />
               <BaseEdge path={edgePath} markerEnd={rMarkerEnd} markerStart={rMarkerStart} style={{ strokeWidth: strokeWidth, stroke: 'transparent', fill: 'none' }} />
             </>
           ) : ( <BaseEdge id={id} path={edgePath} markerEnd={rMarkerEnd} markerStart={rMarkerStart} style={{ ...style, strokeWidth, stroke: edgeColor }} /> )
@@ -284,7 +291,7 @@ function FlowEditor() {
       }));
   };
 
-  // ★ 論理ブロックスタック（証明展開）機能：gapX を 100 に固定
+  // ★ 論理ブロックスタック（証明展開）機能
   const addLogicalDerivationBlock = useCallback((type: 'double_arrow' | 'single_arrow' | 'and' | 'or') => {
     if (!primaryNode) return;
     takeSnapshot();
@@ -296,12 +303,13 @@ function FlowEditor() {
     const y0 = primaryNode.position.y;
 
     const currentNodes = nodesRef.current;
+    
     const isDerivationBlock = (n: any) => n.data?.isDerivationBlock && n.data?.parentNodeId === primaryNode.id;
     const derivationBlocks = currentNodes.filter(n => isDerivationBlock(n) && !n.data?.isTransparentHelper);
     
     const count = derivationBlocks.length;
     
-    // ★ ここを100に固定！
+    // ★ 論理ブロックの間隔は 100px 固定をそのまま維持！
     const gapX = 100; 
     const gapY = h0; 
     
@@ -341,15 +349,15 @@ function FlowEditor() {
     const edgeId = `e-${sourceNodeId}-${newNodeId}-${Date.now()}`;
     let edgeProps: any = { type: 'default', label: '', style: { strokeWidth: 2, stroke: '#333' }, data: { color: '#333' } };
     
-    // ★ AND / OR の場合は hideLine: true を付与して線を完全に透明にする
     if (type === 'double_arrow') { edgeProps.data.markerType = 'custom-double-both'; edgeProps.data.double = true; edgeProps.data.fontSize = 18; } 
     else if (type === 'single_arrow') { edgeProps.data.markerType = 'custom-double-arrow'; edgeProps.data.double = true; edgeProps.data.fontSize = 18; } 
     else if (type === 'and') { edgeProps.data.markerType = 'none'; edgeProps.data.fontSize = 20; edgeProps.label = '∧'; edgeProps.data.hideLine = true; } 
     else if (type === 'or') { edgeProps.data.markerType = 'none'; edgeProps.data.fontSize = 20; edgeProps.label = '∨'; edgeProps.data.hideLine = true; }
 
+    // ★ 論理ブロック接続専用の隠しハンドルを使うことで、論理記号の8pxの間隔を維持する
     setEdges((eds: any[]) => [...eds.map((e: any) => ({...e, selected:false})), { 
         id: edgeId, source: sourceNodeId, target: newNodeId, 
-        sourceHandle: 'right-src', targetHandle: 'left-tgt', 
+        sourceHandle: 'logical-right-src', targetHandle: 'logical-left-tgt', 
         ...edgeProps, zIndex: 0 
     }]);
   }, [primaryNode, takeSnapshot]);
@@ -1014,8 +1022,25 @@ function FlowEditor() {
               
               {n.id !== 'center-mark' && (
                 <>
-                  <Handle type="target" position={Position.Top} id="top-tgt" className="custom-handle-target custom-handle-offset-top" /><Handle type="target" position={Position.Bottom} id="bottom-tgt" className="custom-handle-target custom-handle-offset-bottom" /><Handle type="target" position={Position.Left} id="left-tgt" className="custom-handle-target custom-handle-offset-left" /><Handle type="target" position={Position.Right} id="right-tgt" className="custom-handle-target custom-handle-offset-right" />
-                  <Handle type="source" position={Position.Left} id="left-src" className="custom-handle custom-handle-offset-left" /><Handle type="source" position={Position.Right} id="right-src" className="custom-handle custom-handle-offset-right" /><Handle type="source" position={Position.Top} id="top-src" className="custom-handle custom-handle-offset-top" /><Handle type="source" position={Position.Bottom} id="bottom-src" className="custom-handle custom-handle-offset-bottom" />
+                  {/* ★ 通常の線が接続されるハンドル（枠線との隙間を3pxに設定） */}
+                  <Handle type="target" position={Position.Top} id="top-tgt" className="custom-handle-target custom-handle-offset-top" />
+                  <Handle type="target" position={Position.Bottom} id="bottom-tgt" className="custom-handle-target custom-handle-offset-bottom" />
+                  <Handle type="target" position={Position.Left} id="left-tgt" className="custom-handle-target custom-handle-offset-left" />
+                  <Handle type="target" position={Position.Right} id="right-tgt" className="custom-handle-target custom-handle-offset-right" />
+                  <Handle type="source" position={Position.Left} id="left-src" className="custom-handle custom-handle-offset-left" />
+                  <Handle type="source" position={Position.Right} id="right-src" className="custom-handle custom-handle-offset-right" />
+                  <Handle type="source" position={Position.Top} id="top-src" className="custom-handle custom-handle-offset-top" />
+                  <Handle type="source" position={Position.Bottom} id="bottom-src" className="custom-handle custom-handle-offset-bottom" />
+
+                  {/* ★ 論理ブロック専用の隠しハンドル（論理記号の距離や見た目を絶対に維持するため、8pxの隙間を確保） */}
+                  <Handle type="target" position={Position.Top} id="logical-top-tgt" className="logical-handle logical-handle-offset-top" />
+                  <Handle type="target" position={Position.Bottom} id="logical-bottom-tgt" className="logical-handle logical-handle-offset-bottom" />
+                  <Handle type="target" position={Position.Left} id="logical-left-tgt" className="logical-handle logical-handle-offset-left" />
+                  <Handle type="target" position={Position.Right} id="logical-right-tgt" className="logical-handle logical-handle-offset-right" />
+                  <Handle type="source" position={Position.Left} id="logical-left-src" className="logical-handle logical-handle-offset-left" />
+                  <Handle type="source" position={Position.Right} id="logical-right-src" className="logical-handle logical-handle-offset-right" />
+                  <Handle type="source" position={Position.Top} id="logical-top-src" className="logical-handle logical-handle-offset-top" />
+                  <Handle type="source" position={Position.Bottom} id="logical-bottom-src" className="logical-handle logical-handle-offset-bottom" />
                 </>
               )}
 
