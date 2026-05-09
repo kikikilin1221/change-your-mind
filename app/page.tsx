@@ -36,14 +36,14 @@ const GLOBAL_CSS = `
   .react-flow__handle { background: transparent !important; border: none !important; width: 1px !important; height: 1px !important; min-width: 0 !important; min-height: 0 !important; box-shadow: none !important; }
   .custom-handle, .custom-handle-target { width: 24px !important; height: 24px !important; background: transparent !important; border: none !important; z-index: 10 !important; cursor: crosshair !important; pointer-events: auto !important; display: flex; justify-content: center; align-items: center; }
   
-  /* ★ 改善：黒い点をhover時も含めて完全に削除 */
+  /* ★ 改善：黒い点（ホバー時の丸も含む）を完全に削除 */
   .custom-handle::before, .custom-handle-target::before, .custom-handle:hover::before, .custom-handle-target:hover::before { display: none !important; opacity: 0 !important; content: none !important; }
   
-  /* ★ 普通の線が繋がる距離を枠線ギリギリの 3px に縮小 */
-  .custom-handle-offset-top { top: -3px !important; }
-  .custom-handle-offset-bottom { bottom: -3px !important; }
-  .custom-handle-offset-left { left: -3px !important; }
-  .custom-handle-offset-right { right: -3px !important; }
+  /* ★ 改善：普通の線が繋がる距離を枠線ギリギリ（0px）に設定 */
+  .custom-handle-offset-top { top: 0px !important; }
+  .custom-handle-offset-bottom { bottom: 0px !important; }
+  .custom-handle-offset-left { left: 0px !important; }
+  .custom-handle-offset-right { right: 0px !important; }
 
   /* ★ 論理ブロック専用の隠しハンドル（論理記号の距離や見た目は絶対に維持する） */
   .logical-handle { width: 0px !important; height: 0px !important; min-width: 0 !important; min-height: 0 !important; border: none !important; background: transparent !important; }
@@ -89,11 +89,13 @@ const DoubleEdge = ({ id, sourceX, sourceY, targetX, targetY, sourcePosition, ta
       {isDouble && !hideLine && (
         <svg style={{ position: 'absolute', width: 0, height: 0 }}>
           <defs>
-            {/* ★ 改善：肌色マスクを撤廃し、refXを傘の付け根(4と20)に設定して、二重線が傘にぴったり接する（突き破らない）ように修正 */}
-            <marker id={`custom-arrow-${id}`} viewBox="0 0 24 24" refX="4" refY="12" markerWidth={customArrowSize} markerHeight={customArrowSize} markerUnits="userSpaceOnUse" orient="auto">
+            {/* ★ 改善：refX を 12 に修正。これにより、論理ハンドルの-8pxと相殺され、枠線にぴったり接しつつ食い込まない完璧な位置になります */}
+            <marker id={`custom-arrow-${id}`} viewBox="0 0 24 24" refX="12" refY="12" markerWidth={customArrowSize} markerHeight={customArrowSize} markerUnits="userSpaceOnUse" orient="auto">
+              <polygon points="0,0 20,12 0,24" fill="var(--bg-color, #ffffff)" stroke="none" />
               <polyline points="4,4 18,12 4,20" fill="none" stroke={edgeColor} strokeWidth={strokeWidth >= 3 ? 3 : 2} strokeLinecap="round" strokeLinejoin="round" />
             </marker>
-            <marker id={`custom-arrow-start-${id}`} viewBox="0 0 24 24" refX="20" refY="12" markerWidth={customArrowSize} markerHeight={customArrowSize} markerUnits="userSpaceOnUse" orient="auto">
+            <marker id={`custom-arrow-start-${id}`} viewBox="0 0 24 24" refX="12" refY="12" markerWidth={customArrowSize} markerHeight={customArrowSize} markerUnits="userSpaceOnUse" orient="auto">
+              <polygon points="24,0 4,12 24,24" fill="var(--bg-color, #ffffff)" stroke="none" />
               <polyline points="20,4 6,12 20,20" fill="none" stroke={edgeColor} strokeWidth={strokeWidth >= 3 ? 3 : 2} strokeLinecap="round" strokeLinejoin="round" />
             </marker>
           </defs>
@@ -1018,7 +1020,7 @@ function FlowEditor() {
               
               {n.id !== 'center-mark' && (
                 <>
-                  {/* ★ 通常の線が接続されるハンドル（枠線との隙間を2pxに設定） */}
+                  {/* ★ 通常の線が接続されるハンドル（枠線から2px離す設定） */}
                   <Handle type="target" position={Position.Top} id="top-tgt" className="custom-handle-target custom-handle-offset-top" />
                   <Handle type="target" position={Position.Bottom} id="bottom-tgt" className="custom-handle-target custom-handle-offset-bottom" />
                   <Handle type="target" position={Position.Left} id="left-tgt" className="custom-handle-target custom-handle-offset-left" />
