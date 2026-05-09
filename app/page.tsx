@@ -45,7 +45,7 @@ const GLOBAL_CSS = `
   .custom-handle-offset-right { right: -3px !important; }
 
   /* ★ 論理ブロック専用の隠しハンドル（論理記号の距離や見た目は絶対に維持する） */
-  .logical-handle { width: 0px !important; height: 0px !important; min-width: 0 !important; min-height: 0 !important; border: none !important; background: transparent !important; }
+  .logical-handle { width: 0px !important; height: 0px !important; min-width: 0 !important; min-height: 0 !important; border: none !important; background: transparent !important; pointer-events: none !important; }
   .logical-handle-offset-top { top: -8px !important; }
   .logical-handle-offset-bottom { bottom: -8px !important; }
   .logical-handle-offset-left { left: -8px !important; }
@@ -88,13 +88,13 @@ const DoubleEdge = ({ id, sourceX, sourceY, targetX, targetY, sourcePosition, ta
       {isDouble && !hideLine && (
         <svg style={{ position: 'absolute', width: 0, height: 0 }}>
           <defs>
-            {/* ★ お客様から頂いた「完璧な矢印」のコードを一切変更せずにそのまま使用 */}
+            {/* ★ デザイン維持：突き抜けを物理カットするマスク構造（背景色 #fff3dd） */}
             <marker id={`custom-arrow-${id}`} viewBox="0 0 24 24" refX="10" refY="12" markerWidth={customArrowSize} markerHeight={customArrowSize} markerUnits="userSpaceOnUse" orient="auto">
-              <polygon points="0,0 20,12 0,24" fill="var(--bg-color, #ffffff)" stroke="none" />
+              <polygon points="0,0 20,12 0,24" fill="#fff3dd" stroke="none" />
               <polyline points="4,4 18,12 4,20" fill="none" stroke={edgeColor} strokeWidth={strokeWidth >= 3 ? 3 : 2} strokeLinecap="round" strokeLinejoin="round" />
             </marker>
             <marker id={`custom-arrow-start-${id}`} viewBox="0 0 24 24" refX="14" refY="12" markerWidth={customArrowSize} markerHeight={customArrowSize} markerUnits="userSpaceOnUse" orient="auto">
-              <polygon points="24,0 4,12 24,24" fill="var(--bg-color, #ffffff)" stroke="none" />
+              <polygon points="24,0 4,12 24,24" fill="#fff3dd" stroke="none" />
               <polyline points="20,4 6,12 20,20" fill="none" stroke={edgeColor} strokeWidth={strokeWidth >= 3 ? 3 : 2} strokeLinecap="round" strokeLinejoin="round" />
             </marker>
           </defs>
@@ -105,7 +105,7 @@ const DoubleEdge = ({ id, sourceX, sourceY, targetX, targetY, sourcePosition, ta
           isDouble ? (
             <>
               <BaseEdge path={edgePath} style={{ ...style, strokeWidth: strokeWidth + 8, stroke: edgeColor }} />
-              <BaseEdge path={edgePath} style={{ ...style, strokeWidth: strokeWidth + 4, stroke: 'var(--bg-color, #ffffff)' }} />
+              <BaseEdge path={edgePath} style={{ ...style, strokeWidth: strokeWidth + 4, stroke: '#fff3dd' }} />
               <BaseEdge path={edgePath} markerEnd={rMarkerEnd} markerStart={rMarkerStart} style={{ strokeWidth: strokeWidth, stroke: 'transparent', fill: 'none' }} />
             </>
           ) : ( <BaseEdge id={id} path={edgePath} markerEnd={rMarkerEnd} markerStart={rMarkerStart} style={{ ...style, strokeWidth, stroke: edgeColor }} /> )
@@ -291,7 +291,7 @@ function FlowEditor() {
       }));
   };
 
-  // ★ 論理ブロックスタック（証明展開）機能
+  // ★ 論理ブロックスタック（証明展開）機能：gapX を 100 に固定
   const addLogicalDerivationBlock = useCallback((type: 'double_arrow' | 'single_arrow' | 'and' | 'or') => {
     if (!primaryNode) return;
     takeSnapshot();
@@ -303,7 +303,6 @@ function FlowEditor() {
     const y0 = primaryNode.position.y;
 
     const currentNodes = nodesRef.current;
-    
     const isDerivationBlock = (n: any) => n.data?.isDerivationBlock && n.data?.parentNodeId === primaryNode.id;
     const derivationBlocks = currentNodes.filter(n => isDerivationBlock(n) && !n.data?.isTransparentHelper);
     
@@ -349,6 +348,7 @@ function FlowEditor() {
     const edgeId = `e-${sourceNodeId}-${newNodeId}-${Date.now()}`;
     let edgeProps: any = { type: 'default', label: '', style: { strokeWidth: 2, stroke: '#333' }, data: { color: '#333' } };
     
+    // ★ AND / OR の場合は hideLine: true を付与して線を完全に透明にする
     if (type === 'double_arrow') { edgeProps.data.markerType = 'custom-double-both'; edgeProps.data.double = true; edgeProps.data.fontSize = 18; } 
     else if (type === 'single_arrow') { edgeProps.data.markerType = 'custom-double-arrow'; edgeProps.data.double = true; edgeProps.data.fontSize = 18; } 
     else if (type === 'and') { edgeProps.data.markerType = 'none'; edgeProps.data.fontSize = 20; edgeProps.label = '∧'; edgeProps.data.hideLine = true; } 
@@ -1165,8 +1165,9 @@ function FlowEditor() {
             <Background color="#f1f1f1" className="no-print" /><Controls className="no-print" /><SmartGuides guides={guides} />
           </ReactFlow>
           
+          {/* ★ 改善：メニューパネルでのクリックがキャンバスに伝播しないように onMouseDown を追加 */}
           {selectedNodes.length > 0 && primaryNode && primaryNode.type !== 'printZone' && (
-            <div className="no-print" style={{ position:'absolute', right:0, top:0, bottom:0, width:'320px', borderLeft:'1px solid #ddd', padding:'15px', backgroundColor:'#fff', zIndex:1000, overflowY: 'auto', boxShadow: '-4px 0 10px rgba(0,0,0,0.05)' }}>
+            <div className="no-print" onMouseDown={(e) => e.stopPropagation()} onClick={(e) => e.stopPropagation()} style={{ position:'absolute', right:0, top:0, bottom:0, width:'320px', borderLeft:'1px solid #ddd', padding:'15px', backgroundColor:'#fff', zIndex:1000, overflowY: 'auto', boxShadow: '-4px 0 10px rgba(0,0,0,0.05)' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
                 <h3 style={{fontSize:'14px', margin: 0}}>{selectedNodes.length > 1 ? `${selectedNodes.length}個の要素を一括編集` : primaryNode.data?.isTable ? '表の設定' : primaryNode.data?.isImage ? '画像編集' : primaryNode.data?.isShape ? '図形設定' : 'テキスト設定'}</h3>
                 <button onClick={clearSelection} style={{ border: 'none', background: 'none', fontSize: '18px', cursor: 'pointer', padding: '0 5px' }}>×</button>
@@ -1345,11 +1346,13 @@ function FlowEditor() {
             </div>
           )}
 
+          {/* ★ 改善：メニューパネルでのクリックがキャンバスに伝播しないように onMouseDown を追加 */}
           {selectedEdge && (
-            <div className="no-print" style={{ position:'absolute', right:0, top:0, bottom:0, width:'300px', borderLeft:'1px solid #ddd', padding:'20px', backgroundColor:'#fff', zIndex:1000, overflowY: 'auto' }}>
+            <div className="no-print" onMouseDown={(e) => e.stopPropagation()} onClick={(e) => e.stopPropagation()} style={{ position:'absolute', right:0, top:0, bottom:0, width:'300px', borderLeft:'1px solid #ddd', padding:'20px', backgroundColor:'#fff', zIndex:1000, overflowY: 'auto' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
                 <h3 style={{fontSize:'14px', margin: 0}}>線のデザイン</h3>
-                <button onClick={clearSelection} style={{ border: 'none', background: 'none', fontSize: '18px', cursor: 'pointer', padding: '0 5px' }}>×</button>
+                {/* ★ 改善：×ボタンを押したときに「線（エッジ）の選択」だけを解除し、ノードの選択はそのまま維持する */}
+                <button onClick={(e) => { e.stopPropagation(); setEdges((eds: any[]) => eds.map((edge: any) => ({ ...edge, selected: false }))); }} style={{ border: 'none', background: 'none', fontSize: '18px', cursor: 'pointer', padding: '0 5px' }}>×</button>
               </div>
 
               <div style={{ display:'flex', gap:'5px', marginBottom:'15px' }}>
