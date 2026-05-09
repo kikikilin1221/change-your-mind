@@ -33,27 +33,20 @@ const GLOBAL_CSS = `
       outline: none !important;
   }
 
-  /* ★ 改善：黒い点を完全に削除し、普通の線を枠線から「2px」手前で止める */
-  .custom-handle, .custom-handle-target { 
-      width: 0px !important; height: 0px !important; background: transparent !important; 
-      border: none !important; z-index: 10 !important; cursor: crosshair !important; 
-      position: absolute; pointer-events: auto !important; 
-  }
-  .custom-handle::before, .custom-handle-target::before, .custom-handle::after, .custom-handle-target::after { 
-      display: none !important; opacity: 0 !important; content: none !important; 
-  }
+  .react-flow__handle { background: transparent !important; border: none !important; width: 1px !important; height: 1px !important; min-width: 0 !important; min-height: 0 !important; box-shadow: none !important; }
+  .custom-handle, .custom-handle-target { width: 24px !important; height: 24px !important; background: transparent !important; border: none !important; z-index: 10 !important; cursor: crosshair !important; pointer-events: auto !important; display: flex; justify-content: center; align-items: center; }
   
-  .custom-handle-offset-top { top: -2px !important; }
-  .custom-handle-offset-bottom { bottom: -2px !important; }
-  .custom-handle-offset-left { left: -2px !important; }
-  .custom-handle-offset-right { right: -2px !important; }
+  /* ★ 改善：黒い点をhover時も含めて完全に削除 */
+  .custom-handle::before, .custom-handle-target::before, .custom-handle:hover::before, .custom-handle-target:hover::before { display: none !important; opacity: 0 !important; content: none !important; }
+  
+  /* ★ 普通の線が繋がる距離を枠線ギリギリの 3px に縮小 */
+  .custom-handle-offset-top { top: -3px !important; }
+  .custom-handle-offset-bottom { bottom: -3px !important; }
+  .custom-handle-offset-left { left: -3px !important; }
+  .custom-handle-offset-right { right: -3px !important; }
 
   /* ★ 論理ブロック専用の隠しハンドル（論理記号の距離や見た目は絶対に維持する） */
-  .logical-handle { 
-      width: 0px !important; height: 0px !important; min-width: 0 !important; min-height: 0 !important; 
-      border: none !important; background: transparent !important; pointer-events: none !important; position: absolute; 
-  }
-  .logical-handle::before, .logical-handle::after { display: none !important; content: none !important; }
+  .logical-handle { width: 0px !important; height: 0px !important; min-width: 0 !important; min-height: 0 !important; border: none !important; background: transparent !important; }
   .logical-handle-offset-top { top: -8px !important; }
   .logical-handle-offset-bottom { bottom: -8px !important; }
   .logical-handle-offset-left { left: -8px !important; }
@@ -86,8 +79,8 @@ const DoubleEdge = ({ id, sourceX, sourceY, targetX, targetY, sourcePosition, ta
   const displayLabel = label === undefined || label === null || label === 'undefined' ? '' : String(label);
   
   let rMarkerEnd = markerEnd; let rMarkerStart = markerStart;
-  if (mType === 'arrow' || mType === 'both' || mType === 'custom-double-arrow' || mType === 'custom-double-both') { rMarkerEnd = `url(#custom-arrow-${id})`; }
-  if (mType === 'both' || mType === 'custom-double-both') { rMarkerStart = `url(#custom-arrow-start-${id})`; }
+  if (mType === 'custom-double-arrow' || mType === 'custom-double-both') { rMarkerEnd = `url(#custom-arrow-${id})`; }
+  if (mType === 'custom-double-both') { rMarkerStart = `url(#custom-arrow-start-${id})`; }
   
   const customArrowSize = strokeWidth * 2 + 18; 
 
@@ -96,12 +89,12 @@ const DoubleEdge = ({ id, sourceX, sourceY, targetX, targetY, sourcePosition, ta
       {isDouble && !hideLine && (
         <svg style={{ position: 'absolute', width: 0, height: 0 }}>
           <defs>
-            {/* ★ 改善：肌色マスクを完全撤廃。fill="none"でシンプルに。refX=18で矢印の先端とパスを完璧に一致させ、突き抜けや食い込みを防止 */}
-            <marker id={`custom-arrow-${id}`} viewBox="0 0 24 24" refX="18" refY="12" markerWidth={customArrowSize} markerHeight={customArrowSize} markerUnits="userSpaceOnUse" orient="auto">
-              <polyline points="6,4 18,12 6,20" fill="none" stroke={edgeColor} strokeWidth={strokeWidth >= 3 ? 3 : 2} strokeLinecap="round" strokeLinejoin="round" />
+            {/* ★ 改善：肌色マスクを撤廃し、refXを傘の付け根(4と20)に設定して、二重線が傘にぴったり接する（突き破らない）ように修正 */}
+            <marker id={`custom-arrow-${id}`} viewBox="0 0 24 24" refX="4" refY="12" markerWidth={customArrowSize} markerHeight={customArrowSize} markerUnits="userSpaceOnUse" orient="auto">
+              <polyline points="4,4 18,12 4,20" fill="none" stroke={edgeColor} strokeWidth={strokeWidth >= 3 ? 3 : 2} strokeLinecap="round" strokeLinejoin="round" />
             </marker>
-            <marker id={`custom-arrow-start-${id}`} viewBox="0 0 24 24" refX="6" refY="12" markerWidth={customArrowSize} markerHeight={customArrowSize} markerUnits="userSpaceOnUse" orient="auto">
-              <polyline points="18,4 6,12 18,20" fill="none" stroke={edgeColor} strokeWidth={strokeWidth >= 3 ? 3 : 2} strokeLinecap="round" strokeLinejoin="round" />
+            <marker id={`custom-arrow-start-${id}`} viewBox="0 0 24 24" refX="20" refY="12" markerWidth={customArrowSize} markerHeight={customArrowSize} markerUnits="userSpaceOnUse" orient="auto">
+              <polyline points="20,4 6,12 20,20" fill="none" stroke={edgeColor} strokeWidth={strokeWidth >= 3 ? 3 : 2} strokeLinecap="round" strokeLinejoin="round" />
             </marker>
           </defs>
         </svg>
@@ -1025,7 +1018,7 @@ function FlowEditor() {
               
               {n.id !== 'center-mark' && (
                 <>
-                  {/* ★ 通常の線が接続されるハンドル（枠線から2px離す設定） */}
+                  {/* ★ 通常の線が接続されるハンドル（枠線との隙間を2pxに設定） */}
                   <Handle type="target" position={Position.Top} id="top-tgt" className="custom-handle-target custom-handle-offset-top" />
                   <Handle type="target" position={Position.Bottom} id="bottom-tgt" className="custom-handle-target custom-handle-offset-bottom" />
                   <Handle type="target" position={Position.Left} id="left-tgt" className="custom-handle-target custom-handle-offset-left" />
