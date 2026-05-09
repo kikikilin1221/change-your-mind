@@ -23,21 +23,39 @@ const GLOBAL_CSS = `
   }
 
   .react-flow__node, .react-flow__node-default, .react-flow__node-custom {
-      border: none !important; box-shadow: none !important; background: transparent !important; border-radius: 0 !important; padding: 0 !important; outline: none !important;
+      border: none !important;
+      box-shadow: none !important;
+      background: transparent !important;
+      border-radius: 0 !important;
+      padding: 0 !important;
+      outline: none !important;
   }
 
-  /* ★ 黒い点を完全に削除し、ハンドルを10pxに設定して枠線の中央に完璧に配置（食い込み・隙間ゼロ） */
-  .custom-handle, .custom-handle-target, .logical-handle { 
-      width: 10px !important; height: 10px !important; background: transparent !important; border: none !important; z-index: 10 !important; cursor: crosshair !important; position: absolute; 
+  /* ★ 改善：黒い点を完全に削除し、普通の線を枠線から「2px」手前で止める */
+  .custom-handle, .custom-handle-target { 
+      width: 0px !important; height: 0px !important; background: transparent !important; 
+      border: none !important; z-index: 10 !important; cursor: crosshair !important; 
+      position: absolute; pointer-events: auto !important; 
   }
-  .custom-handle::before, .custom-handle-target::before, .custom-handle::after, .custom-handle-target::after { display: none !important; opacity: 0 !important; }
-  .logical-handle { pointer-events: none !important; }
+  .custom-handle::before, .custom-handle-target::before, .custom-handle::after, .custom-handle-target::after { 
+      display: none !important; opacity: 0 !important; content: none !important; 
+  }
   
-  /* 10pxのハンドルの中心を枠線上にぴったり合わせるための -5px */
-  .custom-handle-offset-top, .logical-handle-offset-top { top: -5px !important; }
-  .custom-handle-offset-bottom, .logical-handle-offset-bottom { bottom: -5px !important; }
-  .custom-handle-offset-left, .logical-handle-offset-left { left: -5px !important; }
-  .custom-handle-offset-right, .logical-handle-offset-right { right: -5px !important; }
+  .custom-handle-offset-top { top: -2px !important; }
+  .custom-handle-offset-bottom { bottom: -2px !important; }
+  .custom-handle-offset-left { left: -2px !important; }
+  .custom-handle-offset-right { right: -2px !important; }
+
+  /* ★ 論理ブロック専用の隠しハンドル（論理記号の距離や見た目は絶対に維持する） */
+  .logical-handle { 
+      width: 0px !important; height: 0px !important; min-width: 0 !important; min-height: 0 !important; 
+      border: none !important; background: transparent !important; pointer-events: none !important; position: absolute; 
+  }
+  .logical-handle::before, .logical-handle::after { display: none !important; content: none !important; }
+  .logical-handle-offset-top { top: -8px !important; }
+  .logical-handle-offset-bottom { bottom: -8px !important; }
+  .logical-handle-offset-left { left: -8px !important; }
+  .logical-handle-offset-right { right: -8px !important; }
   
   .print-page-wrapper { page-break-after: always; position: relative; overflow: hidden; margin: 0 auto; border: none !important; outline: none !important; }
   .editing-mode { outline: 2px solid #3b82f6 !important; border-radius: 4px; padding: 2px; }
@@ -62,30 +80,31 @@ const DoubleEdge = ({ id, sourceX, sourceY, targetX, targetY, sourcePosition, ta
   const labelStyle = (data as any)?.labelStyle || { textAlign: 'center' }; 
   const fontSize = (data as any)?.fontSize || 14;
   const mType = (data as any)?.markerType;
+
   const displayLabel = label === undefined || label === null || label === 'undefined' ? '' : String(label);
   
   let rMarkerEnd = markerEnd; let rMarkerStart = markerStart;
-  if (mType === 'custom-double-arrow' || mType === 'custom-double-both') { rMarkerEnd = `url(#custom-arrow-${id})`; }
-  if (mType === 'custom-double-both') { rMarkerStart = `url(#custom-arrow-start-${id})`; }
+  if (mType === 'arrow' || mType === 'both' || mType === 'custom-double-arrow' || mType === 'custom-double-both') { rMarkerEnd = `url(#custom-arrow-${id})`; }
+  if (mType === 'both' || mType === 'custom-double-both') { rMarkerStart = `url(#custom-arrow-start-${id})`; }
+  
   const customArrowSize = strokeWidth * 2 + 18; 
 
   return (
     <>
-      {isDouble && !hideLine && (
+      {!hideLine && (
         <svg style={{ position: 'absolute', width: 0, height: 0 }}>
           <defs>
-            {/* ★ 矢印の先端(18)が枠線とぴったり接し、キャンバス背景色(var(--bg-color))のマスクで突き抜けを完全に防止 */}
+            {/* ★ 改善：肌色マスクを完全撤廃。fill="none"でシンプルに。refX=18で矢印の先端とパスを完璧に一致させ、突き抜けや食い込みを防止 */}
             <marker id={`custom-arrow-${id}`} viewBox="0 0 24 24" refX="18" refY="12" markerWidth={customArrowSize} markerHeight={customArrowSize} markerUnits="userSpaceOnUse" orient="auto">
-              <polygon points="0,0 18,12 0,24" fill="var(--bg-color, #ffffff)" stroke="none" />
               <polyline points="6,4 18,12 6,20" fill="none" stroke={edgeColor} strokeWidth={strokeWidth >= 3 ? 3 : 2} strokeLinecap="round" strokeLinejoin="round" />
             </marker>
             <marker id={`custom-arrow-start-${id}`} viewBox="0 0 24 24" refX="6" refY="12" markerWidth={customArrowSize} markerHeight={customArrowSize} markerUnits="userSpaceOnUse" orient="auto">
-              <polygon points="24,0 6,12 24,24" fill="var(--bg-color, #ffffff)" stroke="none" />
               <polyline points="18,4 6,12 18,20" fill="none" stroke={edgeColor} strokeWidth={strokeWidth >= 3 ? 3 : 2} strokeLinecap="round" strokeLinejoin="round" />
             </marker>
           </defs>
         </svg>
       )}
+      
       {!hideLine && (
           isDouble ? (
             <>
@@ -95,6 +114,7 @@ const DoubleEdge = ({ id, sourceX, sourceY, targetX, targetY, sourcePosition, ta
             </>
           ) : ( <BaseEdge id={id} path={edgePath} markerEnd={rMarkerEnd} markerStart={rMarkerStart} style={{ ...style, strokeWidth, stroke: edgeColor }} /> )
       )}
+
       {displayLabel || isEditing ? (
         <EdgeLabelRenderer>
           <div className="no-print" style={{ position: 'absolute', transform: `translate(-50%, -50%) translate(${labelX}px,${labelY}px)`, zIndex: 1000, pointerEvents: 'auto' }}>
@@ -154,27 +174,34 @@ const safeCloneEdges = (eds: any[]) => eds.map(e => ({ ...e, data: { ...e.data }
 const edgeTypes = { default: DoubleEdge };
 const PASTEL_COLORS = ['#FFB7B2', '#FFDAC1', '#E2F0CB', '#B5EAD7', '#C7CEEA', '#F3E5F5', '#E1F5FE', '#FFF9C4', '#FCE4EC', '#E8F5E9'];
 const QUICK_TEXT_COLORS = ['#000000', '#FF0000', '#008000', '#0000FF', '#FFF000'];
+
 type TableActionType = { id: string; type: string; startX: number; startY: number; startR: number; startC: number; minC: number; maxC: number; minR: number; maxR: number; initWidths: number[]; initHeights: number[]; };
 
 function FlowEditor() {
   const { setViewport, getZoom } = useReactFlow();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const jsonImportRef = useRef<HTMLInputElement>(null);
+  
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [isTopBarOpen, setIsTopBarOpen] = useState(true);
   const [isBottomBarOpen, setIsBottomBarOpen] = useState(true);
+  
   const [isPrintMode, setIsPrintMode] = useState(false);
   const [isExecutingPrint, setIsExecutingPrint] = useState(false);
   const [isLassoMode, setIsLassoMode] = useState(false);
+
   const [files, setFiles] = useState<Record<string, any>>({});
   const [activeFileId, setActiveFileId] = useState<string>('default');
+  
   const [nodes, setNodes] = useState<any[]>([]);
   const [edges, setEdges] = useState<any[]>([]);
   const [levelData, setLevelData] = useState<Record<string, { nodes: any[]; edges: any[]; bgColor?: string; label?: string }>>({});
+  
   const [historyLevel, setHistoryLevel] = useState<string[]>([]);
   const [currentLevel, setCurrentLevel] = useState('root');
   const [currentLabel, setCurrentLabel] = useState('TOP層');
   const [guides, setGuides] = useState<{ lineX?: number, lineY?: number }>({});
+  
   const [partialFontSize, setPartialFontSize] = useState<number>(14);
   const [selectedCells, setSelectedCells] = useState<Record<string, string[]>>({});
   const [tableBorderWidth, setTableBorderWidth] = useState('1px');
@@ -185,10 +212,12 @@ function FlowEditor() {
   const imageCropDragRef = useRef<{ id: string, startX: number, startY: number, initX: number, initY: number } | null>(null);
   const tableActionRef = useRef<TableActionType | null>(null);
   const copiedTableCellsRef = useRef<any>(null); 
+
   const nodesRef = useRef<any[]>([]);
   const edgesRef = useRef<any[]>([]);
   const copiedNodesRef = useRef<any[]>([]);
   const currentLabelRef = useRef<string>(currentLabel);
+  
   const [past, setPast] = useState<{nodes: any[], edges: any[]}[]>([]);
   const [future, setFuture] = useState<{nodes: any[], edges: any[]}[]>([]);
 
@@ -199,6 +228,7 @@ function FlowEditor() {
   const selectedNodes = useMemo(() => nodes.filter((n: any) => n.selected), [nodes]);
   const primaryNode = selectedNodes.length > 0 ? selectedNodes[0] : null;
   const selectedEdge = useMemo(() => edges.find((e: any) => e.selected) || null, [edges]);
+
   const isTableEditing = primaryNode?.data?.isTable && (selectedCells[primaryNode.id]?.length || 0) > 0;
 
   const clearSelection = useCallback(() => {
@@ -252,6 +282,7 @@ function FlowEditor() {
           const newCells = { ...n.data.cells };
           const newColWidths = [...(n.data.colWidths || Array(n.data.cols).fill(100))];
           const newRowHeights = [...(n.data.rowHeights || Array(n.data.rows).fill(40))];
+          
           if (type === 'row') {
               newRowHeights.push(40);
               for(let c=0; c<newCols; c++) newCells[`${newRows-1}-${c}`] = { content: '', style: { border: '1px solid #ccc', hAlign: 'left', vAlign: 'top', writingMode: 'horizontal-tb' } };
@@ -264,6 +295,7 @@ function FlowEditor() {
       }));
   };
 
+  // ★ 論理ブロックスタック（証明展開）機能：gapX を 90px で維持
   const addLogicalDerivationBlock = useCallback((type: 'double_arrow' | 'single_arrow' | 'and' | 'or') => {
     if (!primaryNode) return;
     takeSnapshot();
@@ -273,13 +305,15 @@ function FlowEditor() {
     const parentFontSize = primaryNode.style?.fontSize || '14px';
     const x0 = primaryNode.position.x;
     const y0 = primaryNode.position.y;
+
     const currentNodes = nodesRef.current;
-    
     const isDerivationBlock = (n: any) => n.data?.isDerivationBlock && n.data?.parentNodeId === primaryNode.id;
     const derivationBlocks = currentNodes.filter(n => isDerivationBlock(n) && !n.data?.isTransparentHelper);
     
     const count = derivationBlocks.length;
-    const gapX = 90; // ★ 論理記号の間隔を 90px で固定
+    
+    // ★ 論理ブロックの間隔は 90px 固定
+    const gapX = 90; 
     const gapY = h0; 
     
     const newX = x0 + w0 + gapX;
@@ -323,6 +357,7 @@ function FlowEditor() {
     else if (type === 'and') { edgeProps.data.markerType = 'none'; edgeProps.data.fontSize = 20; edgeProps.label = '∧'; edgeProps.data.hideLine = true; } 
     else if (type === 'or') { edgeProps.data.markerType = 'none'; edgeProps.data.fontSize = 20; edgeProps.label = '∨'; edgeProps.data.hideLine = true; }
 
+    // ★ 論理ブロック接続専用の隠しハンドルを使うことで、論理記号の8pxの間隔を維持する
     setEdges((eds: any[]) => [...eds.map((e: any) => ({...e, selected:false})), { 
         id: edgeId, source: sourceNodeId, target: newNodeId, 
         sourceHandle: 'logical-right-src', targetHandle: 'logical-left-tgt', 
@@ -780,8 +815,6 @@ function FlowEditor() {
     return () => { window.removeEventListener('mousemove', onMouseMove); window.removeEventListener('mouseup', onMouseUp); };
   }, [getZoom]);
 
-// ↓↓↓ 後半へ続く ↓↓↓// ↑↑↑ 前半からの続き ↑↑↑
-
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]; if (!file) return; const reader = new FileReader();
     reader.onload = (ev) => {
@@ -991,7 +1024,7 @@ function FlowEditor() {
               
               {n.id !== 'center-mark' && (
                 <>
-                  {/* ★ 通常の線が接続されるハンドル（枠線にぴったり接する 0px 設定） */}
+                  {/* ★ 通常の線が接続されるハンドル（枠線から2px離す設定） */}
                   <Handle type="target" position={Position.Top} id="top-tgt" className="custom-handle-target custom-handle-offset-top" />
                   <Handle type="target" position={Position.Bottom} id="bottom-tgt" className="custom-handle-target custom-handle-offset-bottom" />
                   <Handle type="target" position={Position.Left} id="left-tgt" className="custom-handle-target custom-handle-offset-left" />
@@ -1134,7 +1167,7 @@ function FlowEditor() {
             <Background color="#f1f1f1" className="no-print" /><Controls className="no-print" /><SmartGuides guides={guides} />
           </ReactFlow>
           
-          {/* ★ 改善：メニューパネルでのクリックがキャンバスに伝播しないように onMouseDown を追加 */}
+          {/* ★ メニューパネルでのクリックがキャンバスに伝播しないように onMouseDown を追加 */}
           {selectedNodes.length > 0 && primaryNode && primaryNode.type !== 'printZone' && (
             <div className="no-print" onMouseDown={(e) => e.stopPropagation()} onClick={(e) => e.stopPropagation()} style={{ position:'absolute', right:0, top:0, bottom:0, width:'320px', borderLeft:'1px solid #ddd', padding:'15px', backgroundColor:'#fff', zIndex:1000, overflowY: 'auto', boxShadow: '-4px 0 10px rgba(0,0,0,0.05)' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
@@ -1224,7 +1257,6 @@ function FlowEditor() {
                   </div>
               </div>
 
-              {/* ★ 論理ブロック（証明展開）追加ボタン */}
               {!primaryNode.data?.isShape && !primaryNode.data?.isImage && !primaryNode.data?.isTable && (
                 <div style={{ padding: '10px', background: '#f8f9fa', borderRadius: '8px', marginBottom: '15px', border: '1px solid #ddd' }}>
                   <label style={{fontSize: '11px', fontWeight: 'bold', color: '#1d4ed8'}}>論理ブロック追加（証明展開）</label>
@@ -1315,12 +1347,12 @@ function FlowEditor() {
             </div>
           )}
 
-          {/* ★ 改善：メニュー操作時に選択が解除されないよう onMouseDown と onClick でイベント伝播を停止 */}
+          {/* ★ メニュー操作時に選択が解除されないよう onMouseDown と onClick でイベント伝播を停止 */}
           {selectedEdge && (
             <div className="no-print" onMouseDown={(e) => e.stopPropagation()} onClick={(e) => e.stopPropagation()} style={{ position:'absolute', right:0, top:0, bottom:0, width:'300px', borderLeft:'1px solid #ddd', padding:'20px', backgroundColor:'#fff', zIndex:1000, overflowY: 'auto' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
                 <h3 style={{fontSize:'14px', margin: 0}}>線のデザイン</h3>
-                {/* ★ 改善：×ボタンを押したときに「線（エッジ）の選択」だけを解除し、ノード選択は維持する */}
+                {/* ★ ×ボタンを押したときに「線（エッジ）の選択」だけを解除し、ノード選択は維持する */}
                 <button onClick={(e) => { e.stopPropagation(); setEdges((eds: any[]) => eds.map((edge: any) => ({ ...edge, selected: false }))); }} style={{ border: 'none', background: 'none', fontSize: '18px', cursor: 'pointer', padding: '0 5px' }}>×</button>
               </div>
 
