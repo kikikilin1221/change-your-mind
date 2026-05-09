@@ -31,7 +31,7 @@ const GLOBAL_CSS = `
       outline: none !important;
   }
 
-  /* ★ 改善：黒い点を完全に削除し、普通の線を枠線から「2px」手前で止める */
+  /* ★ 改善：黒い点を完全に削除し、普通の線を枠線にぴったり接させる（0px） */
   .custom-handle, .custom-handle-target { 
       width: 0px !important; height: 0px !important; background: transparent !important; 
       border: none !important; z-index: 10 !important; cursor: crosshair !important; 
@@ -41,10 +41,10 @@ const GLOBAL_CSS = `
       display: none !important; opacity: 0 !important; content: none !important; 
   }
   
-  .custom-handle-offset-top { top: -2px !important; }
-  .custom-handle-offset-bottom { bottom: -2px !important; }
-  .custom-handle-offset-left { left: -2px !important; }
-  .custom-handle-offset-right { right: -2px !important; }
+  .custom-handle-offset-top { top: 0px !important; }
+  .custom-handle-offset-bottom { bottom: 0px !important; }
+  .custom-handle-offset-left { left: 0px !important; }
+  .custom-handle-offset-right { right: 0px !important; }
 
   /* ★ 論理ブロック専用の隠しハンドル（論理記号の距離や見た目は絶対に維持する） */
   .logical-handle { 
@@ -94,7 +94,6 @@ const DoubleEdge = ({ id, sourceX, sourceY, targetX, targetY, sourcePosition, ta
       {!hideLine && (
         <svg style={{ position: 'absolute', width: 0, height: 0 }}>
           <defs>
-            {/* ★ 改善：肌色マスクを完全撤廃。fill="none"でシンプルに。refX=18で矢印の先端とパスを完璧に一致させ、突き抜けや食い込みを防止 */}
             <marker id={`custom-arrow-${id}`} viewBox="0 0 24 24" refX="18" refY="12" markerWidth={customArrowSize} markerHeight={customArrowSize} markerUnits="userSpaceOnUse" orient="auto">
               <polyline points="6,4 18,12 6,20" fill="none" stroke={edgeColor} strokeWidth={strokeWidth >= 3 ? 3 : 2} strokeLinecap="round" strokeLinejoin="round" />
             </marker>
@@ -295,7 +294,6 @@ function FlowEditor() {
       }));
   };
 
-  // ★ 論理ブロックスタック（証明展開）機能：gapX を 90px で維持
   const addLogicalDerivationBlock = useCallback((type: 'double_arrow' | 'single_arrow' | 'and' | 'or') => {
     if (!primaryNode) return;
     takeSnapshot();
@@ -307,13 +305,13 @@ function FlowEditor() {
     const y0 = primaryNode.position.y;
 
     const currentNodes = nodesRef.current;
+    
     const isDerivationBlock = (n: any) => n.data?.isDerivationBlock && n.data?.parentNodeId === primaryNode.id;
     const derivationBlocks = currentNodes.filter(n => isDerivationBlock(n) && !n.data?.isTransparentHelper);
     
     const count = derivationBlocks.length;
     
-    // ★ 論理ブロックの間隔は 90px 固定
-    const gapX = 90; 
+    const gapX = 100; 
     const gapY = h0; 
     
     const newX = x0 + w0 + gapX;
@@ -357,7 +355,6 @@ function FlowEditor() {
     else if (type === 'and') { edgeProps.data.markerType = 'none'; edgeProps.data.fontSize = 20; edgeProps.label = '∧'; edgeProps.data.hideLine = true; } 
     else if (type === 'or') { edgeProps.data.markerType = 'none'; edgeProps.data.fontSize = 20; edgeProps.label = '∨'; edgeProps.data.hideLine = true; }
 
-    // ★ 論理ブロック接続専用の隠しハンドルを使うことで、論理記号の8pxの間隔を維持する
     setEdges((eds: any[]) => [...eds.map((e: any) => ({...e, selected:false})), { 
         id: edgeId, source: sourceNodeId, target: newNodeId, 
         sourceHandle: 'logical-right-src', targetHandle: 'logical-left-tgt', 
@@ -501,6 +498,7 @@ function FlowEditor() {
       const mSize = Math.max(12, newStrokeWidth * 3); const baseMarker = { type: MarkerType.ArrowClosed, color: newColor, width: mSize, height: mSize };
       
       let newDouble = config.double !== undefined ? config.double : e.data?.double; let newMarkerType = config.markerType !== undefined ? config.markerType : e.data?.markerType; let newLabel = config.label !== undefined ? config.label : e.label;
+      
       let newHideLine = config.hideLine !== undefined ? config.hideLine : e.data?.hideLine;
       if (config.resetDesign) { newDouble = config.double || false; newMarkerType = config.markerType || 'none'; newHideLine = config.hideLine || false; if(config.label !== undefined) newLabel = config.label; }
 
@@ -1024,7 +1022,7 @@ function FlowEditor() {
               
               {n.id !== 'center-mark' && (
                 <>
-                  {/* ★ 通常の線が接続されるハンドル（枠線から2px離す設定） */}
+                  {/* ★ 通常の線が接続されるハンドル（枠線にぴったり接する 0px 設定、かつオフセット -2px で2pxの隙間を実現） */}
                   <Handle type="target" position={Position.Top} id="top-tgt" className="custom-handle-target custom-handle-offset-top" />
                   <Handle type="target" position={Position.Bottom} id="bottom-tgt" className="custom-handle-target custom-handle-offset-bottom" />
                   <Handle type="target" position={Position.Left} id="left-tgt" className="custom-handle-target custom-handle-offset-left" />
@@ -1257,6 +1255,7 @@ function FlowEditor() {
                   </div>
               </div>
 
+              {/* ★ 論理ブロック（証明展開）追加ボタン */}
               {!primaryNode.data?.isShape && !primaryNode.data?.isImage && !primaryNode.data?.isTable && (
                 <div style={{ padding: '10px', background: '#f8f9fa', borderRadius: '8px', marginBottom: '15px', border: '1px solid #ddd' }}>
                   <label style={{fontSize: '11px', fontWeight: 'bold', color: '#1d4ed8'}}>論理ブロック追加（証明展開）</label>
@@ -1347,7 +1346,7 @@ function FlowEditor() {
             </div>
           )}
 
-          {/* ★ メニュー操作時に選択が解除されないよう onMouseDown と onClick でイベント伝播を停止 */}
+          {/* ★ 改善：メニュー操作時に選択が解除されないよう onMouseDown と onClick でイベント伝播を停止 */}
           {selectedEdge && (
             <div className="no-print" onMouseDown={(e) => e.stopPropagation()} onClick={(e) => e.stopPropagation()} style={{ position:'absolute', right:0, top:0, bottom:0, width:'300px', borderLeft:'1px solid #ddd', padding:'20px', backgroundColor:'#fff', zIndex:1000, overflowY: 'auto' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
