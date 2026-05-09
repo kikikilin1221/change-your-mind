@@ -33,19 +33,19 @@ const GLOBAL_CSS = `
       outline: none !important;
   }
 
-  .react-flow__handle { background: transparent !important; border: none !important; width: 1px !important; height: 1px !important; min-width: 0 !important; min-height: 0 !important; box-shadow: none !important; }
-  .custom-handle, .custom-handle-target { width: 24px !important; height: 24px !important; background: transparent !important; border: none !important; z-index: 10 !important; cursor: crosshair !important; pointer-events: auto !important; display: flex; justify-content: center; align-items: center; }
-  .custom-handle::before, .custom-handle-target::before { content: ""; display: block; width: 0px; height: 0px; background: #3b82f6; border-radius: 50%; transition: all 0.2s cubic-bezier(0.34, 1.56, 0.64, 1); border: 2px solid #fff; opacity: 0; }
+  /* ★ 改善：普通の線の距離を枠線ギリギリの「3px」に設定 */
+  .custom-handle, .custom-handle-target { width: 0px !important; height: 0px !important; background: transparent !important; border: none !important; z-index: 10 !important; cursor: crosshair !important; pointer-events: auto !important; display: flex; justify-content: center; align-items: center; position: absolute; }
+  .custom-handle::after, .custom-handle-target::after { content: ""; display: block; position: absolute; width: 24px; height: 24px; background: transparent; }
+  .custom-handle::before, .custom-handle-target::before { content: ""; display: block; position: absolute; width: 0px; height: 0px; background: #3b82f6; border-radius: 50%; transition: all 0.2s cubic-bezier(0.34, 1.56, 0.64, 1); border: 2px solid #fff; opacity: 0; pointer-events: none; }
   .custom-handle:hover::before, .custom-handle-target:hover::before { width: 14px; height: 14px; opacity: 1; box-shadow: 0 1px 3px rgba(0,0,0,0.2); }
   
-  /* ★ 改善：普通の線が繋がる距離を枠線ギリギリの 3px に縮小 */
   .custom-handle-offset-top { top: -3px !important; }
   .custom-handle-offset-bottom { bottom: -3px !important; }
   .custom-handle-offset-left { left: -3px !important; }
   .custom-handle-offset-right { right: -3px !important; }
 
   /* ★ 論理ブロック専用の隠しハンドル（論理記号の距離や見た目は絶対に維持する） */
-  .logical-handle { width: 0px !important; height: 0px !important; min-width: 0 !important; min-height: 0 !important; border: none !important; background: transparent !important; pointer-events: none !important; }
+  .logical-handle { width: 0px !important; height: 0px !important; min-width: 0 !important; min-height: 0 !important; border: none !important; background: transparent !important; pointer-events: none !important; position: absolute; }
   .logical-handle-offset-top { top: -8px !important; }
   .logical-handle-offset-bottom { bottom: -8px !important; }
   .logical-handle-offset-left { left: -8px !important; }
@@ -88,13 +88,11 @@ const DoubleEdge = ({ id, sourceX, sourceY, targetX, targetY, sourcePosition, ta
       {isDouble && !hideLine && (
         <svg style={{ position: 'absolute', width: 0, height: 0 }}>
           <defs>
-            {/* ★ デザイン維持：突き抜けを物理カットするマスク構造（背景色 #fff3dd） */}
-            <marker id={`custom-arrow-${id}`} viewBox="0 0 24 24" refX="10" refY="12" markerWidth={customArrowSize} markerHeight={customArrowSize} markerUnits="userSpaceOnUse" orient="auto">
-              <polygon points="0,0 20,12 0,24" fill="#fff3dd" stroke="none" />
+            {/* ★ 改善：肌色マスクを完全撤廃し、数学的に「傘の付け根(refX=4,20)」で線をストップさせて突き抜けを防止する完璧な仕様に復元 */}
+            <marker id={`custom-arrow-${id}`} viewBox="0 0 24 24" refX="4" refY="12" markerWidth={customArrowSize} markerHeight={customArrowSize} markerUnits="userSpaceOnUse" orient="auto">
               <polyline points="4,4 18,12 4,20" fill="none" stroke={edgeColor} strokeWidth={strokeWidth >= 3 ? 3 : 2} strokeLinecap="round" strokeLinejoin="round" />
             </marker>
-            <marker id={`custom-arrow-start-${id}`} viewBox="0 0 24 24" refX="14" refY="12" markerWidth={customArrowSize} markerHeight={customArrowSize} markerUnits="userSpaceOnUse" orient="auto">
-              <polygon points="24,0 4,12 24,24" fill="#fff3dd" stroke="none" />
+            <marker id={`custom-arrow-start-${id}`} viewBox="0 0 24 24" refX="20" refY="12" markerWidth={customArrowSize} markerHeight={customArrowSize} markerUnits="userSpaceOnUse" orient="auto">
               <polyline points="20,4 6,12 20,20" fill="none" stroke={edgeColor} strokeWidth={strokeWidth >= 3 ? 3 : 2} strokeLinecap="round" strokeLinejoin="round" />
             </marker>
           </defs>
@@ -105,7 +103,7 @@ const DoubleEdge = ({ id, sourceX, sourceY, targetX, targetY, sourcePosition, ta
           isDouble ? (
             <>
               <BaseEdge path={edgePath} style={{ ...style, strokeWidth: strokeWidth + 8, stroke: edgeColor }} />
-              <BaseEdge path={edgePath} style={{ ...style, strokeWidth: strokeWidth + 4, stroke: '#fff3dd' }} />
+              <BaseEdge path={edgePath} style={{ ...style, strokeWidth: strokeWidth + 4, stroke: 'var(--bg-color, #ffffff)' }} />
               <BaseEdge path={edgePath} markerEnd={rMarkerEnd} markerStart={rMarkerStart} style={{ strokeWidth: strokeWidth, stroke: 'transparent', fill: 'none' }} />
             </>
           ) : ( <BaseEdge id={id} path={edgePath} markerEnd={rMarkerEnd} markerStart={rMarkerStart} style={{ ...style, strokeWidth, stroke: edgeColor }} /> )
@@ -308,7 +306,7 @@ function FlowEditor() {
     
     const count = derivationBlocks.length;
     
-    // ★ 論理ブロックの間隔は 100px 固定をそのまま維持！
+    // ★ 論理ブロックの間隔は 100px 固定をそのまま維持
     const gapX = 100; 
     const gapY = h0; 
     
