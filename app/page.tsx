@@ -33,24 +33,35 @@ const GLOBAL_CSS = `
       outline: none !important;
   }
 
-  .react-flow__handle { background: transparent !important; border: none !important; width: 1px !important; height: 1px !important; min-width: 0 !important; min-height: 0 !important; box-shadow: none !important; }
+  /* ★ 改善：黒い点は消し、ホバー時のみ「青い丸」を表示するギミックを追加 */
+  .custom-handle, .custom-handle-target { 
+      width: 0px !important; height: 0px !important; background: transparent !important; 
+      border: none !important; z-index: 10 !important; cursor: crosshair !important; 
+      position: absolute; pointer-events: visible !important; display: flex; justify-content: center; align-items: center;
+  }
+  /* 当たり判定用（透明で24px確保） */
+  .custom-handle::after, .custom-handle-target::after { 
+      content: ""; display: block; position: absolute; width: 24px; height: 24px; background: transparent; 
+  }
+  /* ホバー時のみ表示される青い点（通常時は透明） */
+  .custom-handle::before, .custom-handle-target::before { 
+      content: ""; display: block; position: absolute; width: 0px; height: 0px; background: #3b82f6; border-radius: 50%; transition: all 0.2s cubic-bezier(0.34, 1.56, 0.64, 1); border: 2px solid #fff; opacity: 0; pointer-events: none; z-index: 1;
+  }
+  .custom-handle:hover::before, .custom-handle-target:hover::before { 
+      width: 14px; height: 14px; opacity: 1; box-shadow: 0 1px 3px rgba(0,0,0,0.2); 
+  }
   
-  /* ★ 改善：普通の線が繋がる距離を枠線ギリギリに設定するため、実体を0pxにし、当たり判定を24pxにする */
-  .custom-handle, .custom-handle-target { width: 0px !important; height: 0px !important; background: transparent !important; border: none !important; z-index: 10 !important; cursor: crosshair !important; pointer-events: auto !important; display: flex; justify-content: center; align-items: center; position: absolute; }
-  .custom-handle::after, .custom-handle-target::after { content: ""; display: block; position: absolute; width: 24px; height: 24px; background: transparent; }
-  
-  /* ★ 黒い点を絶対に表示しない */
-  .custom-handle::before, .custom-handle-target::before { display: none !important; }
-  .custom-handle:hover::before, .custom-handle-target:hover::before { display: none !important; }
-  
-  /* ★ ハンドル位置を枠線上にぴったり合わせる（0px） */
-  .custom-handle-offset-top { top: 0px !important; }
-  .custom-handle-offset-bottom { bottom: 0px !important; }
-  .custom-handle-offset-left { left: 0px !important; }
-  .custom-handle-offset-right { right: 0px !important; }
+  .custom-handle-offset-top { top: -2px !important; }
+  .custom-handle-offset-bottom { bottom: -2px !important; }
+  .custom-handle-offset-left { left: -2px !important; }
+  .custom-handle-offset-right { right: -2px !important; }
 
   /* ★ 論理ブロック専用の隠しハンドル（論理記号の距離や見た目は絶対に維持する） */
-  .logical-handle { width: 0px !important; height: 0px !important; min-width: 0 !important; min-height: 0 !important; border: none !important; background: transparent !important; }
+  .logical-handle { 
+      width: 0px !important; height: 0px !important; min-width: 0 !important; min-height: 0 !important; 
+      border: none !important; background: transparent !important; pointer-events: none !important; position: absolute; 
+  }
+  .logical-handle::before, .logical-handle::after { display: none !important; content: none !important; }
   .logical-handle-offset-top { top: -8px !important; }
   .logical-handle-offset-bottom { bottom: -8px !important; }
   .logical-handle-offset-left { left: -8px !important; }
@@ -83,8 +94,8 @@ const DoubleEdge = ({ id, sourceX, sourceY, targetX, targetY, sourcePosition, ta
   const displayLabel = label === undefined || label === null || label === 'undefined' ? '' : String(label);
   
   let rMarkerEnd = markerEnd; let rMarkerStart = markerStart;
-  if (mType === 'custom-double-arrow' || mType === 'custom-double-both') { rMarkerEnd = `url(#custom-arrow-${id})`; }
-  if (mType === 'custom-double-both') { rMarkerStart = `url(#custom-arrow-start-${id})`; }
+  if (mType === 'arrow' || mType === 'both' || mType === 'custom-double-arrow' || mType === 'custom-double-both') { rMarkerEnd = `url(#custom-arrow-${id})`; }
+  if (mType === 'both' || mType === 'custom-double-both') { rMarkerStart = `url(#custom-arrow-start-${id})`; }
   
   const customArrowSize = strokeWidth * 2 + 18; 
 
@@ -93,14 +104,11 @@ const DoubleEdge = ({ id, sourceX, sourceY, targetX, targetY, sourcePosition, ta
       {isDouble && !hideLine && (
         <svg style={{ position: 'absolute', width: 0, height: 0 }}>
           <defs>
-            {/* ★ お客様から頂いた「完璧な矢印」のコードを一切変更せずに、refX のみ 12 に修正して食い込みを防止 */}
-            <marker id={`custom-arrow-${id}`} viewBox="0 0 24 24" refX="12" refY="12" markerWidth={customArrowSize} markerHeight={customArrowSize} markerUnits="userSpaceOnUse" orient="auto">
-              <polygon points="0,0 20,12 0,24" fill="var(--bg-color, #ffffff)" stroke="none" />
-              <polyline points="4,4 18,12 4,20" fill="none" stroke={edgeColor} strokeWidth={strokeWidth >= 3 ? 3 : 2} strokeLinecap="round" strokeLinejoin="round" />
+            <marker id={`custom-arrow-${id}`} viewBox="0 0 24 24" refX="18" refY="12" markerWidth={customArrowSize} markerHeight={customArrowSize} markerUnits="userSpaceOnUse" orient="auto">
+              <polyline points="6,4 18,12 6,20" fill="none" stroke={edgeColor} strokeWidth={strokeWidth >= 3 ? 3 : 2} strokeLinecap="round" strokeLinejoin="round" />
             </marker>
-            <marker id={`custom-arrow-start-${id}`} viewBox="0 0 24 24" refX="12" refY="12" markerWidth={customArrowSize} markerHeight={customArrowSize} markerUnits="userSpaceOnUse" orient="auto">
-              <polygon points="24,0 4,12 24,24" fill="var(--bg-color, #ffffff)" stroke="none" />
-              <polyline points="20,4 6,12 20,20" fill="none" stroke={edgeColor} strokeWidth={strokeWidth >= 3 ? 3 : 2} strokeLinecap="round" strokeLinejoin="round" />
+            <marker id={`custom-arrow-start-${id}`} viewBox="0 0 24 24" refX="6" refY="12" markerWidth={customArrowSize} markerHeight={customArrowSize} markerUnits="userSpaceOnUse" orient="auto">
+              <polyline points="18,4 6,12 18,20" fill="none" stroke={edgeColor} strokeWidth={strokeWidth >= 3 ? 3 : 2} strokeLinecap="round" strokeLinejoin="round" />
             </marker>
           </defs>
         </svg>
@@ -1053,10 +1061,10 @@ function FlowEditor() {
                   <img src={n.data.imageUrl as string} style={{ position: 'absolute', width: n.data?.isCropping ? `${baseW}px` : '100%', height: n.data?.isCropping ? `${baseH}px` : '100%', maxWidth: 'none', maxHeight: 'none', left: n.data?.isCropping ? `${offX}px` : 0, top: n.data?.isCropping ? `${offY}px` : 0, transform: `translate(${n.data.imgPosX || 0}px, ${n.data.imgPosY || 0}px) scale(${n.data.imgZoom || 1})`, transformOrigin: 'center center', pointerEvents: 'none' }} alt="img" />
                   <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', display: 'flex', flexDirection: 'column', alignItems: ai, justifyContent: jc, padding: '4px' }}>
                       <div 
-                          id={`edit-${n.id}`} className={"html-content"} contentEditable={isEditingNode} suppressContentEditableWarning
+                          id={`edit-${n.id}`} className={isEditingNode ? "nodrag html-content" : "html-content"} contentEditable={isEditingNode} suppressContentEditableWarning
                           onMouseDown={(e) => { if (isEditingNode) e.stopPropagation(); }} onKeyDown={(e) => { if (isEditingNode) e.stopPropagation(); }}
                           onInput={(e) => { n.data._tempContent = e.currentTarget.innerHTML; }} onBlur={(e) => { const finalHtml = n.data._tempContent ?? e.currentTarget.innerHTML; setNodes(nds => nds.map(node => node.id === n.id ? { ...node, data: { ...node.data, isEditing: false, content: finalHtml, _tempContent: undefined } } : node)); }}
-                          style={{ pointerEvents: 'auto', width: '100%', height: 'auto', outline: 'none', cursor: isEditingNode ? 'text' : 'pointer', color: n.style?.color || '#000', fontFamily: n.style?.fontFamily || 'sans-serif', fontSize: n.style?.fontSize || '14px', fontWeight: n.style?.fontWeight || 'normal', textDecoration: n.style?.textDecoration || 'none', whiteSpace: 'pre-wrap', lineHeight: '1.2', textAlign: textAlignment, transform: `translate(${textOffX}px, ${textOffY}px)`, writingMode: wMode }}
+                          style={{ pointerEvents: 'auto', width: '100%', height: 'auto', outline: 'none', cursor: isEditingNode ? 'text' : 'grab', color: n.style?.color || '#000', fontFamily: n.style?.fontFamily || 'sans-serif', fontSize: n.style?.fontSize || '14px', fontWeight: n.style?.fontWeight || 'normal', textDecoration: n.style?.textDecoration || 'none', whiteSpace: 'pre-wrap', lineHeight: '1.2', textAlign: textAlignment, transform: `translate(${textOffX}px, ${textOffY}px)`, writingMode: wMode }}
                           ref={el => {
                               if (!el) return;
                               if (!isEditingNode) { const newHtml = renderHTMLWithMath(n.data?.content || ''); if (el.innerHTML !== newHtml) el.innerHTML = newHtml; el.dataset.editing = 'false'; } 
@@ -1067,10 +1075,10 @@ function FlowEditor() {
                 </div>
               ) : n.id !== 'center-mark' && !n.data?.isTable && !n.data?.isTransparentHelper ? (
                 <div 
-                    id={`edit-${n.id}`} className={"nodrag html-content"} contentEditable={isEditingNode} suppressContentEditableWarning
+                    id={`edit-${n.id}`} className={isEditingNode ? "nodrag html-content" : "html-content"} contentEditable={isEditingNode} suppressContentEditableWarning
                     onMouseDown={(e) => { if (isEditingNode) e.stopPropagation(); }} onKeyDown={(e) => { if (isEditingNode) e.stopPropagation(); }}
                     onInput={(e) => { n.data._tempContent = e.currentTarget.innerHTML; }} onBlur={(e) => { const finalHtml = n.data._tempContent ?? e.currentTarget.innerHTML; setNodes(nds => nds.map(node => node.id === n.id ? { ...node, data: { ...node.data, isEditing: false, content: finalHtml, _tempContent: undefined } } : node)); }}
-                    style={{ pointerEvents: 'auto', width: '100%', height: 'auto', outline: 'none', cursor: isEditingNode ? 'text' : 'pointer', color: n.style?.color || '#000', fontFamily: n.style?.fontFamily || 'sans-serif', fontSize: n.style?.fontSize || '14px', fontWeight: n.style?.fontWeight || 'normal', textDecoration: n.style?.textDecoration || 'none', whiteSpace: 'pre-wrap', lineHeight: '1.2', textAlign: textAlignment, transform: `translate(${textOffX}px, ${textOffY}px)`, writingMode: wMode }}
+                    style={{ pointerEvents: 'auto', width: '100%', height: 'auto', outline: 'none', cursor: isEditingNode ? 'text' : 'grab', color: n.style?.color || '#000', fontFamily: n.style?.fontFamily || 'sans-serif', fontSize: n.style?.fontSize || '14px', fontWeight: n.style?.fontWeight || 'normal', textDecoration: n.style?.textDecoration || 'none', whiteSpace: 'pre-wrap', lineHeight: '1.2', textAlign: textAlignment, transform: `translate(${textOffX}px, ${textOffY}px)`, writingMode: wMode }}
                     ref={el => {
                         if (!el) return;
                         if (!isEditingNode) { const newHtml = renderHTMLWithMath(n.data?.content || ''); if (el.innerHTML !== newHtml) el.innerHTML = newHtml; el.dataset.editing = 'false'; } 
