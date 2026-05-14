@@ -313,7 +313,7 @@ function FlowEditor() {
     
     const count = derivationBlocks.length;
     
-    const gapX = 100; 
+    const gapX = (type === 'and' || type === 'or') ? 40 : 100; 
     const gapY = h0; 
     
     const newX = x0 + w0 + gapX;
