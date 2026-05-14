@@ -670,25 +670,36 @@ function FlowEditor() {
 const moveSubtreeY = useCallback((direction: 'up' | 'down') => {
       if (!selectedEdge) return;
       takeSnapshot();
-      const sId = selectedEdge.source;
+      
       const tId = selectedEdge.target;
-      
-      const siblingEdges = edgesRef.current.filter((e:any) => e.source === sId);
-      if (siblingEdges.length < 2) return;
-      
-      const siblingNodes = nodesRef.current.filter((n:any) => siblingEdges.some((e:any) => e.target === n.id));
+      const targetNode = nodesRef.current.find((n:any) => n.id === tId);
+      if (!targetNode) return;
+
+      let siblingNodes = [];
+
+      // ★ 改善：論理ブロック（見えないノード経由）と普通の枝分かれの両方を正確に判定する
+      if (targetNode.data?.isDerivationBlock) {
+          const parentId = targetNode.data.parentNodeId;
+          siblingNodes = nodesRef.current.filter((n:any) => n.data?.isDerivationBlock && n.data?.parentNodeId === parentId && !n.data?.isTransparentHelper);
+      } else {
+          const sId = selectedEdge.source;
+          const siblingEdges = edgesRef.current.filter((e:any) => e.source === sId);
+          siblingNodes = nodesRef.current.filter((n:any) => siblingEdges.some((e:any) => e.target === n.id));
+      }
+
+      if (siblingNodes.length < 2) return; // 兄弟がいなければ入れ替え不可
       siblingNodes.sort((a, b) => a.position.y - b.position.y);
-      
+
       const targetIndex = siblingNodes.findIndex(n => n.id === tId);
       if (targetIndex === -1) return;
-      
+
       let swapNode = null;
       if (direction === 'up' && targetIndex > 0) swapNode = siblingNodes[targetIndex - 1];
       else if (direction === 'down' && targetIndex < siblingNodes.length - 1) swapNode = siblingNodes[targetIndex + 1];
-      
+
       if (!swapNode) return;
-      const targetNode = siblingNodes[targetIndex];
-      
+
+      // ★ 右側に繋がっている要素（子要素）を全て取得
       const getDescendants = (id: string, edgesArr: any[], desc = new Set<string>()) => {
           desc.add(id);
           edgesArr.filter((e: any) => e.source === id).forEach((e: any) => {
@@ -696,13 +707,22 @@ const moveSubtreeY = useCallback((direction: 'up' | 'down') => {
           });
           return Array.from(desc);
       };
-      
+
+      // 見えない接続ノードがあればそれも一緒に動かす
+      const getTransHelper = (nId: string) => nodesRef.current.find((n:any) => n.data?.isTransparentHelper && edgesRef.current.some((e:any) => e.source === n.id && e.target === nId))?.id;
+
       const targetDesc = getDescendants(targetNode.id, edgesRef.current);
+      const targetTrans = getTransHelper(targetNode.id);
+      if (targetTrans) targetDesc.push(targetTrans);
+
       const swapDesc = getDescendants(swapNode.id, edgesRef.current);
-      
+      const swapTrans = getTransHelper(swapNode.id);
+      if (swapTrans) swapDesc.push(swapTrans);
+
       const dyTarget = swapNode.position.y - targetNode.position.y;
       const dySwap = targetNode.position.y - swapNode.position.y;
-      
+
+      // 一括でY座標を入れ替える
       setNodes((nds: any[]) => nds.map((n: any) => {
           if (targetDesc.includes(n.id)) return { ...n, position: { ...n.position, y: n.position.y + dyTarget } };
           if (swapDesc.includes(n.id)) return { ...n, position: { ...n.position, y: n.position.y + dySwap } };
