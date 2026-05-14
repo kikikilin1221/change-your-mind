@@ -296,7 +296,7 @@ function FlowEditor() {
       }));
   };
 
-  const addLogicalDerivationBlock = useCallback((type: 'double_arrow' | 'single_arrow' | 'and' | 'or') => {
+  const addLogicalDerivationBlock = useCallback((type: 'double_arrow' | 'single_arrow' | 'and' | 'or' | 'plus') => {
     if (!primaryNode) return;
     takeSnapshot();
 
@@ -313,7 +313,7 @@ function FlowEditor() {
     
     const count = derivationBlocks.length;
     
-    const gapX = (type === 'and' || type === 'or') ? 40 : 100; 
+    const gapX = (type === 'and' || type === 'or' || type === 'plus') ? 40 : 100; 
     const gapY = h0; 
     
     const newX = x0 + w0 + gapX;
@@ -356,6 +356,7 @@ function FlowEditor() {
     else if (type === 'single_arrow') { edgeProps.data.markerType = 'custom-double-arrow'; edgeProps.data.double = true; edgeProps.data.fontSize = 18; } 
     else if (type === 'and') { edgeProps.data.markerType = 'none'; edgeProps.data.fontSize = 20; edgeProps.label = '∧'; edgeProps.data.hideLine = true; } 
     else if (type === 'or') { edgeProps.data.markerType = 'none'; edgeProps.data.fontSize = 20; edgeProps.label = '∨'; edgeProps.data.hideLine = true; }
+    else if (type === 'plus') { edgeProps.data.markerType = 'none'; edgeProps.data.fontSize = 20; edgeProps.label = '＋'; edgeProps.data.hideLine = true; }
 
     setEdges((eds: any[]) => [...eds.map((e: any) => ({...e, selected:false})), { 
         id: edgeId, source: sourceNodeId, target: newNodeId, 
@@ -666,6 +667,48 @@ function FlowEditor() {
       }));
   }, [primaryNode, selectedCells, takeSnapshot]);
 
+const moveSubtreeY = useCallback((direction: 'up' | 'down') => {
+      if (!selectedEdge) return;
+      takeSnapshot();
+      const sId = selectedEdge.source;
+      const tId = selectedEdge.target;
+      
+      const siblingEdges = edgesRef.current.filter((e:any) => e.source === sId);
+      if (siblingEdges.length < 2) return;
+      
+      const siblingNodes = nodesRef.current.filter((n:any) => siblingEdges.some((e:any) => e.target === n.id));
+      siblingNodes.sort((a, b) => a.position.y - b.position.y);
+      
+      const targetIndex = siblingNodes.findIndex(n => n.id === tId);
+      if (targetIndex === -1) return;
+      
+      let swapNode = null;
+      if (direction === 'up' && targetIndex > 0) swapNode = siblingNodes[targetIndex - 1];
+      else if (direction === 'down' && targetIndex < siblingNodes.length - 1) swapNode = siblingNodes[targetIndex + 1];
+      
+      if (!swapNode) return;
+      const targetNode = siblingNodes[targetIndex];
+      
+      const getDescendants = (id: string, edgesArr: any[], desc = new Set<string>()) => {
+          desc.add(id);
+          edgesArr.filter((e: any) => e.source === id).forEach((e: any) => {
+              if (!desc.has(e.target)) getDescendants(e.target, edgesArr, desc);
+          });
+          return Array.from(desc);
+      };
+      
+      const targetDesc = getDescendants(targetNode.id, edgesRef.current);
+      const swapDesc = getDescendants(swapNode.id, edgesRef.current);
+      
+      const dyTarget = swapNode.position.y - targetNode.position.y;
+      const dySwap = targetNode.position.y - swapNode.position.y;
+      
+      setNodes((nds: any[]) => nds.map((n: any) => {
+          if (targetDesc.includes(n.id)) return { ...n, position: { ...n.position, y: n.position.y + dyTarget } };
+          if (swapDesc.includes(n.id)) return { ...n, position: { ...n.position, y: n.position.y + dySwap } };
+          return n;
+      }));
+  }, [selectedEdge, takeSnapshot]);
 
   const enterLevel = useCallback((id: string, defaultLabel: string) => {
     setLevelData(prev => ({ ...prev, [currentLevel]: { nodes: safeCloneNodes(nodesRef.current), edges: safeCloneEdges(edgesRef.current), bgColor: prev[currentLevel]?.bgColor, label: currentLabelRef.current } }));
@@ -1262,11 +1305,12 @@ function FlowEditor() {
                 <div style={{ padding: '10px', background: '#f8f9fa', borderRadius: '8px', marginBottom: '15px', border: '1px solid #ddd' }}>
                   <label style={{fontSize: '11px', fontWeight: 'bold', color: '#1d4ed8'}}>論理ブロック追加（証明展開）</label>
                   <p style={{fontSize: '9px', color: '#666', marginTop: '2px', marginBottom: '6px'}}>※連続で押すと真下に自動スタックされます</p>
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '5px' }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '5px' }}>
                     <button onClick={() => addLogicalDerivationBlock('double_arrow')} style={{ padding: '6px', fontSize: '14px', cursor: 'pointer', borderRadius: '4px', border: '1px solid #ccc', background: '#fff' }}>⇔</button>
                     <button onClick={() => addLogicalDerivationBlock('single_arrow')} style={{ padding: '6px', fontSize: '14px', cursor: 'pointer', borderRadius: '4px', border: '1px solid #ccc', background: '#fff' }}>⇨</button>
                     <button onClick={() => addLogicalDerivationBlock('and')} style={{ padding: '6px', fontSize: '14px', cursor: 'pointer', borderRadius: '4px', border: '1px solid #ccc', background: '#fff' }}>∧</button>
                     <button onClick={() => addLogicalDerivationBlock('or')} style={{ padding: '6px', fontSize: '14px', cursor: 'pointer', borderRadius: '4px', border: '1px solid #ccc', background: '#fff' }}>∨</button>
+                    <button onClick={() => addLogicalDerivationBlock('plus')} style={{ padding: '6px', fontSize: '14px', cursor: 'pointer', borderRadius: '4px', border: '1px solid #ccc', background: '#fff' }}>＋</button>
                   </div>
                 </div>
               )}
@@ -1361,7 +1405,10 @@ function FlowEditor() {
                 <button onClick={() => { takeSnapshot(); setEdges((eds: any[]) => { const maxZ = Math.max(0, ...eds.map((n: any) => Number(n.zIndex) || 0)); return eds.map((n: any) => n.selected ? {...n, zIndex: maxZ + 1} : n); })}} style={{flex:1, padding:'6px', fontSize:'11px', fontWeight: 'bold', background: '#f0f0f0', border: '1px solid #ccc', cursor: 'pointer', borderRadius: '4px'}}>↑ 最前面へ</button>
                 <button onClick={() => { takeSnapshot(); setEdges((eds: any[]) => { const minZ = Math.min(0, ...eds.map((n: any) => Number(n.zIndex) || 0)); return eds.map((n: any) => n.selected ? {...n, zIndex: minZ - 1} : n); })}} style={{flex:1, padding:'6px', fontSize:'11px', fontWeight: 'bold', background: '#f0f0f0', border: '1px solid #ccc', cursor: 'pointer', borderRadius: '4px'}}>↓ 最背面へ</button>
               </div>
-
+<div style={{ display:'flex', gap:'5px', marginBottom:'15px' }}>
+                <button onClick={() => moveSubtreeY('up')} style={{flex:1, padding:'6px', fontSize:'11px', fontWeight: 'bold', background: '#e0e7ff', color: '#3730a3', border: '1px solid #c7d2fe', cursor: 'pointer', borderRadius: '4px'}}>🔺 上へ入替</button>
+                <button onClick={() => moveSubtreeY('down')} style={{flex:1, padding:'6px', fontSize:'11px', fontWeight: 'bold', background: '#e0e7ff', color: '#3730a3', border: '1px solid #c7d2fe', cursor: 'pointer', borderRadius: '4px'}}>🔻 下へ入替</button>
+              </div>
               <div style={{ padding: '15px', borderRadius: '12px', backgroundColor: '#f8f9fa', border: '1px solid #ddd', marginBottom: '15px' }}>
                   <label style={{fontSize: '11px', fontWeight: 'bold', color: '#1d4ed8'}}>文字の部分装飾 (編集中のみ)</label>
                   <p style={{fontSize: '10px', color: '#666', marginTop: '4px', marginBottom: '10px', lineHeight: '1.4'}}>
