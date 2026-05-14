@@ -677,7 +677,7 @@ const moveSubtreeY = useCallback((direction: 'up' | 'down') => {
 
       let siblingNodes = [];
 
-      // ★ 改善：論理ブロック（見えないノード経由）と普通の枝分かれの両方を正確に判定する
+      // ★ 改善：論理ブロックと通常の枝の両方を正確に取得する
       if (targetNode.data?.isDerivationBlock) {
           const parentId = targetNode.data.parentNodeId;
           siblingNodes = nodesRef.current.filter((n:any) => n.data?.isDerivationBlock && n.data?.parentNodeId === parentId && !n.data?.isTransparentHelper);
@@ -687,7 +687,7 @@ const moveSubtreeY = useCallback((direction: 'up' | 'down') => {
           siblingNodes = nodesRef.current.filter((n:any) => siblingEdges.some((e:any) => e.target === n.id));
       }
 
-      if (siblingNodes.length < 2) return; // 兄弟がいなければ入れ替え不可
+      if (siblingNodes.length < 2) return; 
       siblingNodes.sort((a, b) => a.position.y - b.position.y);
 
       const targetIndex = siblingNodes.findIndex(n => n.id === tId);
@@ -699,7 +699,6 @@ const moveSubtreeY = useCallback((direction: 'up' | 'down') => {
 
       if (!swapNode) return;
 
-      // ★ 右側に繋がっている要素（子要素）を全て取得
       const getDescendants = (id: string, edgesArr: any[], desc = new Set<string>()) => {
           desc.add(id);
           edgesArr.filter((e: any) => e.source === id).forEach((e: any) => {
@@ -708,21 +707,25 @@ const moveSubtreeY = useCallback((direction: 'up' | 'down') => {
           return Array.from(desc);
       };
 
-      // 見えない接続ノードがあればそれも一緒に動かす
-      const getTransHelper = (nId: string) => nodesRef.current.find((n:any) => n.data?.isTransparentHelper && edgesRef.current.some((e:any) => e.source === n.id && e.target === nId))?.id;
-
       const targetDesc = getDescendants(targetNode.id, edgesRef.current);
-      const targetTrans = getTransHelper(targetNode.id);
-      if (targetTrans) targetDesc.push(targetTrans);
-
       const swapDesc = getDescendants(swapNode.id, edgesRef.current);
-      const swapTrans = getTransHelper(swapNode.id);
-      if (swapTrans) swapDesc.push(swapTrans);
 
       const dyTarget = swapNode.position.y - targetNode.position.y;
       const dySwap = targetNode.position.y - swapNode.position.y;
 
-      // 一括でY座標を入れ替える
+      const edgeTarget = edgesRef.current.find((e:any) => e.target === targetNode.id);
+      const edgeSwap = edgesRef.current.find((e:any) => e.target === swapNode.id);
+
+      // ★ 改善：斜めにならないよう、線の「出発点」も一緒に入れ替える！
+      setEdges((eds: any[]) => eds.map((e: any) => {
+          if (edgeTarget && edgeSwap) {
+              if (e.id === edgeTarget.id) return { ...e, source: edgeSwap.source };
+              if (e.id === edgeSwap.id) return { ...e, source: edgeTarget.source };
+          }
+          return e;
+      }));
+
+      // 要素を入れ替える
       setNodes((nds: any[]) => nds.map((n: any) => {
           if (targetDesc.includes(n.id)) return { ...n, position: { ...n.position, y: n.position.y + dyTarget } };
           if (swapDesc.includes(n.id)) return { ...n, position: { ...n.position, y: n.position.y + dySwap } };
