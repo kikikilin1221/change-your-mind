@@ -680,50 +680,96 @@ const moveSubtreeY = useCallback((direction: 'up' | 'down') => {
       if (!targetNode) return;
 
       let siblingNodes = [];
+      let rootLogicalParentNode = null;
 
+      // ステップ1: この「行」の根本となる論理的な親テキストノードを見つける。
       if (targetNode.data?.isDerivationBlock) {
           const parentId = targetNode.data.parentNodeId;
-          siblingNodes = nodesRef.current.filter((n:any) => n.data?.isDerivationBlock && n.data?.parentNodeId === parentId && !n.data?.isTransparentHelper);
+          rootLogicalParentNode = nodesRef.current.find(n => n.id === parentId);
       } else {
-          const sId = selectedEdge.source;
-          const siblingEdges = edgesRef.current.filter((e:any) => e.source === sId);
-          siblingNodes = nodesRef.current.filter((n:any) => siblingEdges.some((e:any) => e.target === n.id));
+          rootLogicalParentNode = targetNode;
       }
+      
+      if (!rootLogicalParentNode) return;
+
+      // ステップ2: この「行の根本」の兄弟（＝他の行）を取得する。
+      const getSiblings = (node: any) => {
+          let siblings = [];
+          if (node.data?.isDerivationBlock) {
+              const parentId = node.data.parentNodeId;
+              const parentNode = nodesRef.current.find(n => n.id === parentId);
+              const parentEdges = edgesRef.current.filter(e => e.target === parentNode?.id);
+              const sourceIds = parentEdges.map(e => e.source);
+              if (sourceIds.length > 0) {
+                   const sourceId = sourceIds[0];
+                   const siblingEdges = edgesRef.current.filter(e => e.source === sourceId);
+                   siblings = nodesRef.current.filter(n => siblingEdges.some(e => e.target === n.id));
+              } else {
+                   const sourceId = selectedEdge.source;
+                   const siblingEdges = edgesRef.current.filter(e => e.source === sourceId);
+                   siblings = nodesRef.current.filter(n => siblingEdges.some(e => e.target === n.id));
+              }
+          } else {
+              const sId = selectedEdge.source;
+              const siblingEdges = edgesRef.current.filter(e => e.source === sId);
+              siblings = nodesRef.current.filter(n => siblingEdges.some(e => e.target === n.id));
+          }
+          return siblings;
+      };
+
+      siblingNodes = getSiblings(targetNode);
 
       if (siblingNodes.length < 2) return; 
       siblingNodes.sort((a, b) => a.position.y - b.position.y);
 
-      const targetIndex = siblingNodes.findIndex(n => n.id === tId);
+      // ここから、targetNodeを含む「行全体」を swapNodeを含む「行全体」と入れ替える処理。
+      const targetIndex = siblingNodes.findIndex(n => n.id === rootLogicalParentNode!.id);
       if (targetIndex === -1) return;
 
+      // 入れ替え相手のノードを見つける
       let swapNode = null;
       if (direction === 'up' && targetIndex > 0) swapNode = siblingNodes[targetIndex - 1];
       else if (direction === 'down' && targetIndex < siblingNodes.length - 1) swapNode = siblingNodes[targetIndex + 1];
 
       if (!swapNode) return;
 
-      const getDescendants = (id: string, edgesArr: any[], desc = new Set<string>()) => {
-          desc.add(id);
-          edgesArr.filter((e: any) => e.source === id).forEach((e: any) => {
-              if (!desc.has(e.target)) getDescendants(e.target, edgesArr, desc);
-          });
-          return Array.from(desc);
+      // ★ 完全修復：標準の線(edge)だけでなく、論理的な親ID(parentNodeId)も考慮して、すべてのヘルパーや記号を収集する。
+      const getFullSubtreeIds = (id: string) => {
+          const subtreeIds = new Set<string>();
+          const queue = [id];
+          subtreeIds.add(id);
+
+          while (queue.length > 0) {
+              const currentId = queue.shift()!;
+
+              // 1. 標準の線で繋がっている子孫要素を収集
+              edgesRef.current.forEach((e: any) => {
+                  if (e.source === currentId && !subtreeIds.has(e.target)) {
+                      subtreeIds.add(e.target);
+                      queue.push(e.target);
+                  }
+              });
+
+              // 2. 論理的な親ノードとしてこのノードを持っているヘルパーや記号を収集
+              nodesRef.current.forEach((n: any) => {
+                  if (n.data?.parentNodeId === currentId && !subtreeIds.has(n.id)) {
+                      subtreeIds.add(n.id);
+                      queue.push(n.id);
+                  }
+              });
+          }
+          return Array.from(subtreeIds);
       };
 
-      const getTransHelper = (nId: string) => nodesRef.current.find((n:any) => n.data?.isTransparentHelper && edgesRef.current.some((e:any) => e.source === n.id && e.target === nId))?.id;
+      // 両方のノードの「完全なサブツリー（行）」を取得する
+      const targetDesc = getFullSubtreeIds(rootLogicalParentNode!.id);
+      const swapDesc = getFullSubtreeIds(swapNode.id);
 
-      const targetDesc = getDescendants(targetNode.id, edgesRef.current);
-      const targetTrans = getTransHelper(targetNode.id);
-      if (targetTrans) targetDesc.push(targetTrans);
+      // Y座標の移動量を計算
+      const dyTarget = swapNode.position.y - rootLogicalParentNode!.position.y;
+      const dySwap = rootLogicalParentNode!.position.y - swapNode.position.y;
 
-      const swapDesc = getDescendants(swapNode.id, edgesRef.current);
-      const swapTrans = getTransHelper(swapNode.id);
-      if (swapTrans) swapDesc.push(swapTrans);
-
-      const dyTarget = swapNode.position.y - targetNode.position.y;
-      const dySwap = targetNode.position.y - swapNode.position.y;
-
-      // ★ 修復：線の再接続（setEdges）を削除し、純粋にY座標だけを動かすことで線が斜めになるのを完全に防ぐ
+      // ★ これにより、親ノードが移動する時、すべての論理記号やテキストが同じ量だけ水平に移動する！
       setNodes((nds: any[]) => nds.map((n: any) => {
           if (targetDesc.includes(n.id)) return { ...n, position: { ...n.position, y: n.position.y + dyTarget } };
           if (swapDesc.includes(n.id)) return { ...n, position: { ...n.position, y: n.position.y + dySwap } };
@@ -731,9 +777,7 @@ const moveSubtreeY = useCallback((direction: 'up' | 'down') => {
       }));
   }, [selectedEdge, takeSnapshot]);
 
-  // ★ 1ボタンで「左テキスト・論理記号・右テキスト」の3つを認識し、完璧に入れ替える機能
-  // ★ 1ボタンで「左テキスト・論理記号・右テキスト」の3つを認識し、完璧に入れ替える機能
-  // ★ 1ボタンで「左テキスト」と「右テキスト」の中身を入れ替える機能（IDと位置は固定）
+  // ★ このまま上書き
   const toggleSwapX = useCallback(() => {
       if (!selectedEdge) return;
       takeSnapshot();
@@ -745,8 +789,6 @@ const moveSubtreeY = useCallback((direction: 'up' | 'down') => {
 
       if (!sourceNode || !targetNode) return;
 
-      // 物理的に移動させず、中身のデータ（テキスト、スタイル、幅、高さ、各種フラグ）だけを交換する
-      // これにより、線の繋がりや論理記号の位置関係を完璧に維持したまま、見た目だけを入れ替える
       setNodes((nds: any[]) => nds.map((n: any) => {
           if (n.id === sourceId) {
               return {
@@ -811,9 +853,8 @@ const moveSubtreeY = useCallback((direction: 'up' | 'down') => {
           return n;
       }));
   }, [selectedEdge, takeSnapshot]);
-  
 
-
+  // ★ このまま上書き
   const alignSelectedEdgeTarget = useCallback((direction: 'horizontal' | 'vertical') => {
       if (!selectedEdge) return;
       takeSnapshot();
@@ -836,7 +877,7 @@ const moveSubtreeY = useCallback((direction: 'up' | 'down') => {
           return n;
       }));
   }, [selectedEdge, takeSnapshot]);
-
+  
   const enterLevel = useCallback((id: string, defaultLabel: string) => {
     setLevelData(prev => ({ ...prev, [currentLevel]: { nodes: safeCloneNodes(nodesRef.current), edges: safeCloneEdges(edgesRef.current), bgColor: prev[currentLevel]?.bgColor, label: currentLabelRef.current } }));
     setNodes((nds: any[]) => {
