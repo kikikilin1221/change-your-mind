@@ -733,83 +733,86 @@ const moveSubtreeY = useCallback((direction: 'up' | 'down') => {
 
   // ★ 1ボタンで「左テキスト・論理記号・右テキスト」の3つを認識し、完璧に入れ替える機能
   // ★ 1ボタンで「左テキスト・論理記号・右テキスト」の3つを認識し、完璧に入れ替える機能
+  // ★ 1ボタンで「左テキスト」と「右テキスト」の中身を入れ替える機能（IDと位置は固定）
   const toggleSwapX = useCallback(() => {
       if (!selectedEdge) return;
       takeSnapshot();
 
-      const source = nodesRef.current.find(n => n.id === selectedEdge.source);
-      const target = nodesRef.current.find(n => n.id === selectedEdge.target);
-      if (!source || !target) return;
+      const sourceId = selectedEdge.source;
+      const targetId = selectedEdge.target;
+      const sourceNode = nodesRef.current.find((n:any) => n.id === sourceId);
+      const targetNode = nodesRef.current.find((n:any) => n.id === targetId);
 
-      // ★ 修正：TypeScriptの型エラーを防ぐため「: any」を明記
-      let N_L: any = null;
-      let N_R: any = null;
-      let N_S: any = null;
-      let N_trans: any = null;
+      if (!sourceNode || !targetNode) return;
 
-      // どこを選択しても、左(N_L)・真ん中(N_S)・右(N_R)を正確に特定する
-      if (source.data?.isDerivationBlock && !source.data?.isTransparentHelper) {
-          N_S = source;
-          N_R = target;
-          N_L = nodesRef.current.find(n => n.id === N_S.data.parentNodeId);
-          N_trans = nodesRef.current.find(n => n.data?.isTransparentHelper && n.data?.parentNodeId === N_L?.id);
-      } else if (source.data?.isTransparentHelper) {
-          N_trans = source;
-          N_S = target;
-          N_L = nodesRef.current.find(n => n.id === N_trans.data.parentNodeId);
-          const edgeOut = edgesRef.current.find(e => e.source === N_S.id);
-          if (edgeOut) N_R = nodesRef.current.find(n => n.id === edgeOut.target);
-      } else {
-          N_L = source;
-          N_R = target;
-      }
-
-      if (!N_L || !N_R) return;
-
-      const getDescendants = (id: string, edgesArr: any[], desc = new Set<string>()) => {
-          desc.add(id);
-          edgesArr.filter((e: any) => e.source === id).forEach((e: any) => {
-              if (!desc.has(e.target)) getDescendants(e.target, edgesArr, desc);
-          });
-          return Array.from(desc);
-      };
-
-      const tDesc = getDescendants(N_R.id, edgesRef.current);
-      const getTransHelpers = (descList: string[]) => {
-          return nodesRef.current.filter((n:any) => n.data?.isTransparentHelper && edgesRef.current.some((e:any) => e.source === n.id && descList.includes(e.target))).map(n => n.id);
-      };
-      const tHelpers = getTransHelpers(tDesc);
-      tHelpers.forEach(h => { if (!tDesc.includes(h)) tDesc.push(h); });
-
-      const L_W = Number(N_L.style?.width) || 200;
-      const R_W = Number(N_R.style?.width) || 200;
-      const gapX = N_R.position.x - (N_L.position.x + L_W);
-
-      // 左側に右側のノードの幅が入るため、右側の要素全体の新しいX座標を計算する
-      const newTX = N_L.position.x + R_W + gapX;
-      const dx = newTX - N_R.position.x;
-
-      // 物理的に移動させず、中身のデータだけを交換し、ズレた幅の分だけ論理記号をスライドさせる
+      // 物理的に移動させず、中身のデータ（テキスト、スタイル、幅、高さ、各種フラグ）だけを交換する
+      // これにより、線の繋がりや論理記号の位置関係を完璧に維持したまま、見た目だけを入れ替える
       setNodes((nds: any[]) => nds.map((n: any) => {
-          if (n.id === N_L.id) {
-              return { ...n, data: { ...N_R.data }, style: { ...N_R.style } };
+          if (n.id === sourceId) {
+              return {
+                  ...n,
+                  data: { 
+                      ...n.data,
+                      content: targetNode.data.content,
+                      cells: targetNode.data.cells,
+                      imageUrl: targetNode.data.imageUrl,
+                      isImage: targetNode.data.isImage,
+                      isTable: targetNode.data.isTable,
+                      rows: targetNode.data.rows,
+                      cols: targetNode.data.cols,
+                      colWidths: targetNode.data.colWidths,
+                      rowHeights: targetNode.data.rowHeights,
+                      tableTitle: targetNode.data.tableTitle
+                  },
+                  style: { 
+                      ...n.style, 
+                      width: targetNode.style?.width, 
+                      height: targetNode.style?.height, 
+                      backgroundColor: targetNode.style?.backgroundColor, 
+                      borderColor: targetNode.style?.borderColor, 
+                      borderWidth: targetNode.style?.borderWidth, 
+                      borderRadius: targetNode.style?.borderRadius,
+                      hAlign: targetNode.style?.hAlign,
+                      vAlign: targetNode.style?.vAlign,
+                      writingMode: targetNode.style?.writingMode
+                  }
+              };
           }
-          if (n.id === N_R.id) {
-              return { ...n, position: { ...n.position, x: n.position.x + dx }, data: { ...N_L.data }, style: { ...N_L.style } };
-          }
-          if (N_S && n.id === N_S.id) {
-              return { ...n, position: { ...n.position, x: n.position.x + dx } };
-          }
-          if (N_trans && n.id === N_trans.id) {
-              return { ...n, style: { ...n.style, width: R_W } };
-          }
-          if (tDesc.includes(n.id) && n.id !== N_R.id && n.id !== N_S?.id) {
-              return { ...n, position: { ...n.position, x: n.position.x + dx } };
+          if (n.id === targetId) {
+              return {
+                  ...n,
+                  data: { 
+                      ...n.data,
+                      content: sourceNode.data.content,
+                      cells: sourceNode.data.cells,
+                      imageUrl: sourceNode.data.imageUrl,
+                      isImage: sourceNode.data.isImage,
+                      isTable: sourceNode.data.isTable,
+                      rows: sourceNode.data.rows,
+                      cols: sourceNode.data.cols,
+                      colWidths: sourceNode.data.colWidths,
+                      rowHeights: sourceNode.data.rowHeights,
+                      tableTitle: sourceNode.data.tableTitle
+                  },
+                  style: { 
+                      ...n.style, 
+                      width: sourceNode.style?.width, 
+                      height: sourceNode.style?.height, 
+                      backgroundColor: sourceNode.style?.backgroundColor, 
+                      borderColor: sourceNode.style?.borderColor, 
+                      borderWidth: sourceNode.style?.borderWidth, 
+                      borderRadius: sourceNode.style?.borderRadius,
+                      hAlign: sourceNode.style?.hAlign,
+                      vAlign: sourceNode.style?.vAlign,
+                      writingMode: sourceNode.style?.writingMode
+                  }
+              };
           }
           return n;
       }));
   }, [selectedEdge, takeSnapshot]);
   
+
 
   const alignSelectedEdgeTarget = useCallback((direction: 'horizontal' | 'vertical') => {
       if (!selectedEdge) return;
