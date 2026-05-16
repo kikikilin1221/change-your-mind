@@ -723,18 +723,7 @@ const moveSubtreeY = useCallback((direction: 'up' | 'down') => {
       const dyTarget = swapNode.position.y - targetNode.position.y;
       const dySwap = targetNode.position.y - swapNode.position.y;
 
-      const edgeTarget = edgesRef.current.find((e:any) => e.target === targetNode.id);
-      const edgeSwap = edgesRef.current.find((e:any) => e.target === swapNode.id);
-
-      // ★ 改善：上下移動時に線が斜めにならないよう、線の「出発点（ソース）」も一緒に入れ替える
-      setEdges((eds: any[]) => eds.map((e: any) => {
-          if (edgeTarget && edgeSwap) {
-              if (e.id === edgeTarget.id) return { ...e, source: edgeSwap.source };
-              if (e.id === edgeSwap.id) return { ...e, source: edgeTarget.source };
-          }
-          return e;
-      }));
-
+      // ★ 完全修復：線の出発点は入れ替えず、座標だけを移動させることで水平を完全に保つ！
       setNodes((nds: any[]) => nds.map((n: any) => {
           if (targetDesc.includes(n.id)) return { ...n, position: { ...n.position, y: n.position.y + dyTarget } };
           if (swapDesc.includes(n.id)) return { ...n, position: { ...n.position, y: n.position.y + dySwap } };
@@ -742,74 +731,76 @@ const moveSubtreeY = useCallback((direction: 'up' | 'down') => {
       }));
   }, [selectedEdge, takeSnapshot]);
 
+  // ★ 1ボタンで左右のテキストを入れ替える最強機能（データ交換＋座標自動調整）
   const toggleSwapX = useCallback(() => {
       if (!selectedEdge) return;
       takeSnapshot();
       
-      const sId = selectedEdge.source;
+      let sId = selectedEdge.source;
+      let sNode = nodesRef.current.find((n:any) => n.id === sId);
+      
+      if (sNode?.data?.isTransparentHelper) {
+          sId = sNode.data.parentNodeId;
+          sNode = nodesRef.current.find((n:any) => n.id === sId);
+      }
+
       const tId = selectedEdge.target;
-      const sNode = nodesRef.current.find((n:any) => n.id === sId);
       const tNode = nodesRef.current.find((n:any) => n.id === tId);
+
       if (!sNode || !tNode) return;
 
-      const getDescendants = (id: string, edgesArr: any[], excludeId: string | null = null) => {
-          const desc = new Set<string>();
-          const traverse = (currentId: string) => {
-              desc.add(currentId);
-              edgesArr.filter((e: any) => e.source === currentId).forEach((e: any) => {
-                  if (e.target !== excludeId && !desc.has(e.target)) traverse(e.target);
-              });
-          };
-          traverse(id);
+      const getDescendants = (id: string, edgesArr: any[], desc = new Set<string>()) => {
+          desc.add(id);
+          edgesArr.filter((e: any) => e.source === id).forEach((e: any) => {
+              if (!desc.has(e.target)) getDescendants(e.target, edgesArr, desc);
+          });
           return Array.from(desc);
       };
 
-      const sDesc = getDescendants(sId, edgesRef.current, tId);
       const tDesc = getDescendants(tId, edgesRef.current);
-
-      const addTransHelpers = (descList: string[]) => {
-          const helpers = nodesRef.current.filter((n:any) => n.data?.isTransparentHelper && edgesRef.current.some((e:any) => e.source === n.id && descList.includes(e.target))).map((n:any) => n.id);
-          helpers.forEach(h => { if(!descList.includes(h)) descList.push(h); });
+      const getTransHelpers = (descList: string[]) => {
+          return nodesRef.current.filter((n:any) => n.data?.isTransparentHelper && edgesRef.current.some((e:any) => e.source === n.id && descList.includes(e.target))).map(n => n.id);
       };
-      addTransHelpers(sDesc);
-      addTransHelpers(tDesc);
+      const tHelpers = getTransHelpers(tDesc);
+      tHelpers.forEach(h => { if (!tDesc.includes(h)) tDesc.push(h); });
 
-      const isLeftToRight = sNode.position.x <= tNode.position.x;
-      const leftNode = isLeftToRight ? sNode : tNode;
-      const rightNode = isLeftToRight ? tNode : sNode;
-      
-      const leftW = Number(leftNode.style?.width) || 200;
-      const gapX = rightNode.position.x - (leftNode.position.x + leftW);
-      
-      const rightW = Number(rightNode.style?.width) || 200;
-      const newRightX = leftNode.position.x;
-      const newLeftX = leftNode.position.x + rightW + gapX;
-      
-      const dxRight = newRightX - rightNode.position.x;
-      const dxLeft = newLeftX - leftNode.position.x;
-      
-      const dxS = isLeftToRight ? dxLeft : dxRight;
-      const dxT = isLeftToRight ? dxRight : dxLeft;
+      const sW = Number(sNode.style?.width) || 200;
+      const tW = Number(tNode.style?.width) || 200;
+      const gapX = tNode.position.x - (sNode.position.x + sW);
 
-      // X座標を物理的に入れ替える
+      // 左側に右側のノードの幅が入るため、右側の要素全体の新しいX座標を計算する
+      const newTX = sNode.position.x + tW + gapX;
+      const dx = newTX - tNode.position.x;
+
       setNodes((nds: any[]) => nds.map((n: any) => {
-          if (sDesc.includes(n.id)) return { ...n, position: { ...n.position, x: n.position.x + dxS } };
-          if (tDesc.includes(n.id)) return { ...n, position: { ...n.position, x: n.position.x + dxT } };
-          return n;
-      }));
-
-      // ★ 改善：物理位置が入れ替わったので、線の「繋がり（ソースとターゲット）」を反転させて矢印の向きを保つ
-      setEdges((eds: any[]) => eds.map((e: any) => {
-          if (e.id === selectedEdge.id) {
-              return { ...e, source: tId, target: sId, sourceHandle: e.sourceHandle, targetHandle: e.targetHandle }; 
+          if (tDesc.includes(n.id)) {
+              if (n.id === tId) {
+                  return {
+                      ...n,
+                      position: { ...n.position, x: n.position.x + dx },
+                      data: { ...n.data, content: sNode.data.content, cells: sNode.data.cells, imageUrl: sNode.data.imageUrl, isImage: sNode.data.isImage, isTable: sNode.data.isTable, rows: sNode.data.rows, cols: sNode.data.cols, colWidths: sNode.data.colWidths, rowHeights: sNode.data.rowHeights, tableTitle: sNode.data.tableTitle },
+                      style: { ...n.style, width: sNode.style?.width, height: sNode.style?.height, backgroundColor: sNode.style?.backgroundColor, borderColor: sNode.style?.borderColor, borderWidth: sNode.style?.borderWidth, borderRadius: sNode.style?.borderRadius, hAlign: sNode.style?.hAlign, vAlign: sNode.style?.vAlign, writingMode: sNode.style?.writingMode }
+                  };
+              }
+              return { ...n, position: { ...n.position, x: n.position.x + dx } };
           }
-          return e;
+
+          if (n.id === sId) {
+              return {
+                  ...n,
+                  data: { ...n.data, content: tNode.data.content, cells: tNode.data.cells, imageUrl: tNode.data.imageUrl, isImage: tNode.data.isImage, isTable: tNode.data.isTable, rows: tNode.data.rows, cols: tNode.data.cols, colWidths: tNode.data.colWidths, rowHeights: tNode.data.rowHeights, tableTitle: tNode.data.tableTitle },
+                  style: { ...n.style, width: tNode.style?.width, height: tNode.style?.height, backgroundColor: tNode.style?.backgroundColor, borderColor: tNode.style?.borderColor, borderWidth: tNode.style?.borderWidth, borderRadius: tNode.style?.borderRadius, hAlign: tNode.style?.hAlign, vAlign: tNode.style?.vAlign, writingMode: tNode.style?.writingMode }
+              };
+          }
+
+          return n;
       }));
   }, [selectedEdge, takeSnapshot]);
 
   const alignSelectedEdgeTarget = useCallback((direction: 'horizontal' | 'vertical') => {
       if (!selectedEdge) return;
       takeSnapshot();
+      
       let sourceNode = nodesRef.current.find(n => n.id === selectedEdge.source);
       if (sourceNode?.data?.isTransparentHelper) {
           sourceNode = nodesRef.current.find(n => n.id === sourceNode.data.parentNodeId);
