@@ -1516,13 +1516,21 @@ const moveSubtreeX = useCallback((direction: 'left' | 'right') => {
 
           {/* ★ メニュー操作時に選択が解除されないよう onMouseDown と onClick でイベント伝播を停止 */}
           {/* ★ メニュー操作時に選択が解除されないよう onMouseDown と onClick でイベント伝播を停止 */}
+          {/* ★ メニュー操作時に選択が解除されないよう onMouseDown と onClick でイベント伝播を停止 */}
           {selectedEdge && (
-            <div className="no-print" onMouseDown={(e) => e.stopPropagation()} onClick={(e) => e.stopPropagation()} style={{ position:'absolute', right:0, top:0, bottom:0, width:'300px', borderLeft:'1px solid #ddd', padding:'20px', backgroundColor:'#fff', zIndex:1000, overflowY: 'auto' }}>
+            <div className="no-print" onMouseDown={(e) => e.stopPropagation()} onClick={(e) => e.stopPropagation()} style={{ position:'absolute', right: (selectedNodes.length > 0 && primaryNode && primaryNode.type !== 'printZone') ? '320px' : 0, top:0, bottom:0, width:'300px', borderLeft:'1px solid #ddd', padding:'20px', backgroundColor:'#fff', zIndex:1000, overflowY: 'auto', boxShadow: '-4px 0 10px rgba(0,0,0,0.05)' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
                 <h3 style={{fontSize:'14px', margin: 0}}>線のデザイン</h3>
                 {/* ★ ×ボタンを押したときに「線（エッジ）の選択」だけを解除し、ノード選択は維持する */}
                 <button onClick={(e) => { e.stopPropagation(); setEdges((eds: any[]) => eds.map((edge: any) => ({ ...edge, selected: false }))); }} style={{ border: 'none', background: 'none', fontSize: '18px', cursor: 'pointer', padding: '0 5px' }}>×</button>
               </div>
+
+              {/* ★ 新機能：線とノードが両方選択されている場合、「線だけ」にするボタンを追加 */}
+              {selectedNodes.length > 0 && (
+                  <button onClick={() => setNodes(nds => nds.map(n => ({...n, selected: false})))} style={{ width: '100%', padding: '8px', marginBottom: '15px', fontSize: '11px', fontWeight: 'bold', background: '#eff6ff', color: '#1d4ed8', border: '1px solid #bfdbfe', borderRadius: '4px', cursor: 'pointer', boxShadow: '0 2px 4px rgba(0,0,0,0.05)' }}>
+                      ✂️ 図形の選択を解除し「線」だけを残す
+                  </button>
+              )}
 
               <div style={{ display:'flex', gap:'5px', marginBottom:'15px' }}>
                 <button onClick={() => { takeSnapshot(); setEdges((eds: any[]) => { const maxZ = Math.max(0, ...eds.map((n: any) => Number(n.zIndex) || 0)); return eds.map((n: any) => n.selected ? {...n, zIndex: maxZ + 1} : n); })}} style={{flex:1, padding:'6px', fontSize:'11px', fontWeight: 'bold', background: '#f0f0f0', border: '1px solid #ccc', cursor: 'pointer', borderRadius: '4px'}}>↑ 最前面へ</button>
