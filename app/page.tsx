@@ -726,6 +726,7 @@ const moveSubtreeY = useCallback((direction: 'up' | 'down') => {
       const edgeTarget = edgesRef.current.find((e:any) => e.target === targetNode.id);
       const edgeSwap = edgesRef.current.find((e:any) => e.target === swapNode.id);
 
+      // ★ 改善：上下移動時に線が斜めにならないよう、線の「出発点（ソース）」も一緒に入れ替える
       setEdges((eds: any[]) => eds.map((e: any) => {
           if (edgeTarget && edgeSwap) {
               if (e.id === edgeTarget.id) return { ...e, source: edgeSwap.source };
@@ -741,80 +742,78 @@ const moveSubtreeY = useCallback((direction: 'up' | 'down') => {
       }));
   }, [selectedEdge, takeSnapshot]);
 
-const moveSubtreeX = useCallback((direction: 'left' | 'right') => {
+  const toggleSwapX = useCallback(() => {
       if (!selectedEdge) return;
       takeSnapshot();
       
+      const sId = selectedEdge.source;
       const tId = selectedEdge.target;
-      const targetNode = nodesRef.current.find((n:any) => n.id === tId);
-      if (!targetNode) return;
+      const sNode = nodesRef.current.find((n:any) => n.id === sId);
+      const tNode = nodesRef.current.find((n:any) => n.id === tId);
+      if (!sNode || !tNode) return;
 
-      let siblingNodes = [];
-
-      if (targetNode.data?.isDerivationBlock) {
-          const parentId = targetNode.data.parentNodeId;
-          siblingNodes = nodesRef.current.filter((n:any) => n.data?.isDerivationBlock && n.data?.parentNodeId === parentId && !n.data?.isTransparentHelper);
-      } else {
-          const sId = selectedEdge.source;
-          const siblingEdges = edgesRef.current.filter((e:any) => e.source === sId);
-          siblingNodes = nodesRef.current.filter((n:any) => siblingEdges.some((e:any) => e.target === n.id));
-      }
-
-      if (siblingNodes.length < 2) return; 
-      siblingNodes.sort((a, b) => a.position.x - b.position.x);
-
-      const targetIndex = siblingNodes.findIndex(n => n.id === tId);
-      if (targetIndex === -1) return;
-
-      let swapNode = null;
-      if (direction === 'left' && targetIndex > 0) swapNode = siblingNodes[targetIndex - 1];
-      else if (direction === 'right' && targetIndex < siblingNodes.length - 1) swapNode = siblingNodes[targetIndex + 1];
-
-      if (!swapNode) return;
-
-      const getDescendants = (id: string, edgesArr: any[], desc = new Set<string>()) => {
-          desc.add(id);
-          edgesArr.filter((e: any) => e.source === id).forEach((e: any) => {
-              if (!desc.has(e.target)) getDescendants(e.target, edgesArr, desc);
-          });
+      const getDescendants = (id: string, edgesArr: any[], excludeId: string | null = null) => {
+          const desc = new Set<string>();
+          const traverse = (currentId: string) => {
+              desc.add(currentId);
+              edgesArr.filter((e: any) => e.source === currentId).forEach((e: any) => {
+                  if (e.target !== excludeId && !desc.has(e.target)) traverse(e.target);
+              });
+          };
+          traverse(id);
           return Array.from(desc);
       };
 
-      const getTransHelper = (nId: string) => nodesRef.current.find((n:any) => n.data?.isTransparentHelper && edgesRef.current.some((e:any) => e.source === n.id && e.target === nId))?.id;
+      const sDesc = getDescendants(sId, edgesRef.current, tId);
+      const tDesc = getDescendants(tId, edgesRef.current);
 
-      const targetDesc = getDescendants(targetNode.id, edgesRef.current);
-      const targetTrans = getTransHelper(targetNode.id);
-      if (targetTrans) targetDesc.push(targetTrans);
+      const addTransHelpers = (descList: string[]) => {
+          const helpers = nodesRef.current.filter((n:any) => n.data?.isTransparentHelper && edgesRef.current.some((e:any) => e.source === n.id && descList.includes(e.target))).map((n:any) => n.id);
+          helpers.forEach(h => { if(!descList.includes(h)) descList.push(h); });
+      };
+      addTransHelpers(sDesc);
+      addTransHelpers(tDesc);
 
-      const swapDesc = getDescendants(swapNode.id, edgesRef.current);
-      const swapTrans = getTransHelper(swapNode.id);
-      if (swapTrans) swapDesc.push(swapTrans);
+      const isLeftToRight = sNode.position.x <= tNode.position.x;
+      const leftNode = isLeftToRight ? sNode : tNode;
+      const rightNode = isLeftToRight ? tNode : sNode;
+      
+      const leftW = Number(leftNode.style?.width) || 200;
+      const gapX = rightNode.position.x - (leftNode.position.x + leftW);
+      
+      const rightW = Number(rightNode.style?.width) || 200;
+      const newRightX = leftNode.position.x;
+      const newLeftX = leftNode.position.x + rightW + gapX;
+      
+      const dxRight = newRightX - rightNode.position.x;
+      const dxLeft = newLeftX - leftNode.position.x;
+      
+      const dxS = isLeftToRight ? dxLeft : dxRight;
+      const dxT = isLeftToRight ? dxRight : dxLeft;
 
-      const dxTarget = swapNode.position.x - targetNode.position.x;
-      const dxSwap = targetNode.position.x - swapNode.position.x;
-
-      const edgeTarget = edgesRef.current.find((e:any) => e.target === targetNode.id);
-      const edgeSwap = edgesRef.current.find((e:any) => e.target === swapNode.id);
-
-      setEdges((eds: any[]) => eds.map((e: any) => {
-          if (edgeTarget && edgeSwap) {
-              if (e.id === edgeTarget.id) return { ...e, source: edgeSwap.source };
-              if (e.id === edgeSwap.id) return { ...e, source: edgeTarget.source };
-          }
-          return e;
+      // X座標を物理的に入れ替える
+      setNodes((nds: any[]) => nds.map((n: any) => {
+          if (sDesc.includes(n.id)) return { ...n, position: { ...n.position, x: n.position.x + dxS } };
+          if (tDesc.includes(n.id)) return { ...n, position: { ...n.position, x: n.position.x + dxT } };
+          return n;
       }));
 
-      setNodes((nds: any[]) => nds.map((n: any) => {
-          if (targetDesc.includes(n.id)) return { ...n, position: { ...n.position, x: n.position.x + dxTarget } };
-          if (swapDesc.includes(n.id)) return { ...n, position: { ...n.position, x: n.position.x + dxSwap } };
-          return n;
+      // ★ 改善：物理位置が入れ替わったので、線の「繋がり（ソースとターゲット）」を反転させて矢印の向きを保つ
+      setEdges((eds: any[]) => eds.map((e: any) => {
+          if (e.id === selectedEdge.id) {
+              return { ...e, source: tId, target: sId, sourceHandle: e.sourceHandle, targetHandle: e.targetHandle }; 
+          }
+          return e;
       }));
   }, [selectedEdge, takeSnapshot]);
 
   const alignSelectedEdgeTarget = useCallback((direction: 'horizontal' | 'vertical') => {
       if (!selectedEdge) return;
       takeSnapshot();
-      const sourceNode = nodesRef.current.find(n => n.id === selectedEdge.source);
+      let sourceNode = nodesRef.current.find(n => n.id === selectedEdge.source);
+      if (sourceNode?.data?.isTransparentHelper) {
+          sourceNode = nodesRef.current.find(n => n.id === sourceNode.data.parentNodeId);
+      }
       const targetNode = nodesRef.current.find(n => n.id === selectedEdge.target);
       if (!sourceNode || !targetNode) return;
 
@@ -1542,10 +1541,12 @@ const moveSubtreeX = useCallback((direction: 'left' | 'right') => {
                 <button onClick={() => moveSubtreeY('up')} style={{flex:1, padding:'6px', fontSize:'11px', fontWeight: 'bold', background: '#e0e7ff', color: '#3730a3', border: '1px solid #c7d2fe', cursor: 'pointer', borderRadius: '4px'}}>🔺 上へ入替</button>
                 <button onClick={() => moveSubtreeY('down')} style={{flex:1, padding:'6px', fontSize:'11px', fontWeight: 'bold', background: '#e0e7ff', color: '#3730a3', border: '1px solid #c7d2fe', cursor: 'pointer', borderRadius: '4px'}}>🔻 下へ入替</button>
               </div>
+
+              {/* ▼▼▼ ここが新しくなります（1ボタンに統合） ▼▼▼ */}
               <div style={{ display:'flex', gap:'5px', marginBottom:'15px' }}>
-                <button onClick={() => moveSubtreeX('left')} style={{flex:1, padding:'6px', fontSize:'11px', fontWeight: 'bold', background: '#e0e7ff', color: '#3730a3', border: '1px solid #c7d2fe', cursor: 'pointer', borderRadius: '4px'}}>◀ 左へ入替</button>
-                <button onClick={() => moveSubtreeX('right')} style={{flex:1, padding:'6px', fontSize:'11px', fontWeight: 'bold', background: '#e0e7ff', color: '#3730a3', border: '1px solid #c7d2fe', cursor: 'pointer', borderRadius: '4px'}}>右へ入替 ▶</button>
+                <button onClick={toggleSwapX} style={{flex:1, padding:'6px', fontSize:'11px', fontWeight: 'bold', background: '#e0e7ff', color: '#3730a3', border: '1px solid #c7d2fe', cursor: 'pointer', borderRadius: '4px'}}>🔄 左右のテキストを入替</button>
               </div>
+              {/* ▲▲▲ ここまで ▲▲▲ */}
 
               <label style={{fontSize:'11px', fontWeight: 'bold'}}>直線の自動調整 (終点を移動)</label>
               <div style={{ display:'flex', gap:'5px', marginTop: '5px', marginBottom: '15px' }}>
