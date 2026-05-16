@@ -69,7 +69,8 @@ const getEdgePoint = (cx: number, cy: number, w: number, h: number, tx: number, 
   return { x: px, y: py };
 };
 
-const DoubleEdge = ({ id, sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, style = {}, markerEnd, markerStart, data, label }: EdgeProps) => {
+// ▼引数に selected を追加します
+const DoubleEdge = ({ id, sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, style = {}, markerEnd, markerStart, data, label, selected }: EdgeProps) => {
   const [edgePath, labelX, labelY] = getBezierPath({ sourceX, sourceY, sourcePosition, targetX, targetY, targetPosition });
   const isDouble = (data as any)?.double; 
   const isEditing = Boolean((data as any)?.isEditing);
@@ -90,6 +91,11 @@ const DoubleEdge = ({ id, sourceX, sourceY, targetX, targetY, sourcePosition, ta
 
   return (
     <>
+      {/* ★ 改善：線が選択されている時に青いハイライトを表示する */}
+      {selected && (
+          <BaseEdge path={edgePath} style={{ strokeWidth: strokeWidth + 12, stroke: 'rgba(59, 130, 246, 0.3)', fill: 'none', strokeLinecap: 'round' }} />
+      )}
+      
       {isDouble && !hideLine && (
         <svg style={{ position: 'absolute', width: 0, height: 0 }}>
           <defs>
@@ -312,7 +318,6 @@ function FlowEditor() {
     const derivationBlocks = currentNodes.filter(n => isDerivationBlock(n) && !n.data?.isTransparentHelper);
     
     const count = derivationBlocks.length;
-    
     const gapX = (type === 'and' || type === 'or' || type === 'plus') ? 40 : 100; 
     const gapY = h0; 
     
@@ -666,7 +671,6 @@ function FlowEditor() {
           return { ...n, data: { ...n.data, cells: newCells, colWidths: newColWidths, rowHeights: newRowHeights } };
       }));
   }, [primaryNode, selectedCells, takeSnapshot]);
-
 const moveSubtreeY = useCallback((direction: 'up' | 'down') => {
       if (!selectedEdge) return;
       takeSnapshot();
@@ -677,7 +681,6 @@ const moveSubtreeY = useCallback((direction: 'up' | 'down') => {
 
       let siblingNodes = [];
 
-      // ★ 改善：論理ブロックと通常の枝の両方を正確に取得する
       if (targetNode.data?.isDerivationBlock) {
           const parentId = targetNode.data.parentNodeId;
           siblingNodes = nodesRef.current.filter((n:any) => n.data?.isDerivationBlock && n.data?.parentNodeId === parentId && !n.data?.isTransparentHelper);
@@ -707,8 +710,15 @@ const moveSubtreeY = useCallback((direction: 'up' | 'down') => {
           return Array.from(desc);
       };
 
+      const getTransHelper = (nId: string) => nodesRef.current.find((n:any) => n.data?.isTransparentHelper && edgesRef.current.some((e:any) => e.source === n.id && e.target === nId))?.id;
+
       const targetDesc = getDescendants(targetNode.id, edgesRef.current);
+      const targetTrans = getTransHelper(targetNode.id);
+      if (targetTrans) targetDesc.push(targetTrans);
+
       const swapDesc = getDescendants(swapNode.id, edgesRef.current);
+      const swapTrans = getTransHelper(swapNode.id);
+      if (swapTrans) swapDesc.push(swapTrans);
 
       const dyTarget = swapNode.position.y - targetNode.position.y;
       const dySwap = targetNode.position.y - swapNode.position.y;
@@ -716,7 +726,6 @@ const moveSubtreeY = useCallback((direction: 'up' | 'down') => {
       const edgeTarget = edgesRef.current.find((e:any) => e.target === targetNode.id);
       const edgeSwap = edgesRef.current.find((e:any) => e.target === swapNode.id);
 
-      // ★ 改善：斜めにならないよう、線の「出発点」も一緒に入れ替える！
       setEdges((eds: any[]) => eds.map((e: any) => {
           if (edgeTarget && edgeSwap) {
               if (e.id === edgeTarget.id) return { ...e, source: edgeSwap.source };
@@ -725,10 +734,98 @@ const moveSubtreeY = useCallback((direction: 'up' | 'down') => {
           return e;
       }));
 
-      // 要素を入れ替える
       setNodes((nds: any[]) => nds.map((n: any) => {
           if (targetDesc.includes(n.id)) return { ...n, position: { ...n.position, y: n.position.y + dyTarget } };
           if (swapDesc.includes(n.id)) return { ...n, position: { ...n.position, y: n.position.y + dySwap } };
+          return n;
+      }));
+  }, [selectedEdge, takeSnapshot]);
+
+const moveSubtreeX = useCallback((direction: 'left' | 'right') => {
+      if (!selectedEdge) return;
+      takeSnapshot();
+      
+      const tId = selectedEdge.target;
+      const targetNode = nodesRef.current.find((n:any) => n.id === tId);
+      if (!targetNode) return;
+
+      let siblingNodes = [];
+
+      if (targetNode.data?.isDerivationBlock) {
+          const parentId = targetNode.data.parentNodeId;
+          siblingNodes = nodesRef.current.filter((n:any) => n.data?.isDerivationBlock && n.data?.parentNodeId === parentId && !n.data?.isTransparentHelper);
+      } else {
+          const sId = selectedEdge.source;
+          const siblingEdges = edgesRef.current.filter((e:any) => e.source === sId);
+          siblingNodes = nodesRef.current.filter((n:any) => siblingEdges.some((e:any) => e.target === n.id));
+      }
+
+      if (siblingNodes.length < 2) return; 
+      siblingNodes.sort((a, b) => a.position.x - b.position.x);
+
+      const targetIndex = siblingNodes.findIndex(n => n.id === tId);
+      if (targetIndex === -1) return;
+
+      let swapNode = null;
+      if (direction === 'left' && targetIndex > 0) swapNode = siblingNodes[targetIndex - 1];
+      else if (direction === 'right' && targetIndex < siblingNodes.length - 1) swapNode = siblingNodes[targetIndex + 1];
+
+      if (!swapNode) return;
+
+      const getDescendants = (id: string, edgesArr: any[], desc = new Set<string>()) => {
+          desc.add(id);
+          edgesArr.filter((e: any) => e.source === id).forEach((e: any) => {
+              if (!desc.has(e.target)) getDescendants(e.target, edgesArr, desc);
+          });
+          return Array.from(desc);
+      };
+
+      const getTransHelper = (nId: string) => nodesRef.current.find((n:any) => n.data?.isTransparentHelper && edgesRef.current.some((e:any) => e.source === n.id && e.target === nId))?.id;
+
+      const targetDesc = getDescendants(targetNode.id, edgesRef.current);
+      const targetTrans = getTransHelper(targetNode.id);
+      if (targetTrans) targetDesc.push(targetTrans);
+
+      const swapDesc = getDescendants(swapNode.id, edgesRef.current);
+      const swapTrans = getTransHelper(swapNode.id);
+      if (swapTrans) swapDesc.push(swapTrans);
+
+      const dxTarget = swapNode.position.x - targetNode.position.x;
+      const dxSwap = targetNode.position.x - swapNode.position.x;
+
+      const edgeTarget = edgesRef.current.find((e:any) => e.target === targetNode.id);
+      const edgeSwap = edgesRef.current.find((e:any) => e.target === swapNode.id);
+
+      setEdges((eds: any[]) => eds.map((e: any) => {
+          if (edgeTarget && edgeSwap) {
+              if (e.id === edgeTarget.id) return { ...e, source: edgeSwap.source };
+              if (e.id === edgeSwap.id) return { ...e, source: edgeTarget.source };
+          }
+          return e;
+      }));
+
+      setNodes((nds: any[]) => nds.map((n: any) => {
+          if (targetDesc.includes(n.id)) return { ...n, position: { ...n.position, x: n.position.x + dxTarget } };
+          if (swapDesc.includes(n.id)) return { ...n, position: { ...n.position, x: n.position.x + dxSwap } };
+          return n;
+      }));
+  }, [selectedEdge, takeSnapshot]);
+
+  const alignSelectedEdgeTarget = useCallback((direction: 'horizontal' | 'vertical') => {
+      if (!selectedEdge) return;
+      takeSnapshot();
+      const sourceNode = nodesRef.current.find(n => n.id === selectedEdge.source);
+      const targetNode = nodesRef.current.find(n => n.id === selectedEdge.target);
+      if (!sourceNode || !targetNode) return;
+
+      setNodes(nds => nds.map(n => {
+          if (n.id === targetNode.id) {
+              if (direction === 'horizontal') {
+                  return { ...n, position: { ...n.position, y: sourceNode.position.y } };
+              } else {
+                  return { ...n, position: { ...n.position, x: sourceNode.position.x } };
+              }
+          }
           return n;
       }));
   }, [selectedEdge, takeSnapshot]);
@@ -1219,7 +1316,9 @@ const moveSubtreeY = useCallback((direction: 'up' | 'down') => {
         <div style={{ flexGrow: 1, position: 'relative' }}>
           <ReactFlow 
              connectionMode={ConnectionMode.Loose} nodes={flowNodes} edges={edges} edgeTypes={edgeTypes} elevateNodesOnSelect={false} multiSelectionKeyCode={['Shift', 'Meta', 'Control']}
-             panOnDrag={!isLassoMode} selectionOnDrag={isLassoMode} selectionMode={SelectionMode.Partial}
+             panOnDrag={!isLassoMode || selectedNodes.length === 1} 
+             selectionOnDrag={isLassoMode && selectedNodes.length !== 1} 
+             selectionMode={SelectionMode.Partial}
              onNodesChange={u => {
                  const hasSelect = u.some((c: any) => c.type === 'select' && c.selected);
                  if (hasSelect) { setNodes(nds => nds.map(n => ({ ...n, data: { ...n.data, isEditing: false, editingCell: null } }))); setEdges(eds => eds.map(e => ({ ...e, data: { ...e.data, isEditing: false } }))); }
@@ -1416,6 +1515,7 @@ const moveSubtreeY = useCallback((direction: 'up' | 'down') => {
           )}
 
           {/* ★ メニュー操作時に選択が解除されないよう onMouseDown と onClick でイベント伝播を停止 */}
+          {/* ★ メニュー操作時に選択が解除されないよう onMouseDown と onClick でイベント伝播を停止 */}
           {selectedEdge && (
             <div className="no-print" onMouseDown={(e) => e.stopPropagation()} onClick={(e) => e.stopPropagation()} style={{ position:'absolute', right:0, top:0, bottom:0, width:'300px', borderLeft:'1px solid #ddd', padding:'20px', backgroundColor:'#fff', zIndex:1000, overflowY: 'auto' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
@@ -1428,10 +1528,23 @@ const moveSubtreeY = useCallback((direction: 'up' | 'down') => {
                 <button onClick={() => { takeSnapshot(); setEdges((eds: any[]) => { const maxZ = Math.max(0, ...eds.map((n: any) => Number(n.zIndex) || 0)); return eds.map((n: any) => n.selected ? {...n, zIndex: maxZ + 1} : n); })}} style={{flex:1, padding:'6px', fontSize:'11px', fontWeight: 'bold', background: '#f0f0f0', border: '1px solid #ccc', cursor: 'pointer', borderRadius: '4px'}}>↑ 最前面へ</button>
                 <button onClick={() => { takeSnapshot(); setEdges((eds: any[]) => { const minZ = Math.min(0, ...eds.map((n: any) => Number(n.zIndex) || 0)); return eds.map((n: any) => n.selected ? {...n, zIndex: minZ - 1} : n); })}} style={{flex:1, padding:'6px', fontSize:'11px', fontWeight: 'bold', background: '#f0f0f0', border: '1px solid #ccc', cursor: 'pointer', borderRadius: '4px'}}>↓ 最背面へ</button>
               </div>
-<div style={{ display:'flex', gap:'5px', marginBottom:'15px' }}>
+
+              {/* ★ 新機能：上下入替・左右入替・自動直線調整を追加 */}
+              <div style={{ display:'flex', gap:'5px', marginBottom:'5px' }}>
                 <button onClick={() => moveSubtreeY('up')} style={{flex:1, padding:'6px', fontSize:'11px', fontWeight: 'bold', background: '#e0e7ff', color: '#3730a3', border: '1px solid #c7d2fe', cursor: 'pointer', borderRadius: '4px'}}>🔺 上へ入替</button>
                 <button onClick={() => moveSubtreeY('down')} style={{flex:1, padding:'6px', fontSize:'11px', fontWeight: 'bold', background: '#e0e7ff', color: '#3730a3', border: '1px solid #c7d2fe', cursor: 'pointer', borderRadius: '4px'}}>🔻 下へ入替</button>
               </div>
+              <div style={{ display:'flex', gap:'5px', marginBottom:'15px' }}>
+                <button onClick={() => moveSubtreeX('left')} style={{flex:1, padding:'6px', fontSize:'11px', fontWeight: 'bold', background: '#e0e7ff', color: '#3730a3', border: '1px solid #c7d2fe', cursor: 'pointer', borderRadius: '4px'}}>◀ 左へ入替</button>
+                <button onClick={() => moveSubtreeX('right')} style={{flex:1, padding:'6px', fontSize:'11px', fontWeight: 'bold', background: '#e0e7ff', color: '#3730a3', border: '1px solid #c7d2fe', cursor: 'pointer', borderRadius: '4px'}}>右へ入替 ▶</button>
+              </div>
+
+              <label style={{fontSize:'11px', fontWeight: 'bold'}}>直線の自動調整 (終点を移動)</label>
+              <div style={{ display:'flex', gap:'5px', marginTop: '5px', marginBottom: '15px' }}>
+                <button onClick={() => alignSelectedEdgeTarget('horizontal')} style={{flex:1, padding:'6px', border: '1px solid #ccc', cursor: 'pointer', borderRadius: '4px', fontWeight: 'bold', fontSize: '11px', background: '#fff'}}>水平(横)に揃える</button>
+                <button onClick={() => alignSelectedEdgeTarget('vertical')} style={{flex:1, padding:'6px', border: '1px solid #ccc', cursor: 'pointer', borderRadius: '4px', fontWeight: 'bold', fontSize: '11px', background: '#fff'}}>垂直(縦)に揃える</button>
+              </div>
+
               <div style={{ padding: '15px', borderRadius: '12px', backgroundColor: '#f8f9fa', border: '1px solid #ddd', marginBottom: '15px' }}>
                   <label style={{fontSize: '11px', fontWeight: 'bold', color: '#1d4ed8'}}>文字の部分装飾 (編集中のみ)</label>
                   <p style={{fontSize: '10px', color: '#666', marginTop: '4px', marginBottom: '10px', lineHeight: '1.4'}}>
@@ -1471,9 +1584,19 @@ const moveSubtreeY = useCallback((direction: 'up' | 'down') => {
               <label style={{fontSize:'11px', fontWeight: 'bold'}}>線の色</label>
               <input type="color" value={selectedEdge.data?.color || '#333333'} onChange={(e) => updateEdgeDesign({ color: e.target.value })} style={{width:'100%', height:'24px', border:'none', cursor:'pointer', padding:0, marginBottom:'20px', marginTop: '5px'}} />
 
-              <label style={{fontSize:'11px', fontWeight: 'bold'}}>種類 (7種)</label>
+              {/* ★ 新機能：種類を8種に変更し、論理記号のデザインを適用 */}
+              <label style={{fontSize:'11px', fontWeight: 'bold'}}>種類 (8種)</label>
               <div style={{ display:'flex', flexDirection:'column', gap:'5px', marginTop: '5px' }}>
-                {[{l:'普通',c:{ resetDesign: true, markerType: 'none', label: '' }},{l:'片矢印 (→)',c:{ resetDesign: true, markerType: 'arrow', label: '' }},{l:'二重片矢印 (⇒)',c:{ resetDesign: true, double: true, markerType: 'custom-double-arrow', label: '' }},{l:'両矢印 (↔)',c:{ resetDesign: true, markerType: 'both', label: '' }},{l:'二重両矢印 (⇔)',c:{ resetDesign: true, double: true, markerType: 'custom-double-both', label: '' }},{l:'論理和 (∧)',c:{ resetDesign: true, markerType: 'none', label: '∧' }},{l:'論理積 (∨)',c:{ resetDesign: true, markerType: 'none', label: '∨' }}].map(item => (
+                {[
+                  {l:'普通',c:{ resetDesign: true, markerType: 'none', label: '' }},
+                  {l:'片矢印 (→)',c:{ resetDesign: true, markerType: 'arrow', label: '' }},
+                  {l:'二重片矢印 (⇒)',c:{ resetDesign: true, double: true, markerType: 'custom-double-arrow', label: '', fontSize: 18 }},
+                  {l:'両矢印 (↔)',c:{ resetDesign: true, markerType: 'both', label: '' }},
+                  {l:'二重両矢印 (⇔)',c:{ resetDesign: true, double: true, markerType: 'custom-double-both', label: '', fontSize: 18 }},
+                  {l:'論理和 (∧)',c:{ resetDesign: true, markerType: 'none', label: '∧', hideLine: true, fontSize: 20 }},
+                  {l:'論理積 (∨)',c:{ resetDesign: true, markerType: 'none', label: '∨', hideLine: true, fontSize: 20 }},
+                  {l:'プラス (＋)',c:{ resetDesign: true, markerType: 'none', label: '＋', hideLine: true, fontSize: 20 }}
+                ].map(item => (
                   <button key={item.l} onClick={() => updateEdgeDesign(item.c)} style={{padding:'8px', fontSize:'12px', border: '1px solid #ccc', background: '#f9f9f9', cursor: 'pointer', borderRadius: '4px', textAlign: 'left', fontWeight: 'bold'}}>{item.l}</button>
                 ))}
               </div>
