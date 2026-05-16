@@ -723,7 +723,7 @@ const moveSubtreeY = useCallback((direction: 'up' | 'down') => {
       const dyTarget = swapNode.position.y - targetNode.position.y;
       const dySwap = targetNode.position.y - swapNode.position.y;
 
-      // ★ 完全修復：線の出発点は入れ替えず、座標だけを移動させることで水平を完全に保つ！
+      // ★ 修復：線の再接続（setEdges）を削除し、純粋にY座標だけを動かすことで線が斜めになるのを完全に防ぐ
       setNodes((nds: any[]) => nds.map((n: any) => {
           if (targetDesc.includes(n.id)) return { ...n, position: { ...n.position, y: n.position.y + dyTarget } };
           if (swapDesc.includes(n.id)) return { ...n, position: { ...n.position, y: n.position.y + dySwap } };
@@ -731,23 +731,40 @@ const moveSubtreeY = useCallback((direction: 'up' | 'down') => {
       }));
   }, [selectedEdge, takeSnapshot]);
 
-  // ★ 1ボタンで左右のテキストを入れ替える最強機能（データ交換＋座標自動調整）
+  // ★ 1ボタンで「左テキスト・論理記号・右テキスト」の3つを認識し、完璧に入れ替える機能
+  // ★ 1ボタンで「左テキスト・論理記号・右テキスト」の3つを認識し、完璧に入れ替える機能
   const toggleSwapX = useCallback(() => {
       if (!selectedEdge) return;
       takeSnapshot();
-      
-      let sId = selectedEdge.source;
-      let sNode = nodesRef.current.find((n:any) => n.id === sId);
-      
-      if (sNode?.data?.isTransparentHelper) {
-          sId = sNode.data.parentNodeId;
-          sNode = nodesRef.current.find((n:any) => n.id === sId);
+
+      const source = nodesRef.current.find(n => n.id === selectedEdge.source);
+      const target = nodesRef.current.find(n => n.id === selectedEdge.target);
+      if (!source || !target) return;
+
+      // ★ 修正：TypeScriptの型エラーを防ぐため「: any」を明記
+      let N_L: any = null;
+      let N_R: any = null;
+      let N_S: any = null;
+      let N_trans: any = null;
+
+      // どこを選択しても、左(N_L)・真ん中(N_S)・右(N_R)を正確に特定する
+      if (source.data?.isDerivationBlock && !source.data?.isTransparentHelper) {
+          N_S = source;
+          N_R = target;
+          N_L = nodesRef.current.find(n => n.id === N_S.data.parentNodeId);
+          N_trans = nodesRef.current.find(n => n.data?.isTransparentHelper && n.data?.parentNodeId === N_L?.id);
+      } else if (source.data?.isTransparentHelper) {
+          N_trans = source;
+          N_S = target;
+          N_L = nodesRef.current.find(n => n.id === N_trans.data.parentNodeId);
+          const edgeOut = edgesRef.current.find(e => e.source === N_S.id);
+          if (edgeOut) N_R = nodesRef.current.find(n => n.id === edgeOut.target);
+      } else {
+          N_L = source;
+          N_R = target;
       }
 
-      const tId = selectedEdge.target;
-      const tNode = nodesRef.current.find((n:any) => n.id === tId);
-
-      if (!sNode || !tNode) return;
+      if (!N_L || !N_R) return;
 
       const getDescendants = (id: string, edgesArr: any[], desc = new Set<string>()) => {
           desc.add(id);
@@ -757,45 +774,42 @@ const moveSubtreeY = useCallback((direction: 'up' | 'down') => {
           return Array.from(desc);
       };
 
-      const tDesc = getDescendants(tId, edgesRef.current);
+      const tDesc = getDescendants(N_R.id, edgesRef.current);
       const getTransHelpers = (descList: string[]) => {
           return nodesRef.current.filter((n:any) => n.data?.isTransparentHelper && edgesRef.current.some((e:any) => e.source === n.id && descList.includes(e.target))).map(n => n.id);
       };
       const tHelpers = getTransHelpers(tDesc);
       tHelpers.forEach(h => { if (!tDesc.includes(h)) tDesc.push(h); });
 
-      const sW = Number(sNode.style?.width) || 200;
-      const tW = Number(tNode.style?.width) || 200;
-      const gapX = tNode.position.x - (sNode.position.x + sW);
+      const L_W = Number(N_L.style?.width) || 200;
+      const R_W = Number(N_R.style?.width) || 200;
+      const gapX = N_R.position.x - (N_L.position.x + L_W);
 
       // 左側に右側のノードの幅が入るため、右側の要素全体の新しいX座標を計算する
-      const newTX = sNode.position.x + tW + gapX;
-      const dx = newTX - tNode.position.x;
+      const newTX = N_L.position.x + R_W + gapX;
+      const dx = newTX - N_R.position.x;
 
+      // 物理的に移動させず、中身のデータだけを交換し、ズレた幅の分だけ論理記号をスライドさせる
       setNodes((nds: any[]) => nds.map((n: any) => {
-          if (tDesc.includes(n.id)) {
-              if (n.id === tId) {
-                  return {
-                      ...n,
-                      position: { ...n.position, x: n.position.x + dx },
-                      data: { ...n.data, content: sNode.data.content, cells: sNode.data.cells, imageUrl: sNode.data.imageUrl, isImage: sNode.data.isImage, isTable: sNode.data.isTable, rows: sNode.data.rows, cols: sNode.data.cols, colWidths: sNode.data.colWidths, rowHeights: sNode.data.rowHeights, tableTitle: sNode.data.tableTitle },
-                      style: { ...n.style, width: sNode.style?.width, height: sNode.style?.height, backgroundColor: sNode.style?.backgroundColor, borderColor: sNode.style?.borderColor, borderWidth: sNode.style?.borderWidth, borderRadius: sNode.style?.borderRadius, hAlign: sNode.style?.hAlign, vAlign: sNode.style?.vAlign, writingMode: sNode.style?.writingMode }
-                  };
-              }
+          if (n.id === N_L.id) {
+              return { ...n, data: { ...N_R.data }, style: { ...N_R.style } };
+          }
+          if (n.id === N_R.id) {
+              return { ...n, position: { ...n.position, x: n.position.x + dx }, data: { ...N_L.data }, style: { ...N_L.style } };
+          }
+          if (N_S && n.id === N_S.id) {
               return { ...n, position: { ...n.position, x: n.position.x + dx } };
           }
-
-          if (n.id === sId) {
-              return {
-                  ...n,
-                  data: { ...n.data, content: tNode.data.content, cells: tNode.data.cells, imageUrl: tNode.data.imageUrl, isImage: tNode.data.isImage, isTable: tNode.data.isTable, rows: tNode.data.rows, cols: tNode.data.cols, colWidths: tNode.data.colWidths, rowHeights: tNode.data.rowHeights, tableTitle: tNode.data.tableTitle },
-                  style: { ...n.style, width: tNode.style?.width, height: tNode.style?.height, backgroundColor: tNode.style?.backgroundColor, borderColor: tNode.style?.borderColor, borderWidth: tNode.style?.borderWidth, borderRadius: tNode.style?.borderRadius, hAlign: tNode.style?.hAlign, vAlign: tNode.style?.vAlign, writingMode: tNode.style?.writingMode }
-              };
+          if (N_trans && n.id === N_trans.id) {
+              return { ...n, style: { ...n.style, width: R_W } };
           }
-
+          if (tDesc.includes(n.id) && n.id !== N_R.id && n.id !== N_S?.id) {
+              return { ...n, position: { ...n.position, x: n.position.x + dx } };
+          }
           return n;
       }));
   }, [selectedEdge, takeSnapshot]);
+  
 
   const alignSelectedEdgeTarget = useCallback((direction: 'horizontal' | 'vertical') => {
       if (!selectedEdge) return;
