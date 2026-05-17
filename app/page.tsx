@@ -562,6 +562,9 @@ function FlowEditor() {
               else if (element.tagName === 'SPAN') { const size = element.style.fontSize; if (size === '48px' || size === 'xxx-large' || size === '-webkit-xxx-large') { element.style.fontSize = value; element.style.lineHeight = '1.2'; } }
           });
       } else { document.execCommand(type, false, value); }
+      
+      // ★ 改善：装飾が適用された瞬間に、即座にキャンバスのデータにも反映させる
+      activeEl.dispatchEvent(new Event('input', { bubbles: true }));
   };
 
   const handleResetFormat = () => {
@@ -574,6 +577,9 @@ function FlowEditor() {
           const element = f as HTMLElement;
           if (element.tagName === 'FONT' || element.tagName === 'SPAN') { element.removeAttribute('size'); element.style.fontSize = '14px'; element.style.color = '#000000'; element.style.fontWeight = 'normal'; element.style.textDecoration = 'none'; element.style.fontFamily = 'sans-serif'; element.style.lineHeight = '1.2'; }
       });
+      
+      // ★ 改善：リセットされた瞬間に、即座にキャンバスのデータにも反映させる
+      activeEl.dispatchEvent(new Event('input', { bubbles: true }));
   };
 
   const handleLayout = (hAlign?: string, vAlign?: string, wMode?: string) => {
@@ -1463,11 +1469,13 @@ const moveSubtreeY = useCallback((direction: 'up' | 'down') => {
               {(!primaryNode.data?.isTable || isTableEditing) && (
                   <div style={{ padding: '10px', background: '#eef2ff', borderRadius: '8px', marginBottom: '15px', border: '1px solid #c7d2fe' }}>
                       <label style={{fontSize: '11px', fontWeight: 'bold', color: '#3730a3'}}>📝 テキストを安全に編集</label>
-                      <p style={{fontSize: '9px', color: '#666', margin: '2px 0 5px 0'}}>※線と被って直接編集しづらい場合はここに入力してください</p>
-                      <textarea
-                          value={isTableEditing ? (primaryNode.data.cells[selectedCells[primaryNode.id][0]]?.content || '') : (primaryNode.data?.content || '')}
-                          onChange={(e) => {
-                              const val = e.target.value;
+                      <p style={{fontSize: '9px', color: '#666', margin: '2px 0 5px 0'}}>※ここで文字を選択して、下の装飾ボタンを直接使えます！</p>
+                      <div
+                          className="html-content"
+                          contentEditable={true}
+                          suppressContentEditableWarning
+                          onInput={(e) => {
+                              const val = e.currentTarget.innerHTML;
                               if (isTableEditing) {
                                   const cellId = selectedCells[primaryNode.id][0];
                                   setNodes(nds => nds.map(n => n.id === primaryNode.id ? { ...n, data: { ...n.data, cells: { ...n.data.cells, [cellId]: { ...n.data.cells[cellId], content: val } } } } : n));
@@ -1475,7 +1483,23 @@ const moveSubtreeY = useCallback((direction: 'up' | 'down') => {
                                   updateSelectedNodes({ content: val });
                               }
                           }}
-                          style={{ width: '100%', minHeight: '60px', padding: '8px', fontSize: '12px', border: '1px solid #a5b4fc', borderRadius: '4px', resize: 'vertical', outline: 'none' }}
+                          onBlur={(e) => {
+                              const val = e.currentTarget.innerHTML;
+                              if (isTableEditing) {
+                                  const cellId = selectedCells[primaryNode.id][0];
+                                  setNodes(nds => nds.map(n => n.id === primaryNode.id ? { ...n, data: { ...n.data, cells: { ...n.data.cells, [cellId]: { ...n.data.cells[cellId], content: val } } } } : n));
+                              } else {
+                                  updateSelectedNodes({ content: val });
+                              }
+                          }}
+                          style={{ width: '100%', minHeight: '60px', padding: '8px', fontSize: '12px', border: '1px solid #a5b4fc', borderRadius: '4px', backgroundColor: '#fff', outline: 'none', overflowY: 'auto', cursor: 'text' }}
+                          ref={el => {
+                              if (!el) return;
+                              const currentVal = isTableEditing ? (primaryNode.data.cells[selectedCells[primaryNode.id][0]]?.content || '') : (primaryNode.data?.content || '');
+                              if (el.innerHTML !== currentVal && document.activeElement !== el) {
+                                  el.innerHTML = currentVal;
+                              }
+                          }}
                       />
                   </div>
               )}
@@ -1643,11 +1667,21 @@ const moveSubtreeY = useCallback((direction: 'up' | 'down') => {
               {/* ★ 新機能：キャンバス上でクリックしづらい時のための安全なテキスト編集エリア（線用） */}
               <div style={{ padding: '10px', background: '#eef2ff', borderRadius: '8px', marginBottom: '15px', border: '1px solid #c7d2fe' }}>
                   <label style={{fontSize: '11px', fontWeight: 'bold', color: '#3730a3'}}>📝 線のテキストを安全に編集</label>
-                  <p style={{fontSize: '9px', color: '#666', margin: '2px 0 5px 0'}}>※線と被ってクリックしづらい場合はここに入力してください</p>
-                  <textarea
-                      value={selectedEdge.label || ''}
-                      onChange={(e) => updateEdgeDesign({ label: e.target.value })}
-                      style={{ width: '100%', minHeight: '40px', padding: '8px', fontSize: '12px', border: '1px solid #a5b4fc', borderRadius: '4px', resize: 'vertical', outline: 'none' }}
+                  <p style={{fontSize: '9px', color: '#666', margin: '2px 0 5px 0'}}>※ここで文字を選択して、下の装飾ボタンを直接使えます！</p>
+                  <div
+                      className="html-content"
+                      contentEditable={true}
+                      suppressContentEditableWarning
+                      onInput={(e) => updateEdgeDesign({ label: e.currentTarget.innerHTML })}
+                      onBlur={(e) => updateEdgeDesign({ label: e.currentTarget.innerHTML })}
+                      style={{ width: '100%', minHeight: '40px', padding: '8px', fontSize: '12px', border: '1px solid #a5b4fc', borderRadius: '4px', backgroundColor: '#fff', outline: 'none', overflowY: 'auto', cursor: 'text' }}
+                      ref={el => {
+                          if (!el) return;
+                          const currentVal = selectedEdge.label || '';
+                          if (el.innerHTML !== currentVal && document.activeElement !== el) {
+                              el.innerHTML = currentVal;
+                          }
+                      }}
                   />
               </div>
 
