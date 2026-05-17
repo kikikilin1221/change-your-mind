@@ -292,11 +292,11 @@ function FlowEditor() {
           
           if (type === 'row') {
               newRowHeights.push(40);
-              for(let c=0; c<newCols; c++) newCells[`${newRows-1}-${c}`] = { content: '', style: { border: '1px solid #ccc', hAlign: 'left', vAlign: 'top', writingMode: 'horizontal-tb' } };
+              for(let c=0; c<newCols; c++) newCells[`${newRows-1}-${c}`] = { content: '', style: { border: 'none', hAlign: 'left', vAlign: 'top', writingMode: 'horizontal-tb' } };
           }
           if (type === 'col') {
               newColWidths.push(100);
-              for(let r=0; r<newRows; r++) newCells[`${r}-${newCols-1}`] = { content: '', style: { border: '1px solid #ccc', hAlign: 'left', vAlign: 'top', writingMode: 'horizontal-tb' } };
+              for(let r=0; r<newRows; r++) newCells[`${r}-${newCols-1}`] = { content: '', style: { border: 'none', hAlign: 'left', vAlign: 'top', writingMode: 'horizontal-tb' } };
           }
           return { ...n, data: { ...n.data, rows: newRows, cols: newCols, cells: newCells, colWidths: newColWidths, rowHeights: newRowHeights } };
       }));
@@ -844,12 +844,18 @@ const moveSubtreeY = useCallback((direction: 'up' | 'down') => {
       const targetNode = nodesRef.current.find(n => n.id === selectedEdge.target);
       if (!sourceNode || !targetNode) return;
 
+      // ★ 改善：図形のトップ(Y=0)ではなく「中心」を基準に合わせることで、線だけを真っ直ぐにする
+      const sW = Number(sourceNode.style?.width) || 200;
+      const sH = Number(sourceNode.style?.height) || 100;
+      const tW = Number(targetNode.style?.width) || 200;
+      const tH = Number(targetNode.style?.height) || 100;
+
       setNodes(nds => nds.map(n => {
           if (n.id === targetNode.id) {
               if (direction === 'horizontal') {
-                  return { ...n, position: { ...n.position, y: sourceNode.position.y } };
+                  return { ...n, position: { ...n.position, y: sourceNode.position.y + (sH - tH) / 2 } };
               } else {
-                  return { ...n, position: { ...n.position, x: sourceNode.position.x } };
+                  return { ...n, position: { ...n.position, x: sourceNode.position.x + (sW - tW) / 2 } };
               }
           }
           return n;
@@ -895,7 +901,8 @@ const moveSubtreeY = useCallback((direction: 'up' | 'down') => {
     if (type === 'table') {
       data = { 
           isTable: true, rows: 2, cols: 2, textOffsetX: 0, textOffsetY: 0, editingCell: null, tableTitle: '',
-          cells: { "0-0": { content: "セル", style: { border: '1px solid #ccc', hAlign: 'left', vAlign: 'top', writingMode: 'horizontal-tb' } }, "0-1": { content: "セル", style: { border: '1px solid #ccc', hAlign: 'left', vAlign: 'top', writingMode: 'horizontal-tb' } }, "1-0": { content: "セル", style: { border: '1px solid #333', hAlign: 'left', vAlign: 'top', writingMode: 'horizontal-tb' } }, "1-1": { content: "セル", style: { border: '1px solid #333', hAlign: 'left', vAlign: 'top', writingMode: 'horizontal-tb' } } } 
+          // ★ 改善：デフォルトの枠線を none に設定
+          cells: { "0-0": { content: "セル", style: { border: 'none', hAlign: 'left', vAlign: 'top', writingMode: 'horizontal-tb' } }, "0-1": { content: "セル", style: { border: 'none', hAlign: 'left', vAlign: 'top', writingMode: 'horizontal-tb' } }, "1-0": { content: "セル", style: { border: 'none', hAlign: 'left', vAlign: 'top', writingMode: 'horizontal-tb' } }, "1-1": { content: "セル", style: { border: 'none', hAlign: 'left', vAlign: 'top', writingMode: 'horizontal-tb' } } } 
       };
       style = { ...style, width: 300, height: 150, padding: 0, backgroundColor: '#fff', display: 'block', borderRadius: '8px', borderColor: '#000000', borderWidth: 0 };
     }
@@ -986,7 +993,7 @@ const moveSubtreeY = useCallback((direction: 'up' | 'down') => {
                       const numRows = action.maxR - action.minR + 1;
                       const deltaPerRow = dy / numRows;
                       for (let r = action.minR; r <= action.maxR; r++) {
-                          newHeights[r] = Math.max(20, action.initHeights[r] + deltaPerRow);
+                          newHeights[r] = Math.max(10, action.initHeights[r] + deltaPerRow);
                       }
                   }
                   return { ...n, data: { ...n.data, colWidths: newWidths, rowHeights: newHeights } };
@@ -1158,7 +1165,7 @@ const moveSubtreeY = useCallback((direction: 'up' | 'down') => {
                                                 key={c}
                                                 onMouseDown={(e) => { e.stopPropagation(); if (isCellEditing) return; tableActionRef.current = { id: n.id, type: 'select-cells', startR: r, startC: c, minC: c, maxC: c, minR: r, maxR: r, startX:0, startY:0, initWidths:[], initHeights:[] }; selectCellsBox(n.id, r, c, r, c, e.shiftKey || e.metaKey || e.ctrlKey); }}
                                                 onMouseEnter={(e) => { const action = tableActionRef.current; if (action && action.id === n.id && action.type === 'select-cells') { selectCellsBox(n.id, action.startR, action.startC, r, c, false); } }}
-                                                style={{ ...safeDomStyle, position: 'relative', cursor: isCellEditing ? 'text' : 'cell', padding: '8px', wordBreak: 'break-all', height: '1px', verticalAlign: tdVerticalAlign, textAlign: cellTextAlignment, writingMode: cWMode, boxShadow: cellBoxShadow, border: isSel && !isCellEditing ? 'none' : cellData.style.border }}
+                                                style={{ ...safeDomStyle, position: 'relative', cursor: isCellEditing ? 'text' : 'cell', padding: '2px', wordBreak: 'break-all', height: '1px', verticalAlign: tdVerticalAlign, textAlign: cellTextAlignment, writingMode: cWMode, boxShadow: cellBoxShadow, border: isSel && !isCellEditing ? 'none' : cellData.style.border }}
                                             >
                                                 {isSel && !isCellEditing && c === selMaxC && (
                                                     <div className="nodrag" style={{position:'absolute', right:-4, top:0, bottom:0, width:8, cursor:'col-resize', zIndex:20}} onMouseDown={e => { e.stopPropagation(); takeSnapshot(); tableActionRef.current = { id: n.id, type: 'resize-col', startC: c, startR: r, minC: selMinC, maxC: selMaxC, minR: selMinR, maxR: selMaxR, startX: e.clientX, startY: 0, initWidths: colWidths, initHeights: [] }; }} />
@@ -1544,7 +1551,7 @@ const moveSubtreeY = useCallback((direction: 'up' | 'down') => {
           {/* ★ メニュー操作時に選択が解除されないよう onMouseDown と onClick でイベント伝播を停止 */}
           {/* ★ メニュー操作時に選択が解除されないよう onMouseDown と onClick でイベント伝播を停止 */}
           {selectedEdge && (
-            <div className="no-print" onMouseDown={(e) => e.stopPropagation()} onClick={(e) => e.stopPropagation()} style={{ position:'absolute', right: (selectedNodes.length > 0 && primaryNode && primaryNode.type !== 'printZone') ? '320px' : 0, top:0, bottom:0, width:'300px', borderLeft:'1px solid #ddd', padding:'20px', backgroundColor:'#fff', zIndex:1000, overflowY: 'auto', boxShadow: '-4px 0 10px rgba(0,0,0,0.05)' }}>
+            <div className="no-print" onMouseDown={(e) => e.stopPropagation()} onClick={(e) => e.stopPropagation()} style={{ position:'absolute', right: 0, top:0, bottom:0, width:'300px', borderLeft:'1px solid #ddd', padding:'20px', backgroundColor:'#fff', zIndex:1000, overflowY: 'auto', boxShadow: '-4px 0 10px rgba(0,0,0,0.05)' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
                 <h3 style={{fontSize:'14px', margin: 0}}>線のデザイン</h3>
                 {/* ★ ×ボタンを押したときに「線（エッジ）の選択」だけを解除し、ノード選択は維持する */}
