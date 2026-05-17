@@ -505,10 +505,30 @@ function FlowEditor() {
       const newColor = config.color !== undefined ? config.color : (e.data?.color || '#333');
       const mSize = Math.max(12, newStrokeWidth * 3); const baseMarker = { type: MarkerType.ArrowClosed, color: newColor, width: mSize, height: mSize };
       
-      let newDouble = config.double !== undefined ? config.double : e.data?.double; let newMarkerType = config.markerType !== undefined ? config.markerType : e.data?.markerType; let newLabel = config.label !== undefined ? config.label : e.label;
-      
+      let newDouble = config.double !== undefined ? config.double : e.data?.double; 
+      let newMarkerType = config.markerType !== undefined ? config.markerType : e.data?.markerType; 
+      let newLabel = config.label !== undefined ? config.label : e.label;
       let newHideLine = config.hideLine !== undefined ? config.hideLine : e.data?.hideLine;
-      if (config.resetDesign) { newDouble = config.double || false; newMarkerType = config.markerType || 'none'; newHideLine = config.hideLine || false; if(config.label !== undefined) newLabel = config.label; }
+      
+      let newSourceHandle = e.sourceHandle;
+      let newTargetHandle = e.targetHandle;
+
+      if (config.resetDesign) { 
+          newDouble = config.double || false; 
+          newMarkerType = config.markerType || 'none'; 
+          newHideLine = config.hideLine || false; 
+          if(config.label !== undefined) newLabel = config.label; 
+
+          // ★ 改善：二重矢印や論理記号の場合は、-8pxオフセットの「logical-」ハンドルに自動で切り替えて食い込みを完全に防ぐ
+          const isLogical = newMarkerType === 'custom-double-arrow' || newMarkerType === 'custom-double-both' || newHideLine;
+          if (isLogical) {
+              if (newSourceHandle && !newSourceHandle.startsWith('logical-')) newSourceHandle = 'logical-' + newSourceHandle;
+              if (newTargetHandle && !newTargetHandle.startsWith('logical-')) newTargetHandle = 'logical-' + newTargetHandle;
+          } else {
+              if (newSourceHandle && newSourceHandle.startsWith('logical-')) newSourceHandle = newSourceHandle.replace('logical-', '');
+              if (newTargetHandle && newTargetHandle.startsWith('logical-')) newTargetHandle = newTargetHandle.replace('logical-', '');
+          }
+      }
 
       let mEnd = undefined; let mStart = undefined;
       if (newMarkerType === 'arrow') { mEnd = baseMarker; } if (newMarkerType === 'both') { mEnd = baseMarker; mStart = baseMarker; }
@@ -516,7 +536,16 @@ function FlowEditor() {
       const newLabelStyle = config.labelStyle !== undefined ? config.labelStyle : e.data?.labelStyle;
       const newFontSize = config.fontSize !== undefined ? config.fontSize : (e.data?.fontSize || 14);
 
-      return { ...e, style: { ...e.style, strokeWidth: newStrokeWidth, stroke: newColor }, data: { ...(e.data || {}), double: newDouble, color: newColor, labelStyle: newLabelStyle, fontSize: newFontSize, markerType: newMarkerType, hideLine: newHideLine }, markerEnd: mEnd, markerStart: mStart, label: newLabel };
+      return { 
+          ...e, 
+          sourceHandle: newSourceHandle, 
+          targetHandle: newTargetHandle, 
+          style: { ...e.style, strokeWidth: newStrokeWidth, stroke: newColor }, 
+          data: { ...(e.data || {}), double: newDouble, color: newColor, labelStyle: newLabelStyle, fontSize: newFontSize, markerType: newMarkerType, hideLine: newHideLine }, 
+          markerEnd: mEnd, 
+          markerStart: mStart, 
+          label: newLabel 
+      };
     }));
   }, [takeSnapshot]);
 
@@ -844,17 +873,19 @@ const moveSubtreeY = useCallback((direction: 'up' | 'down') => {
       const targetNode = nodesRef.current.find(n => n.id === selectedEdge.target);
       if (!sourceNode || !targetNode) return;
 
-      // ★ 改善：図形のトップ(Y=0)ではなく「中心」を基準に合わせることで、線だけを真っ直ぐにする
-      const sW = Number(sourceNode.style?.width) || 200;
-      const sH = Number(sourceNode.style?.height) || 100;
-      const tW = Number(targetNode.style?.width) || 200;
-      const tH = Number(targetNode.style?.height) || 100;
+      // ★ 改善：図形の「実際のレンダリングサイズ (measured)」を取得して、正確に中心を割り出す
+      const sW = sourceNode.measured?.width || Number(sourceNode.style?.width) || 200;
+      const sH = sourceNode.measured?.height || Number(sourceNode.style?.height) || 100;
+      const tW = targetNode.measured?.width || Number(targetNode.style?.width) || 200;
+      const tH = targetNode.measured?.height || Number(targetNode.style?.height) || 100;
 
       setNodes(nds => nds.map(n => {
           if (n.id === targetNode.id) {
               if (direction === 'horizontal') {
+                  // 高さが違っても中心(Y座標)をぴったり合わせる
                   return { ...n, position: { ...n.position, y: sourceNode.position.y + (sH - tH) / 2 } };
               } else {
+                  // 幅が違っても中心(X座標)をぴったり合わせる
                   return { ...n, position: { ...n.position, x: sourceNode.position.x + (sW - tW) / 2 } };
               }
           }
@@ -1428,6 +1459,27 @@ const moveSubtreeY = useCallback((direction: 'up' | 'down') => {
                 </div>
               )}
 
+              {/* ★ 新機能：キャンバス上でクリックしづらい時のための安全なテキスト編集エリア */}
+              {(!primaryNode.data?.isTable || isTableEditing) && (
+                  <div style={{ padding: '10px', background: '#eef2ff', borderRadius: '8px', marginBottom: '15px', border: '1px solid #c7d2fe' }}>
+                      <label style={{fontSize: '11px', fontWeight: 'bold', color: '#3730a3'}}>📝 テキストを安全に編集</label>
+                      <p style={{fontSize: '9px', color: '#666', margin: '2px 0 5px 0'}}>※線と被って直接編集しづらい場合はここに入力してください</p>
+                      <textarea
+                          value={isTableEditing ? (primaryNode.data.cells[selectedCells[primaryNode.id][0]]?.content || '') : (primaryNode.data?.content || '')}
+                          onChange={(e) => {
+                              const val = e.target.value;
+                              if (isTableEditing) {
+                                  const cellId = selectedCells[primaryNode.id][0];
+                                  setNodes(nds => nds.map(n => n.id === primaryNode.id ? { ...n, data: { ...n.data, cells: { ...n.data.cells, [cellId]: { ...n.data.cells[cellId], content: val } } } } : n));
+                              } else {
+                                  updateSelectedNodes({ content: val });
+                              }
+                          }}
+                          style={{ width: '100%', minHeight: '60px', padding: '8px', fontSize: '12px', border: '1px solid #a5b4fc', borderRadius: '4px', resize: 'vertical', outline: 'none' }}
+                      />
+                  </div>
+              )}
+
               <div style={{ padding: '15px', borderRadius: '12px', backgroundColor: '#f8f9fa', border: '1px solid #ddd', marginBottom: '15px' }}>
                   <label style={{fontSize: '11px', fontWeight: 'bold', color: '#1d4ed8'}}>文字の部分装飾 (編集中のみ)</label>
                   <p style={{fontSize: '10px', color: '#666', marginTop: '4px', marginBottom: '10px', lineHeight: '1.4'}}>
@@ -1586,6 +1638,17 @@ const moveSubtreeY = useCallback((direction: 'up' | 'down') => {
               <div style={{ display:'flex', gap:'5px', marginTop: '5px', marginBottom: '15px' }}>
                 <button onClick={() => alignSelectedEdgeTarget('horizontal')} style={{flex:1, padding:'6px', border: '1px solid #ccc', cursor: 'pointer', borderRadius: '4px', fontWeight: 'bold', fontSize: '11px', background: '#fff'}}>水平(横)に揃える</button>
                 <button onClick={() => alignSelectedEdgeTarget('vertical')} style={{flex:1, padding:'6px', border: '1px solid #ccc', cursor: 'pointer', borderRadius: '4px', fontWeight: 'bold', fontSize: '11px', background: '#fff'}}>垂直(縦)に揃える</button>
+              </div>
+
+              {/* ★ 新機能：キャンバス上でクリックしづらい時のための安全なテキスト編集エリア（線用） */}
+              <div style={{ padding: '10px', background: '#eef2ff', borderRadius: '8px', marginBottom: '15px', border: '1px solid #c7d2fe' }}>
+                  <label style={{fontSize: '11px', fontWeight: 'bold', color: '#3730a3'}}>📝 線のテキストを安全に編集</label>
+                  <p style={{fontSize: '9px', color: '#666', margin: '2px 0 5px 0'}}>※線と被ってクリックしづらい場合はここに入力してください</p>
+                  <textarea
+                      value={selectedEdge.label || ''}
+                      onChange={(e) => updateEdgeDesign({ label: e.target.value })}
+                      style={{ width: '100%', minHeight: '40px', padding: '8px', fontSize: '12px', border: '1px solid #a5b4fc', borderRadius: '4px', resize: 'vertical', outline: 'none' }}
+                  />
               </div>
 
               <div style={{ padding: '15px', borderRadius: '12px', backgroundColor: '#f8f9fa', border: '1px solid #ddd', marginBottom: '15px' }}>
