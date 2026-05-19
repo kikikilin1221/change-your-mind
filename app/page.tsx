@@ -1131,15 +1131,33 @@ const moveSubtreeY = useCallback((direction: 'up' | 'down') => {
     let lineX: number | undefined, lineY: number | undefined; 
     let snapDiffX = 15, snapDiffY = 15;
 
-    // 現在リサイズ中のノードのリアルタイムな4辺の位置（絶対座標）
+    if (!primaryNode) return;
+
+    // 現在リサイズ中のノードのリアルタイムな4辺の位置
     const nLeft = x; 
     const nRight = x + width; 
     const nTop = y; 
     const nBottom = y + height;
 
+    // 直前のノードのサイズ・位置と比較して、「どの辺が動いているか」を特定する
+    const cW = primaryNode.measured?.width || Number(primaryNode.style?.width) || 200;
+    const cH = primaryNode.measured?.height || Number(primaryNode.style?.height) || 100;
+    const cLeft = primaryNode.position.x;
+    const cRight = cLeft + cW;
+    const cTop = primaryNode.position.y;
+    const cBottom = cTop + cH;
+
+    // xyflowの方向データ(direction)か、座標の差分で動いている辺を判定
+    const dirX = params.direction?.[0];
+    const dirY = params.direction?.[1];
+    const isLeftMoving = dirX === -1 || Math.abs(nLeft - cLeft) > 0.5;
+    const isRightMoving = dirX === 1 || Math.abs(nRight - cRight) > 0.5;
+    const isTopMoving = dirY === -1 || Math.abs(nTop - cTop) > 0.5;
+    const isBottomMoving = dirY === 1 || Math.abs(nBottom - cBottom) > 0.5;
+
     nodesRef.current.forEach(t => {
       // 自分自身、センターマーク、現在選択中のノードはスナップ対象から除外
-      if (t.id === primaryNode?.id || t.id === 'center-mark' || t.selected) return;
+      if (t.id === primaryNode.id || t.id === 'center-mark' || t.selected) return;
 
       const tW = t.measured?.width || Number(t.style?.width) || 200; 
       const tH = t.measured?.height || Number(t.style?.height) || 100; 
@@ -1149,14 +1167,16 @@ const moveSubtreeY = useCallback((direction: 'up' | 'down') => {
       const tTop = t.position.y; 
       const tBottom = t.position.y + tH;
 
-      // ーーー 横方向（X軸）のスナップ判定 ーーー
-      // 動いている「左端」または「右端」が、他ノードの「左端」または「右端」に接近しているかチェック
-      const xs = [
-        { target: tLeft, src: nLeft },  // 左に拡大中の左端 ➔ 他の左端
-        { target: tRight, src: nLeft }, // 左に拡大中の左端 ➔ 他の右端
-        { target: tLeft, src: nRight }, // 右に拡大中の右端 ➔ 他の左端
-        { target: tRight, src: nRight } // 右に拡大中の右端 ➔ 他の右端
-      ];
+      // ーーー 横方向（X軸）のスナップ判定（動いている辺だけ計算！） ーーー
+      const xs = [];
+      if (isLeftMoving) {
+          xs.push({ target: tLeft, src: nLeft });
+          xs.push({ target: tRight, src: nLeft });
+      }
+      if (isRightMoving) {
+          xs.push({ target: tLeft, src: nRight });
+          xs.push({ target: tRight, src: nRight });
+      }
 
       xs.forEach(item => {
         const diff = Math.abs(item.target - item.src);
@@ -1166,14 +1186,16 @@ const moveSubtreeY = useCallback((direction: 'up' | 'down') => {
         }
       });
 
-      // ーーー 縦方向（Y軸）のスナップ判定 ーーー
-      // 動いている「上端」または「下端」が、他ノードの「上端」または「下端」に接近しているかチェック
-      const ys = [
-        { target: tTop, src: nTop },     // 上に拡大中の上端 ➔ 他の上端
-        { target: tBottom, src: nTop },  // 上に拡大中の上端 ➔ 他の下端
-        { target: tTop, src: nBottom },  // 下に拡大中の下端 ➔ 他の上端
-        { target: tBottom, src: nBottom } // 下に拡大中の下端 ➔ 他の下端
-      ];
+      // ーーー 縦方向（Y軸）のスナップ判定（動いている辺だけ計算！） ーーー
+      const ys = [];
+      if (isTopMoving) {
+          ys.push({ target: tTop, src: nTop });
+          ys.push({ target: tBottom, src: nTop });
+      }
+      if (isBottomMoving) {
+          ys.push({ target: tTop, src: nBottom });
+          ys.push({ target: tBottom, src: nBottom });
+      }
 
       ys.forEach(item => {
           const diff = Math.abs(item.target - item.src);
@@ -1184,10 +1206,9 @@ const moveSubtreeY = useCallback((direction: 'up' | 'down') => {
       });
     });
 
-    // 計算したガイド線位置を反映（1つの軸で最も近いノードへ赤い線がビシッと走ります）
     setGuides({ lineX, lineY });
   }, [primaryNode]);
-  
+
 
   const onNodeResizeStop = useCallback(() => {
       setGuides({});
