@@ -619,13 +619,67 @@ function FlowEditor() {
       }));
   };
 
-  const handleCopy = useCallback(() => { const selected = nodesRef.current.filter(n => n.selected); if (selected.length > 0) copiedNodesRef.current = safeCloneNodes(selected); }, []);
+  const handleCopy = useCallback(() => { 
+      // 選択されているすべての図形（ノード）と線（エッジ）をコピー用の参照に保存
+      const selectedN = nodesRef.current.filter(n => n.selected); 
+      const selectedE = edgesRef.current.filter(e => e.selected);
+      
+      if (selectedN.length > 0) {
+          copiedNodesRef.current = safeCloneNodes(selectedN);
+          // 線（エッジ）も複製時に追従させるため退避
+          (window as any)._copiedEdges = safeCloneEdges(selectedE);
+      } 
+  }, []);
   
   const handlePaste = useCallback(() => {
     if (copiedNodesRef.current && copiedNodesRef.current.length > 0) {
         takeSnapshot();
-        const newNodes = copiedNodesRef.current.map(original => { const newId = `node-${Date.now()}-${Math.random()}`; return { ...original, id: newId, selected: true, position: { x: original.position.x + 30, y: original.position.y + 30 }, zIndex: Math.max(0, ...nodesRef.current.map(n => Number(n.zIndex) || 0)) + 1 }; });
+        
+        // 1. 古いノードIDと新しいノードIDの対応マップを作成
+        const idMap = new Map<string, string>();
+        
+        const newNodes = copiedNodesRef.current.map(original => { 
+            const newId = `node-${Date.now()}-${Math.random()}`; 
+            idMap.set(original.id, newId);
+            
+            return { 
+                ...original, 
+                id: newId, 
+                selected: true, 
+                position: { x: original.position.x + 40, y: original.position.y + 40 }, 
+                zIndex: Math.max(0, ...nodesRef.current.map(n => Number(n.zIndex) || 0)) + 1 
+            }; 
+        });
+        
+        // 2. コピーされた線（エッジ）の中から「コピーされた図形同士を結ぶ線」だけを抽出して複製
+        const savedEdges = (window as any)._copiedEdges || [];
+        const newEdges: any[] = [];
+        
+        savedEdges.forEach((originalEdge: any) => {
+            // 線の出発点と到達点の両方が、今回コピーされた図形の中に存在する場合のみ複製
+            if (idMap.has(originalEdge.source) && idMap.has(originalEdge.target)) {
+                const newEdgeId = `edge-${Date.now()}-${Math.random()}`;
+                
+                // 元のハンドル設定を維持しつつ、新しいIDへマッピング
+                let newSrcHandle = originalEdge.sourceHandle;
+                let newTgtHandle = originalEdge.targetHandle;
+                
+                newEdges.push({
+                    ...originalEdge,
+                    id: newEdgeId,
+                    source: idMap.get(originalEdge.source)!,
+                    target: idMap.get(originalEdge.target)!,
+                    sourceHandle: newSrcHandle,
+                    targetHandle: newTgtHandle,
+                    selected: true, // ペースト直後は線も選択状態にする
+                    zIndex: originalEdge.zIndex || 0
+                });
+            }
+        });
+
+        // 既存の選択状態を解除し、新しいノードとエッジを適用
         setNodes((nds: any[]) => [...nds.map((n: any) => ({...n, selected: false})), ...newNodes]);
+        setEdges((eds: any[]) => [...eds.map((e: any) => ({...e, selected: false})), ...newEdges]);
     }
   }, [takeSnapshot]);
   
