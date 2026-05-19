@@ -1125,7 +1125,7 @@ const moveSubtreeY = useCallback((direction: 'up' | 'down') => {
     });
     if (snapX !== undefined) node.position.x = snapX; if (snapY !== undefined) node.position.y = snapY; setGuides({ lineX, lineY });
   }, [nodes]);
-  // ★ 新機能：サイズ変更時（リサイズ）にも赤いガイド線と停止補助を出すロジック
+  // ★ 改善：リサイズ（拡大・縮小）をしている最中の境界線（右端・下端なども）に対してもスナップとガイド線を出す
   const onNodeResize = useCallback((_: any, params: any) => {
     let { x, y, width, height } = params;
     let snapX: number | undefined, snapY: number | undefined; 
@@ -1136,6 +1136,7 @@ const moveSubtreeY = useCallback((direction: 'up' | 'down') => {
     const nTop = y, nBottom = y + height;
 
     nodesRef.current.forEach(t => {
+      // 自身のノード、センターマーク、選択中の他のノードは判定から除外
       if (t.id === primaryNode?.id || t.id === 'center-mark' || t.selected) return;
       const tW = t.measured?.width || Number(t.style?.width) || 200; 
       const tH = t.measured?.height || Number(t.style?.height) || 100; 
@@ -1143,10 +1144,12 @@ const moveSubtreeY = useCallback((direction: 'up' | 'down') => {
       const tLeft = t.position.x, tRight = t.position.x + tW; 
       const tTop = t.position.y, tBottom = t.position.y + tH;
 
-      // 横幅のサイズ変更に対する停止補助
+      // ★ 完全修復：横幅の拡大（右端を動かす）に対する停止補助とガイド線
       const xs = [
+        // 動かしている最中の右端 (nRight) を、他ノードの左端と右端に合わせる
         { target: tLeft, src: nRight, type: 'right' },
         { target: tRight, src: nRight, type: 'right' },
+        // 左端 (nLeft) を動かしている場合（縮小など）の判定
         { target: tLeft, src: nLeft, type: 'left' },
         { target: tRight, src: nLeft, type: 'left' }
       ];
@@ -1158,10 +1161,12 @@ const moveSubtreeY = useCallback((direction: 'up' | 'down') => {
         }
       });
 
-      // 縦幅のサイズ変更に対する停止補助
+      // ★ 完全修復：縦幅の拡大（下端を動かす）に対する停止補助とガイド線
       const ys = [
+        // 動かしている最中の下端 (nBottom) を、他ノードの上端と下端に合わせる
         { target: tTop, src: nBottom, type: 'bottom' },
         { target: tBottom, src: nBottom, type: 'bottom' },
+        // 上端 (nTop) を動かしている場合の判定
         { target: tTop, src: nTop, type: 'top' },
         { target: tBottom, src: nTop, type: 'top' }
       ];
@@ -1174,7 +1179,7 @@ const moveSubtreeY = useCallback((direction: 'up' | 'down') => {
       });
     });
 
-    // ガイド線をリアルタイムに描画
+    // ガイド線をリアルタイムに描画（これにより赤い線が出る）
     setGuides({ lineX, lineY });
   }, [primaryNode]);
 
