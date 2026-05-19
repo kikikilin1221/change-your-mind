@@ -1125,63 +1125,69 @@ const moveSubtreeY = useCallback((direction: 'up' | 'down') => {
     });
     if (snapX !== undefined) node.position.x = snapX; if (snapY !== undefined) node.position.y = snapY; setGuides({ lineX, lineY });
   }, [nodes]);
-  // ★ 改善：リサイズ（拡大・縮小）をしている最中の境界線（右端・下端なども）に対してもスナップとガイド線を出す
+  // ★ 改善：拡大・縮小している方向（左端・右端・上端・下端）のどこであっても、周囲のすべての図形と完璧にスナップして赤い線を出す
   const onNodeResize = useCallback((_: any, params: any) => {
     let { x, y, width, height } = params;
-    let snapX: number | undefined, snapY: number | undefined; 
     let lineX: number | undefined, lineY: number | undefined; 
     let snapDiffX = 15, snapDiffY = 15;
 
-    const nLeft = x, nRight = x + width; 
-    const nTop = y, nBottom = y + height;
+    // 現在リサイズ中のノードのリアルタイムな4辺の位置（絶対座標）
+    const nLeft = x; 
+    const nRight = x + width; 
+    const nTop = y; 
+    const nBottom = y + height;
 
     nodesRef.current.forEach(t => {
-      // 自身のノード、センターマーク、選択中の他のノードは判定から除外
+      // 自分自身、センターマーク、現在選択中のノードはスナップ対象から除外
       if (t.id === primaryNode?.id || t.id === 'center-mark' || t.selected) return;
+
       const tW = t.measured?.width || Number(t.style?.width) || 200; 
       const tH = t.measured?.height || Number(t.style?.height) || 100; 
       
-      const tLeft = t.position.x, tRight = t.position.x + tW; 
-      const tTop = t.position.y, tBottom = t.position.y + tH;
+      const tLeft = t.position.x; 
+      const tRight = t.position.x + tW; 
+      const tTop = t.position.y; 
+      const tBottom = t.position.y + tH;
 
-      // ★ 完全修復：横幅の拡大（右端を動かす）に対する停止補助とガイド線
+      // ーーー 横方向（X軸）のスナップ判定 ーーー
+      // 動いている「左端」または「右端」が、他ノードの「左端」または「右端」に接近しているかチェック
       const xs = [
-        // 動かしている最中の右端 (nRight) を、他ノードの左端と右端に合わせる
-        { target: tLeft, src: nRight, type: 'right' },
-        { target: tRight, src: nRight, type: 'right' },
-        // 左端 (nLeft) を動かしている場合（縮小など）の判定
-        { target: tLeft, src: nLeft, type: 'left' },
-        { target: tRight, src: nLeft, type: 'left' }
+        { target: tLeft, src: nLeft },  // 左に拡大中の左端 ➔ 他の左端
+        { target: tRight, src: nLeft }, // 左に拡大中の左端 ➔ 他の右端
+        { target: tLeft, src: nRight }, // 右に拡大中の右端 ➔ 他の左端
+        { target: tRight, src: nRight } // 右に拡大中の右端 ➔ 他の右端
       ];
+
       xs.forEach(item => {
         const diff = Math.abs(item.target - item.src);
         if (diff < snapDiffX) {
           snapDiffX = diff;
-          lineX = item.target;
+          lineX = item.target; // スナップするターゲットの位置に赤い線を引く
         }
       });
 
-      // ★ 完全修復：縦幅の拡大（下端を動かす）に対する停止補助とガイド線
+      // ーーー 縦方向（Y軸）のスナップ判定 ーーー
+      // 動いている「上端」または「下端」が、他ノードの「上端」または「下端」に接近しているかチェック
       const ys = [
-        // 動かしている最中の下端 (nBottom) を、他ノードの上端と下端に合わせる
-        { target: tTop, src: nBottom, type: 'bottom' },
-        { target: tBottom, src: nBottom, type: 'bottom' },
-        // 上端 (nTop) を動かしている場合の判定
-        { target: tTop, src: nTop, type: 'top' },
-        { target: tBottom, src: nTop, type: 'top' }
+        { target: tTop, src: nTop },     // 上に拡大中の上端 ➔ 他の上端
+        { target: tBottom, src: nTop },  // 上に拡大中の上端 ➔ 他の下端
+        { target: tTop, src: nBottom },  // 下に拡大中の下端 ➔ 他の上端
+        { target: tBottom, src: nBottom } // 下に拡大中の下端 ➔ 他の下端
       ];
+
       ys.forEach(item => {
           const diff = Math.abs(item.target - item.src);
           if (diff < snapDiffY) {
               snapDiffY = diff;
-              lineY = item.target;
+              lineY = item.target; // スナップするターゲットの位置に赤い線を引く
           }
       });
     });
 
-    // ガイド線をリアルタイムに描画（これにより赤い線が出る）
+    // 計算したガイド線位置を反映（1つの軸で最も近いノードへ赤い線がビシッと走ります）
     setGuides({ lineX, lineY });
   }, [primaryNode]);
+  
 
   const onNodeResizeStop = useCallback(() => {
       setGuides({});
