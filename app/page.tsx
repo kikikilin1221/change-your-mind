@@ -1125,6 +1125,62 @@ const moveSubtreeY = useCallback((direction: 'up' | 'down') => {
     });
     if (snapX !== undefined) node.position.x = snapX; if (snapY !== undefined) node.position.y = snapY; setGuides({ lineX, lineY });
   }, [nodes]);
+  // ★ 新機能：サイズ変更時（リサイズ）にも赤いガイド線と停止補助を出すロジック
+  const onNodeResize = useCallback((_: any, params: any) => {
+    let { x, y, width, height } = params;
+    let snapX: number | undefined, snapY: number | undefined; 
+    let lineX: number | undefined, lineY: number | undefined; 
+    let snapDiffX = 15, snapDiffY = 15;
+
+    const nLeft = x, nRight = x + width; 
+    const nTop = y, nBottom = y + height;
+
+    nodesRef.current.forEach(t => {
+      if (t.id === primaryNode?.id || t.id === 'center-mark' || t.selected) return;
+      const tW = t.measured?.width || Number(t.style?.width) || 200; 
+      const tH = t.measured?.height || Number(t.style?.height) || 100; 
+      
+      const tLeft = t.position.x, tRight = t.position.x + tW; 
+      const tTop = t.position.y, tBottom = t.position.y + tH;
+
+      // 横幅のサイズ変更に対する停止補助
+      const xs = [
+        { target: tLeft, src: nRight, type: 'right' },
+        { target: tRight, src: nRight, type: 'right' },
+        { target: tLeft, src: nLeft, type: 'left' },
+        { target: tRight, src: nLeft, type: 'left' }
+      ];
+      xs.forEach(item => {
+        const diff = Math.abs(item.target - item.src);
+        if (diff < snapDiffX) {
+          snapDiffX = diff;
+          lineX = item.target;
+        }
+      });
+
+      // 縦幅のサイズ変更に対する停止補助
+      const ys = [
+        { target: tTop, src: nBottom, type: 'bottom' },
+        { target: tBottom, src: nBottom, type: 'bottom' },
+        { target: tTop, src: nTop, type: 'top' },
+        { target: tBottom, src: nTop, type: 'top' }
+      ];
+      ys.forEach(item => {
+          const diff = Math.abs(item.target - item.src);
+          if (diff < snapDiffY) {
+              snapDiffY = diff;
+              lineY = item.target;
+          }
+      });
+    });
+
+    // ガイド線をリアルタイムに描画
+    setGuides({ lineX, lineY });
+  }, [primaryNode]);
+
+  const onNodeResizeStop = useCallback(() => {
+      setGuides({});
+  }, []);
 
   const onNodeDragStop = useCallback((_: any, node: any) => { takeSnapshot(); setNodes((nds: any[]) => nds.map((n: any) => n.id === node.id ? { ...n, position: node.position } : n)); setGuides({}); }, [takeSnapshot]);
 
@@ -1367,7 +1423,33 @@ const moveSubtreeY = useCallback((direction: 'up' | 'down') => {
               ) : null}
 
               {n.id !== 'center-mark' && !n.data?.isTransparentHelper ? (
-                 <NodeResizer minWidth={30} minHeight={30} keepAspectRatio={!!n.data?.keepRatio} isVisible={n.selected && !isTableAndCellEditing} lineStyle={{ border: n.data?.isCropping ? '2px dashed #ef4444' : '1px solid #3b82f6', zIndex: 100 }} handleStyle={{ background: n.data?.isCropping ? '#ef4444' : '#3b82f6', zIndex: 100, borderRadius: '50%' }} onResizeStart={(_, params) => { takeSnapshot(); if (n.data?.isImage && n.data?.isCropping) { n.data._rsX = params.x; n.data._rsY = params.y; n.data._rsCropOffX = n.data.cropOffsetX || 0; n.data._rsCropOffY = n.data.cropOffsetY || 0; } }} onResize={(_, params) => { if (n.data?.isImage && n.data?.isCropping) { const dx = params.x - n.data._rsX; const dy = params.y - n.data._rsY; setNodes((nds: any[]) => nds.map((node: any) => node.id === n.id ? { ...node, data: { ...node.data, cropOffsetX: n.data._rsCropOffX - dx, cropOffsetY: n.data._rsCropOffY - dy } } : node)); } }} />
+                 <NodeResizer 
+                    minWidth={30} 
+                    minHeight={30} 
+                    keepAspectRatio={!!n.data?.keepRatio} 
+                    isVisible={n.selected && !isTableAndCellEditing} 
+                    lineStyle={{ border: n.data?.isCropping ? '2px dashed #ef4444' : '1px solid #3b82f6', zIndex: 100 }} 
+                    handleStyle={{ background: n.data?.isCropping ? '#ef4444' : '#3b82f6', zIndex: 100, borderRadius: '50%' }} 
+                    onResizeStart={(_, params) => { 
+                        takeSnapshot(); 
+                        if (n.data?.isImage && n.data?.isCropping) { 
+                            n.data._rsX = params.x; n.data._rsY = params.y; 
+                            n.data._rsCropOffX = n.data.cropOffsetX || 0; n.data._rsCropOffY = n.data.cropOffsetY || 0; 
+                        } 
+                    }} 
+                    // ★ 改善：サイズ変更中と終了時にスナップ判定を呼び出す
+                    onResize={(e, params) => { 
+                        onNodeResize(e, params);
+                        if (n.data?.isImage && n.data?.isCropping) { 
+                            const dx = params.x - n.data._rsX; const dy = params.y - n.data._rsY; 
+                            setNodes((nds: any[]) => nds.map((node: any) => node.id === n.id ? { ...node, data: { ...node.data, cropOffsetX: n.data._rsCropOffX - dx, cropOffsetY: n.data._rsCropOffY - dy } } : node)); 
+                        } else {
+                            // リアルタイムに図形のサイズ幅を更新
+                            setNodes((nds: any[]) => nds.map((node: any) => node.id === n.id ? { ...node, position: { x: params.x, y: params.y }, style: { ...node.style, width: params.width, height: params.height } } : node));
+                        }
+                    }} 
+                    onResizeEnd={onNodeResizeStop}
+                 />
               ) : null}
             </div>
           ),
