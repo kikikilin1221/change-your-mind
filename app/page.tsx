@@ -7,7 +7,21 @@ import {
 import '@xyflow/react/dist/style.css';
 import katex from 'katex';
 import 'katex/dist/katex.min.css';
-
+// ▼▼▼ ここから追加 ▼▼▼
+// ★ 完全修復：Next.jsよりも早くResizeObserverのエラーを捕まえて完全に握り潰す最強の盾
+if (typeof window !== 'undefined') {
+    const originalError = console.error;
+    console.error = (...args) => {
+        if (typeof args[0] === 'string' && args[0].includes('ResizeObserver')) return;
+        originalError.apply(console, args);
+    };
+    window.addEventListener('error', (e) => {
+        if (e.message && e.message.includes('ResizeObserver')) {
+            e.preventDefault();
+            e.stopImmediatePropagation();
+        }
+    }, true); // ←「true」をつけることで、Next.jsのシステムより先にエラーを消滅させます
+}
 const GLOBAL_CSS = `
   .html-content p { margin: 0; }
   .html-content strike { text-decoration: line-through double !important; }
@@ -1134,7 +1148,7 @@ const moveSubtreeY = useCallback((direction: 'up' | 'down') => {
       const xs = [ { target: tLeft, src: nLeft, offset: 0 }, { target: tLeft, src: nRight, offset: -nW }, { target: tRight, src: nLeft, offset: 0 }, { target: tRight, src: nRight, offset: -nW }, { target: tCenter, src: nCenter, offset: -nW / 2 } ]; xs.forEach(x => { const diff = Math.abs(x.target - x.src); if (diff < snapDiffX) { snapDiffX = diff; snapX = x.target + x.offset; lineX = x.target; } });
       const ys = [ { target: tTop, src: nTop, offset: 0 }, { target: tTop, src: nBottom, offset: -nH }, { target: tBottom, src: nTop, offset: 0 }, { target: tBottom, src: nBottom, offset: -nH }, { target: tMiddle, src: nMiddle, offset: -nH / 2 } ]; ys.forEach(y => { const diff = Math.abs(y.target - y.src); if (diff < snapDiffY) { snapDiffY = diff; snapY = y.target + y.offset; lineY = y.target; } });
     });
-    if (snapX !== undefined) node.position.x = snapX; if (snapY !== undefined) node.position.y = snapY; setGuides({ lineX, lineY });
+    if (snapX !== undefined) node.position.x = snapX; if (snapY !== undefined) node.position.y = snapY; setGuides(prev => (prev.lineX === lineX && prev.lineY === lineY) ? prev : { lineX, lineY });
   }, [nodes]);
   // ★ 改善：拡大・縮小している方向（左端・右端・上端・下端）のどこであっても、周囲のすべての図形と完璧にスナップして赤い線を出す
   const onNodeResize = useCallback((_: any, params: any) => {
@@ -1217,7 +1231,7 @@ const moveSubtreeY = useCallback((direction: 'up' | 'down') => {
       });
     });
 
-    setGuides({ lineX, lineY });
+    setGuides(prev => (prev.lineX === lineX && prev.lineY === lineY) ? prev : { lineX, lineY });
   }, [primaryNode]);
 
 
