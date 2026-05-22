@@ -1635,69 +1635,57 @@ const moveSubtreeY = useCallback((direction: 'up' | 'down') => {
                 </div>
               )}
 
-              {/* ★ 新機能：キャンバス上でクリックしづらい時のための安全なテキスト編集エリア */}
-              {(!primaryNode.data?.isTable || isTableEditing) && (
-                  <div style={{ padding: '10px', background: '#eef2ff', borderRadius: '8px', marginBottom: '15px', border: '1px solid #c7d2fe' }}>
-                      <label style={{fontSize: '11px', fontWeight: 'bold', color: '#3730a3'}}>📝 テキストを安全に編集</label>
-                      <p style={{fontSize: '9px', color: '#666', margin: '2px 0 5px 0'}}>※ここで文字を選択して、下の装飾ボタンを直接使えます！</p>
-                      <div
-                          className="html-content"
-                          contentEditable={true}
-                          suppressContentEditableWarning
-                          onInput={(e) => {
-                              const val = e.currentTarget.innerHTML;
-                              if (isTableEditing) {
-                                  const cellId = selectedCells[primaryNode.id]?.[0];
-                                  if (cellId) setNodes(nds => nds.map(n => n.id === primaryNode.id ? { ...n, data: { ...n.data, cells: { ...(n.data?.cells || {}), [cellId]: { ...(n.data?.cells?.[cellId] || {}), content: val } } } } : n));
-                              } else {
-                                  updateSelectedNodes({ content: val });
+              {/* ★ 新機能：キャンバス上でクリックしづらい時のための安全なテキスト編集エリア（線用） */}
+              <div style={{ padding: '10px', background: '#eef2ff', borderRadius: '8px', marginBottom: '15px', border: '1px solid #c7d2fe' }}>
+                  <label style={{fontSize: '11px', fontWeight: 'bold', color: '#3730a3'}}>📝 線のテキストを安全に編集</label>
+                  <p style={{fontSize: '9px', color: '#666', margin: '2px 0 5px 0'}}>※ここで文字を選択して、下の装飾ボタンを直接使えます！</p>
+                  <div
+                      className="html-content"
+                      contentEditable={true}
+                      suppressContentEditableWarning
+                      onInput={(e) => {
+                          if (selectedEdge) updateEdgeDesign({ label: e.currentTarget.innerHTML });
+                      }}
+                      onBlur={(e) => {
+                          if (selectedEdge) updateEdgeDesign({ label: e.currentTarget.innerHTML });
+                      }}
+                      style={{ width: '100%', minHeight: '40px', padding: '8px', fontSize: '12px', border: '1px solid #a5b4fc', borderRadius: '4px', backgroundColor: '#fff', outline: 'none', overflowY: 'auto', cursor: 'text' }}
+                      ref={el => {
+                          if (!el) return;
+                          try {
+                              const currentVal = selectedEdge ? (selectedEdge.label || '') : '';
+                              if (el.innerHTML !== currentVal && document.activeElement !== el) {
+                                  el.innerHTML = currentVal;
                               }
-                          }}
-                          onBlur={(e) => {
-                              const val = e.currentTarget.innerHTML;
-                              if (isTableEditing) {
-                                  const cellId = selectedCells[primaryNode.id]?.[0];
-                                  if (cellId) setNodes(nds => nds.map(n => n.id === primaryNode.id ? { ...n, data: { ...n.data, cells: { ...(n.data?.cells || {}), [cellId]: { ...(n.data?.cells?.[cellId] || {}), content: val } } } } : n));
-                              } else {
-                                  updateSelectedNodes({ content: val });
-                              }
-                          }}
-                          style={{ width: '100%', minHeight: '60px', padding: '8px', fontSize: '12px', border: '1px solid #a5b4fc', borderRadius: '4px', backgroundColor: '#fff', outline: 'none', overflowY: 'auto', cursor: 'text' }}
-                          ref={el => {
-                              if (!el) return;
-                              try {
-                                  const currentVal = isTableEditing ? (primaryNode.data?.cells?.[selectedCells[primaryNode.id]?.[0]]?.content || '') : (primaryNode.data?.content || '');
-                                  if (el.innerHTML !== currentVal && document.activeElement !== el) el.innerHTML = currentVal;
-                              } catch(err) { console.error(err); }
-                          }}
-                      />
-                  </div>
-              )}
+                          } catch(err) { console.error("Edge text sync guarded:", err); }
+                      }}
+                  />
+              </div> {/* ←★ 消えていたこの </div> を復活させ、謎の )} を排除しました！ */}
 
               <div style={{ padding: '15px', borderRadius: '12px', backgroundColor: '#f8f9fa', border: '1px solid #ddd', marginBottom: '15px' }}>
                   <label style={{fontSize: '11px', fontWeight: 'bold', color: '#1d4ed8'}}>文字の部分装飾 (編集中のみ)</label>
                   <p style={{fontSize: '10px', color: '#666', marginTop: '4px', marginBottom: '10px', lineHeight: '1.4'}}>
-                      ※図形を選択して<b>Tabキー</b>で編集モードに入り、<br/>
+                      ※線を選択して<b>Tabキー</b>で編集モードに入り、<br/>
                       <u>マウスで文字をなぞって選択してから</u>押してください。
                   </p>
                   
-                  <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'5px', marginBottom:'5px' }}>
-                    <button onMouseDown={(e) => e.preventDefault()} onClick={() => applyUnifiedFormat('fontName', 'serif')} style={{cursor:'pointer', border:'1px solid #ccc', padding: '6px', fontSize:'12px', borderRadius: '4px', background: '#fff'}}>明朝</button>
-                    <button onMouseDown={(e) => e.preventDefault()} onClick={() => applyUnifiedFormat('fontName', 'sans-serif')} style={{cursor:'pointer', border:'1px solid #ccc', padding: '6px', fontSize:'12px', borderRadius: '4px', background: '#fff'}}>ゴシック</button>
-                    <button onMouseDown={(e) => e.preventDefault()} onClick={() => applyUnifiedFormat('bold')} style={{ cursor:'pointer', border:'1px solid #ccc', padding: '6px', fontSize:'12px', borderRadius: '4px', background: '#fff' }}>太字</button>
-                    <button onMouseDown={(e) => e.preventDefault()} onClick={() => applyUnifiedFormat('strikeThrough')} style={{ cursor:'pointer', border:'1px solid #ccc', padding: '6px', fontSize:'12px', borderRadius: '4px', background: '#fff' }}>二重線</button>
-                  </div>
-
-                  <div style={{ display: 'flex', gap: '5px', marginTop: '5px', marginBottom: '15px' }}>
-                    {QUICK_TEXT_COLORS.map(c => <button key={c} onMouseDown={(e) => e.preventDefault()} onClick={() => applyUnifiedFormat('foreColor', c)} style={{ width:'24px', height:'24px', backgroundColor:c, border: '1px solid #ddd', borderRadius: '4px', cursor: 'pointer' }} />)}
-                    <input type="color" onMouseDown={(e) => e.preventDefault()} onChange={(e) => applyUnifiedFormat('foreColor', e.target.value)} style={{width:'24px', height:'24px', cursor: 'pointer', border: 'none', padding: 0}} />
-                  </div>
-
-                  <label style={{fontSize:'10px', fontWeight: 'bold'}}>文字サイズ (px)</label>
-                  <div style={{display:'flex', alignItems:'center', gap:'8px', marginBottom: '15px'}}>
-                    <input type="range" min="10" max="100" value={partialFontSize} onMouseDown={(e) => e.preventDefault()} onChange={(e) => { const val = Number(e.target.value); setPartialFontSize(val); applyUnifiedFormat('fontSize', `${val}px`); }} style={{flex:1}} />
-                    <input type="number" min="10" max="100" value={partialFontSize} onMouseDown={(e) => e.preventDefault()} onChange={(e) => { const val = Number(e.target.value); setPartialFontSize(val); applyUnifiedFormat('fontSize', `${val}px`); }} style={{width:'40px', padding:'2px', fontSize:'11px', border:'1px solid #ccc', borderRadius:'4px'}} />
-                    <button onMouseDown={(e) => e.preventDefault()} onClick={handleResetFormat} style={{fontSize:'10px', padding:'4px 6px', border:'1px solid #ccc', borderRadius:'4px', cursor:'pointer', background:'#fff', fontWeight:'bold'}}>標準へ</button>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '10px' }}>
+                     <div style={{ display:'flex', gap:'5px', alignItems: 'center' }}>
+                        <button onMouseDown={(e) => e.preventDefault()} onClick={() => applyUnifiedFormat('bold')} style={{ cursor:'pointer', border:'1px solid #ccc', padding: '4px 8px', fontSize:'11px', borderRadius: '4px', background: '#fff', fontWeight: 'bold' }}>太字</button>
+                        
+                        {/* ★ 線の文字色用の5色選抜クイックボタン */}
+                        <div style={{ display: 'flex', gap: '3px', alignItems: 'center', marginLeft: '5px' }}>
+                          {['#000000', '#ef4444', '#eab308', '#10b981', '#3b82f6'].map(c => (
+                            <button key={c} onMouseDown={(e) => e.preventDefault()} onClick={() => applyUnifiedFormat('foreColor', c)} style={{ width: '18px', height: '18px', backgroundColor: c, border: '1px solid #ddd', borderRadius: '3px', cursor: 'pointer' }} />
+                          ))}
+                        </div>
+                        
+                        <input type="color" onMouseDown={(e) => e.preventDefault()} onChange={(e) => applyUnifiedFormat('foreColor', e.target.value)} style={{width:'20px', height:'20px', cursor: 'pointer', border: 'none', padding: 0, marginLeft: '2px'}} />
+                     </div>
+                     <div style={{ display:'flex', gap:'5px' }}>
+                        <button onClick={() => updateEdgeDesign({ labelStyle: { ...(selectedEdge?.data?.labelStyle || {}), textAlign: 'left' } })} style={{ cursor:'pointer', border:'1px solid #ccc', padding: '4px 8px', fontSize:'11px', borderRadius: '4px', background: '#fff', flex: 1 }}>左詰</button>
+                        <button onClick={() => updateEdgeDesign({ labelStyle: { ...(selectedEdge?.data?.labelStyle || {}), textAlign: 'center' } })} style={{ cursor:'pointer', border:'1px solid #ccc', padding: '4px 8px', fontSize:'11px', borderRadius: '4px', background: '#fff', flex: 1 }}>中央</button>
+                     </div>
                   </div>
               </div>
 
@@ -1867,14 +1855,22 @@ const moveSubtreeY = useCallback((direction: 'up' | 'down') => {
                       ※線を選択して<b>Tabキー</b>で編集モードに入り、<br/>
                       <u>マウスで文字をなぞって選択してから</u>押してください。
                   </p>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '10px' }}>
-                     <div style={{ display:'flex', gap:'5px' }}>
-                        <button onMouseDown={(e) => e.preventDefault()} onClick={() => applyUnifiedFormat('bold')} style={{ cursor:'pointer', border:'1px solid #ccc', padding: '4px 8px', fontSize:'11px', borderRadius: '4px', background: '#fff' }}>太字</button>
-                        <input type="color" onMouseDown={(e) => e.preventDefault()} onChange={(e) => applyUnifiedFormat('foreColor', e.target.value)} style={{width:'24px', height:'24px', cursor: 'pointer', border: 'none', padding: 0}} />
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '10px' }}>
+                     <div style={{ display:'flex', gap:'5px', alignItems: 'center' }}>
+                        <button onMouseDown={(e) => e.preventDefault()} onClick={() => applyUnifiedFormat('bold')} style={{ cursor:'pointer', border:'1px solid #ccc', padding: '4px 8px', fontSize:'11px', borderRadius: '4px', background: '#fff', fontWeight: 'bold' }}>太字</button>
+                        
+                        {/* ★ 新機能：線の文字色用の5色選抜クイックボタン */}
+                        <div style={{ display: 'flex', gap: '3px', alignItems: 'center', marginLeft: '5px' }}>
+                          {['#000000', '#ef4444', '#eab308', '#10b981', '#3b82f6'].map(c => (
+                            <button key={c} onMouseDown={(e) => e.preventDefault()} onClick={() => applyUnifiedFormat('foreColor', c)} style={{ width: '18px', height: '18px', backgroundColor: c, border: '1px solid #ddd', borderRadius: '3px', cursor: 'pointer' }} />
+                          ))}
+                        </div>
+                        
+                        <input type="color" onMouseDown={(e) => e.preventDefault()} onChange={(e) => applyUnifiedFormat('foreColor', e.target.value)} style={{width:'20px', height:'20px', cursor: 'pointer', border: 'none', padding: 0, marginLeft: '2px'}} />
                      </div>
                      <div style={{ display:'flex', gap:'5px' }}>
-                        <button onClick={() => updateEdgeDesign({ labelStyle: { ...selectedEdge.data?.labelStyle, textAlign: 'left' } })} style={{ cursor:'pointer', border:'1px solid #ccc', padding: '4px 8px', fontSize:'11px', borderRadius: '4px', background: '#fff' }}>左詰</button>
-                        <button onClick={() => updateEdgeDesign({ labelStyle: { ...selectedEdge.data?.labelStyle, textAlign: 'center' } })} style={{ cursor:'pointer', border:'1px solid #ccc', padding: '4px 8px', fontSize:'11px', borderRadius: '4px', background: '#fff' }}>中央</button>
+                        <button onClick={() => updateEdgeDesign({ labelStyle: { ...(selectedEdge?.data?.labelStyle || {}), textAlign: 'left' } })} style={{ cursor:'pointer', border:'1px solid #ccc', padding: '4px 8px', fontSize:'11px', borderRadius: '4px', background: '#fff', flex: 1 }}>左詰</button>
+                        <button onClick={() => updateEdgeDesign({ labelStyle: { ...(selectedEdge?.data?.labelStyle || {}), textAlign: 'center' } })} style={{ cursor:'pointer', border:'1px solid #ccc', padding: '4px 8px', fontSize:'11px', borderRadius: '4px', background: '#fff', flex: 1 }}>中央</button>
                      </div>
                   </div>
 
