@@ -232,6 +232,17 @@ function FlowEditor() {
   useEffect(() => { edgesRef.current = edges; }, [edges]);
   useEffect(() => { currentLabelRef.current = currentLabel; }, [currentLabel]);
 
+  // ★ 完全修復：画面録画時以外に起きるReact Flow特有の「ResizeObserver」の無限ループクラッシュを完全に無効化する
+  useEffect(() => {
+      const hideResizeObserverError = (e: ErrorEvent) => {
+          if (e.message === 'ResizeObserver loop limit exceeded' || e.message === 'ResizeObserver loop completed with undelivered notifications.') {
+              e.stopImmediatePropagation();
+          }
+      };
+      window.addEventListener('error', hideResizeObserverError);
+      return () => window.removeEventListener('error', hideResizeObserverError);
+  }, []);
+
   const selectedNodes = useMemo(() => nodes.filter((n: any) => n.selected), [nodes]);
   const primaryNode = selectedNodes.length > 0 ? selectedNodes[0] : null;
   const selectedEdge = useMemo(() => edges.find((e: any) => e.selected) || null, [edges]);
