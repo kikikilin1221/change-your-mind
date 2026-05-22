@@ -1452,12 +1452,14 @@ const moveSubtreeY = useCallback((direction: 'up' | 'down') => {
                 <div className={n.data?.isCropping ? "nodrag" : ""} onMouseDown={(e) => { if (n.data?.isCropping) { e.stopPropagation(); takeSnapshot(); imageCropDragRef.current = { id: n.id, startX: e.clientX, startY: e.clientY, initX: Number(n.data?.imgPosX || 0), initY: Number(n.data?.imgPosY || 0) }; } }} style={{ width: '100%', height: '100%', overflow: 'hidden', position: 'relative', borderRadius: n.style?.borderRadius || 0, cursor: n.data?.isCropping ? 'move' : 'default' }}>
                   <img src={n.data.imageUrl as string} style={{ position: 'absolute', width: n.data?.isCropping ? `${baseW}px` : '100%', height: n.data?.isCropping ? `${baseH}px` : '100%', maxWidth: 'none', maxHeight: 'none', left: n.data?.isCropping ? `${offX}px` : 0, top: n.data?.isCropping ? `${offY}px` : 0, transform: `translate(${n.data.imgPosX || 0}px, ${n.data.imgPosY || 0}px) scale(${n.data.imgZoom || 1})`, transformOrigin: 'center center', pointerEvents: 'none' }} alt="img" />
                   <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', display: 'flex', flexDirection: 'column', alignItems: ai, justifyContent: jc, padding: '4px' }}>
-                      <div 
+                      // ★ 修正後：ref同期を一切行わず、表示のみを行う安全なdiv
+<div 
     className="html-content"
     style={{ 
-        pointerEvents: 'none', // ★ タッチしても編集処理が走らないように設定
         width: '100%', 
-        height: 'auto', 
+        height: '100%', 
+        outline: 'none', 
+        cursor: 'grab',
         color: n.style?.color || '#000', 
         fontFamily: n.style?.fontFamily || 'sans-serif', 
         fontSize: n.style?.fontSize || '14px', 
@@ -1469,7 +1471,6 @@ const moveSubtreeY = useCallback((direction: 'up' | 'down') => {
         transform: `translate(${textOffX}px, ${textOffY}px)`, 
         writingMode: wMode 
     }}
-    // ★ refを削除し、表示専用の dangerouslySetInnerHTML に変更
     dangerouslySetInnerHTML={{ __html: renderHTMLWithMath(n.data?.content || '') }}
 />
                   </div>
