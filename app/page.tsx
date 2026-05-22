@@ -1474,7 +1474,7 @@ const moveSubtreeY = useCallback((direction: 'up' | 'down') => {
                     ref={el => {
                         if (!el) return;
                         if (!isEditingNode) { const newHtml = renderHTMLWithMath(n.data?.content || ''); if (el.innerHTML !== newHtml) el.innerHTML = newHtml; el.dataset.editing = 'false'; } 
-                        else if (el.dataset.editing !== 'true') { el.dataset.editing = 'true'; el.innerHTML = n.data?.content || ''; setTimeout(() => { el.focus(); if (typeof window.getSelection !== 'undefined') { const range = document.createRange(); const sel = window.getSelection(); range.selectNodeContents(el); range.collapse(false); sel?.removeAllRanges(); sel?.addRange(range); } }, 10); }
+                        else if (el.dataset.editing !== 'true') { el.dataset.editing = 'true'; el.innerHTML = n.data?.content || '';  }
                     }}
                 />
               ) : null}
