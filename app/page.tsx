@@ -1131,33 +1131,35 @@ let { x, y, width, height } = params;
 let lineX: number | undefined, lineY: number | undefined; 
 let snapDiffX = 15, snapDiffY = 15;
 
-if (!primaryNode) return;
+    // 現在リサイズ中のノードのリアルタイムな4辺の位置（絶対座標）
+    if (!primaryNode) return;
 
-// 現在リサイズ中のノードのリアルタイムな4辺の位置
+    // 現在リサイズ中のノードのリアルタイムな4辺の位置
 const nLeft = x; 
 const nRight = x + width; 
 const nTop = y; 
 const nBottom = y + height;
 
-// 直前のノードのサイズ・位置と比較して、「どの辺が動いているか」を特定する
-const cW = primaryNode.measured?.width || Number(primaryNode.style?.width) || 200;
-const cH = primaryNode.measured?.height || Number(primaryNode.style?.height) || 100;
-const cLeft = primaryNode.position.x;
-const cRight = cLeft + cW;
-const cTop = primaryNode.position.y;
-const cBottom = cTop + cH;
+    // 直前のノードのサイズ・位置と比較して、「どの辺が動いているか」を特定する
+    const cW = primaryNode.measured?.width || Number(primaryNode.style?.width) || 200;
+    const cH = primaryNode.measured?.height || Number(primaryNode.style?.height) || 100;
+    const cLeft = primaryNode.position.x;
+    const cRight = cLeft + cW;
+    const cTop = primaryNode.position.y;
+    const cBottom = cTop + cH;
 
-// xyflowの方向データ(direction)か、座標の差分で動いている辺を判定
-const dirX = params.direction?.[0];
-const dirY = params.direction?.[1];
-const isLeftMoving = dirX === -1 || Math.abs(nLeft - cLeft) > 0.5;
-const isRightMoving = dirX === 1 || Math.abs(nRight - cRight) > 0.5;
-const isTopMoving = dirY === -1 || Math.abs(nTop - cTop) > 0.5;
-const isBottomMoving = dirY === 1 || Math.abs(nBottom - cBottom) > 0.5;
+    // xyflowの方向データ(direction)か、座標の差分で動いている辺を判定
+    const dirX = params.direction?.[0];
+    const dirY = params.direction?.[1];
+    const isLeftMoving = dirX === -1 || Math.abs(nLeft - cLeft) > 0.5;
+    const isRightMoving = dirX === 1 || Math.abs(nRight - cRight) > 0.5;
+    const isTopMoving = dirY === -1 || Math.abs(nTop - cTop) > 0.5;
+    const isBottomMoving = dirY === 1 || Math.abs(nBottom - cBottom) > 0.5;
 
 nodesRef.current.forEach(t => {
 // 自分自身、センターマーク、現在選択中のノードはスナップ対象から除外
-if (t.id === primaryNode.id || t.id === 'center-mark' || t.selected) return;
+      if (t.id === primaryNode?.id || t.id === 'center-mark' || t.selected) return;
+      if (t.id === primaryNode.id || t.id === 'center-mark' || t.selected) return;
 
 const tW = t.measured?.width || Number(t.style?.width) || 200; 
 const tH = t.measured?.height || Number(t.style?.height) || 100; 
@@ -1167,16 +1169,16 @@ const tRight = t.position.x + tW;
 const tTop = t.position.y; 
 const tBottom = t.position.y + tH;
 
-// ーーー 横方向（X軸）のスナップ判定（動いている辺だけ計算！） ーーー
-const xs = [];
-if (isLeftMoving) {
-xs.push({ target: tLeft, src: nLeft });
-xs.push({ target: tRight, src: nLeft });
-}
-if (isRightMoving) {
-xs.push({ target: tLeft, src: nRight });
-xs.push({ target: tRight, src: nRight });
-}
+      // ーーー 横方向（X軸）のスナップ判定（動いている辺だけ計算！） ーーー
+      const xs = [];
+      if (isLeftMoving) {
+          xs.push({ target: tLeft, src: nLeft });
+          xs.push({ target: tRight, src: nLeft });
+      }
+      if (isRightMoving) {
+          xs.push({ target: tLeft, src: nRight });
+          xs.push({ target: tRight, src: nRight });
+      }
 
 xs.forEach(item => {
 const diff = Math.abs(item.target - item.src);
@@ -1186,16 +1188,16 @@ lineX = item.target; // スナップするターゲットの位置に赤い線�
 }
 });
 
-// ーーー 縦方向（Y軸）のスナップ判定（動いている辺だけ計算！） ーーー
-const ys = [];
-if (isTopMoving) {
-ys.push({ target: tTop, src: nTop });
-ys.push({ target: tBottom, src: nTop });
-}
-if (isBottomMoving) {
-ys.push({ target: tTop, src: nBottom });
-ys.push({ target: tBottom, src: nBottom });
-}
+      // ーーー 縦方向（Y軸）のスナップ判定（動いている辺だけ計算！） ーーー
+      const ys = [];
+      if (isTopMoving) {
+          ys.push({ target: tTop, src: nTop });
+          ys.push({ target: tBottom, src: nTop });
+      }
+      if (isBottomMoving) {
+          ys.push({ target: tTop, src: nBottom });
+          ys.push({ target: tBottom, src: nBottom });
+      }
 
 ys.forEach(item => {
 const diff = Math.abs(item.target - item.src);
@@ -1206,8 +1208,10 @@ lineY = item.target; // スナップするターゲットの位置に赤い線�
 });
 });
 
+    // 計算したガイド線位置を反映（1つの軸で最も近いノードへ赤い線がビシッと走ります）
 setGuides({ lineX, lineY });
 }, [primaryNode]);
+  
 
 
 const onNodeResizeStop = useCallback(() => {
@@ -1557,8 +1561,6 @@ connectionMode={ConnectionMode.Loose} nodes={flowNodes} edges={edges} edgeTypes=
 panOnDrag={!isLassoMode || selectedNodes.length === 1} 
 selectionOnDrag={isLassoMode && selectedNodes.length !== 1} 
 selectionMode={SelectionMode.Partial}
-             minZoom={0.05} /* ★ 追加：ズームアウトの限界を大幅に広げる（0.05倍まで縮小可能） */
-             maxZoom={4}    /* ★ 追加：ズームインの限界も少し余裕を持たせる */
 onNodesChange={u => {
 const hasSelect = u.some((c: any) => c.type === 'select' && c.selected);
 if (hasSelect) { setNodes(nds => nds.map(n => ({ ...n, data: { ...n.data, isEditing: false, editingCell: null } }))); setEdges(eds => eds.map(e => ({ ...e, data: { ...e.data, isEditing: false } }))); }
@@ -1751,16 +1753,8 @@ el.innerHTML = currentVal;
 <span style={{fontSize: '12px', fontWeight: 'bold', width: '24px', textAlign: 'right'}}>{Number(primaryNode.style?.borderWidth ?? (primaryNode.data?.isImage || primaryNode.data?.isTable ? 0 : 0.5))}</span>
 </div>
 
-              <label style={{fontSize:'10px', fontWeight: 'bold'}}>枠線の色</label>
-              <input type="color" value={String(primaryNode.style?.borderColor || '#000000')} onChange={(e) => { takeSnapshot(); updateSelectedNodes({}, { borderColor: e.target.value })}} style={{width:'100%', height:'24px', cursor: 'pointer', border: 'none', padding: 0, marginBottom:'10px'}} />
-              <label style={{fontSize:'11px', fontWeight: 'bold'}}>線の色</label>
-              {/* ★ 新機能：5色のデフォルトカラーボタンと自由色指定を並べる */}
-              <div style={{ display: 'flex', gap: '5px', marginTop: '5px', marginBottom: '20px', alignItems: 'center' }}>
-                {['#000000', '#ef4444', '#eab308', '#10b981', '#3b82f6'].map(c => (
-                  <button key={c} onClick={() => updateEdgeDesign({ color: c })} style={{ width: '24px', height: '24px', backgroundColor: c, border: '1px solid #ddd', borderRadius: '4px', cursor: 'pointer' }} />
-                ))}
-                <input type="color" value={selectedEdge.data?.color || '#333333'} onChange={(e) => updateEdgeDesign({ color: e.target.value })} style={{flex: 1, height: '24px', border: 'none', cursor: 'pointer', padding: 0}} />
-              </div>
+<label style={{fontSize:'10px', fontWeight: 'bold'}}>枠線の色</label>
+<input type="color" value={String(primaryNode.style?.borderColor || '#000000')} onChange={(e) => { takeSnapshot(); updateSelectedNodes({}, { borderColor: e.target.value })}} style={{width:'100%', height:'24px', cursor: 'pointer', border: 'none', padding: 0, marginBottom:'10px'}} />
 
 <label style={{fontSize:'10px', fontWeight: 'bold'}}>背景色</label>
 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: '4px', marginTop: '5px', marginBottom: '10px' }}>
