@@ -1557,6 +1557,8 @@ const moveSubtreeY = useCallback((direction: 'up' | 'down') => {
              panOnDrag={!isLassoMode || selectedNodes.length === 1} 
              selectionOnDrag={isLassoMode && selectedNodes.length !== 1} 
              selectionMode={SelectionMode.Partial}
+             minZoom={0.05} /* ★ 追加：ズームアウトの限界を大幅に広げる（0.05倍まで縮小可能） */
+             maxZoom={4}    /* ★ 追加：ズームインの限界も少し余裕を持たせる */
              onNodesChange={u => {
                  const hasSelect = u.some((c: any) => c.type === 'select' && c.selected);
                  if (hasSelect) { setNodes(nds => nds.map(n => ({ ...n, data: { ...n.data, isEditing: false, editingCell: null } }))); setEdges(eds => eds.map(e => ({ ...e, data: { ...e.data, isEditing: false } }))); }
@@ -1749,8 +1751,14 @@ const moveSubtreeY = useCallback((direction: 'up' | 'down') => {
                 <span style={{fontSize: '12px', fontWeight: 'bold', width: '24px', textAlign: 'right'}}>{Number(primaryNode.style?.borderWidth ?? (primaryNode.data?.isImage || primaryNode.data?.isTable ? 0 : 0.5))}</span>
               </div>
 
-              <label style={{fontSize:'10px', fontWeight: 'bold'}}>枠線の色</label>
-              <input type="color" value={String(primaryNode.style?.borderColor || '#000000')} onChange={(e) => { takeSnapshot(); updateSelectedNodes({}, { borderColor: e.target.value })}} style={{width:'100%', height:'24px', cursor: 'pointer', border: 'none', padding: 0, marginBottom:'10px'}} />
+              <label style={{fontSize:'11px', fontWeight: 'bold'}}>線の色</label>
+              {/* ★ 新機能：5色のデフォルトカラーボタンと自由色指定を並べる */}
+              <div style={{ display: 'flex', gap: '5px', marginTop: '5px', marginBottom: '20px', alignItems: 'center' }}>
+                {['#000000', '#ef4444', '#eab308', '#10b981', '#3b82f6'].map(c => (
+                  <button key={c} onClick={() => updateEdgeDesign({ color: c })} style={{ width: '24px', height: '24px', backgroundColor: c, border: '1px solid #ddd', borderRadius: '4px', cursor: 'pointer' }} />
+                ))}
+                <input type="color" value={selectedEdge.data?.color || '#333333'} onChange={(e) => updateEdgeDesign({ color: e.target.value })} style={{flex: 1, height: '24px', border: 'none', cursor: 'pointer', padding: 0}} />
+              </div>
 
               <label style={{fontSize:'10px', fontWeight: 'bold'}}>背景色</label>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: '4px', marginTop: '5px', marginBottom: '10px' }}>
