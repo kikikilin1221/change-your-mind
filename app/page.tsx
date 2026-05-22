@@ -1647,8 +1647,8 @@ const moveSubtreeY = useCallback((direction: 'up' | 'down') => {
                           onInput={(e) => {
                               const val = e.currentTarget.innerHTML;
                               if (isTableEditing) {
-                                  const cellId = selectedCells[primaryNode.id][0];
-                                  setNodes(nds => nds.map(n => n.id === primaryNode.id ? { ...n, data: { ...n.data, cells: { ...n.data.cells, [cellId]: { ...n.data.cells[cellId], content: val } } } } : n));
+                                  const cellId = selectedCells[primaryNode.id]?.[0];
+                                  if (cellId) setNodes(nds => nds.map(n => n.id === primaryNode.id ? { ...n, data: { ...n.data, cells: { ...(n.data?.cells || {}), [cellId]: { ...(n.data?.cells?.[cellId] || {}), content: val } } } } : n));
                               } else {
                                   updateSelectedNodes({ content: val });
                               }
@@ -1656,8 +1656,8 @@ const moveSubtreeY = useCallback((direction: 'up' | 'down') => {
                           onBlur={(e) => {
                               const val = e.currentTarget.innerHTML;
                               if (isTableEditing) {
-                                  const cellId = selectedCells[primaryNode.id][0];
-                                  setNodes(nds => nds.map(n => n.id === primaryNode.id ? { ...n, data: { ...n.data, cells: { ...n.data.cells, [cellId]: { ...n.data.cells[cellId], content: val } } } } : n));
+                                  const cellId = selectedCells[primaryNode.id]?.[0];
+                                  if (cellId) setNodes(nds => nds.map(n => n.id === primaryNode.id ? { ...n, data: { ...n.data, cells: { ...(n.data?.cells || {}), [cellId]: { ...(n.data?.cells?.[cellId] || {}), content: val } } } } : n));
                               } else {
                                   updateSelectedNodes({ content: val });
                               }
@@ -1665,10 +1665,10 @@ const moveSubtreeY = useCallback((direction: 'up' | 'down') => {
                           style={{ width: '100%', minHeight: '60px', padding: '8px', fontSize: '12px', border: '1px solid #a5b4fc', borderRadius: '4px', backgroundColor: '#fff', outline: 'none', overflowY: 'auto', cursor: 'text' }}
                           ref={el => {
                               if (!el) return;
-                              const currentVal = isTableEditing ? (primaryNode.data.cells[selectedCells[primaryNode.id][0]]?.content || '') : (primaryNode.data?.content || '');
-                              if (el.innerHTML !== currentVal && document.activeElement !== el) {
-                                  el.innerHTML = currentVal;
-                              }
+                              try {
+                                  const currentVal = isTableEditing ? (primaryNode.data?.cells?.[selectedCells[primaryNode.id]?.[0]]?.content || '') : (primaryNode.data?.content || '');
+                                  if (el.innerHTML !== currentVal && document.activeElement !== el) el.innerHTML = currentVal;
+                              } catch(err) { console.error(err); }
                           }}
                       />
                   </div>
@@ -1853,10 +1853,10 @@ const moveSubtreeY = useCallback((direction: 'up' | 'down') => {
                       style={{ width: '100%', minHeight: '40px', padding: '8px', fontSize: '12px', border: '1px solid #a5b4fc', borderRadius: '4px', backgroundColor: '#fff', outline: 'none', overflowY: 'auto', cursor: 'text' }}
                       ref={el => {
                           if (!el) return;
-                          const currentVal = selectedEdge.label || '';
-                          if (el.innerHTML !== currentVal && document.activeElement !== el) {
-                              el.innerHTML = currentVal;
-                          }
+                          try {
+                              const currentVal = selectedEdge?.label || '';
+                              if (el.innerHTML !== currentVal && document.activeElement !== el) el.innerHTML = currentVal;
+                          } catch(err) { console.error(err); }
                       }}
                   />
               </div>
@@ -1898,7 +1898,13 @@ const moveSubtreeY = useCallback((direction: 'up' | 'down') => {
               </div>
 
               <label style={{fontSize:'11px', fontWeight: 'bold'}}>線の色</label>
-              <input type="color" value={selectedEdge.data?.color || '#333333'} onChange={(e) => updateEdgeDesign({ color: e.target.value })} style={{width:'100%', height:'24px', border:'none', cursor:'pointer', padding:0, marginBottom:'20px', marginTop: '5px'}} />
+              {/* ★ 新機能：5色のデフォルトカラーボタンと自由色指定を並べる */}
+              <div style={{ display: 'flex', gap: '5px', marginTop: '5px', marginBottom: '20px', alignItems: 'center' }}>
+                {['#000000', '#ef4444', '#eab308', '#10b981', '#3b82f6'].map(c => (
+                  <button key={c} onClick={() => updateEdgeDesign({ color: c })} style={{ width: '24px', height: '24px', backgroundColor: c, border: '1px solid #ddd', borderRadius: '4px', cursor: 'pointer' }} />
+                ))}
+                <input type="color" value={selectedEdge.data?.color || '#333333'} onChange={(e) => updateEdgeDesign({ color: e.target.value })} style={{flex: 1, height: '24px', border: 'none', cursor: 'pointer', padding: 0}} />
+              </div>
 
               {/* ★ 新機能：種類を8種に変更し、論理記号のデザインを適用 */}
               <label style={{fontSize:'11px', fontWeight: 'bold'}}>種類 (8種)</label>
