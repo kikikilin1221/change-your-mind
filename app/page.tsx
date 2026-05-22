@@ -1453,16 +1453,25 @@ const moveSubtreeY = useCallback((direction: 'up' | 'down') => {
                   <img src={n.data.imageUrl as string} style={{ position: 'absolute', width: n.data?.isCropping ? `${baseW}px` : '100%', height: n.data?.isCropping ? `${baseH}px` : '100%', maxWidth: 'none', maxHeight: 'none', left: n.data?.isCropping ? `${offX}px` : 0, top: n.data?.isCropping ? `${offY}px` : 0, transform: `translate(${n.data.imgPosX || 0}px, ${n.data.imgPosY || 0}px) scale(${n.data.imgZoom || 1})`, transformOrigin: 'center center', pointerEvents: 'none' }} alt="img" />
                   <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', display: 'flex', flexDirection: 'column', alignItems: ai, justifyContent: jc, padding: '4px' }}>
                       <div 
-                          id={`edit-${n.id}`} className={isEditingNode ? "nodrag html-content" : "html-content"} contentEditable={isEditingNode} suppressContentEditableWarning
-                          onMouseDown={(e) => { if (isEditingNode) e.stopPropagation(); }} onKeyDown={(e) => { if (isEditingNode) e.stopPropagation(); }}
-                          onInput={(e) => { n.data._tempContent = e.currentTarget.innerHTML; }} onBlur={(e) => { const finalHtml = n.data._tempContent ?? e.currentTarget.innerHTML; setNodes(nds => nds.map(node => node.id === n.id ? { ...node, data: { ...node.data, isEditing: false, content: finalHtml, _tempContent: undefined } } : node)); }}
-                          style={{ pointerEvents: 'auto', width: '100%', height: 'auto', outline: 'none', cursor: isEditingNode ? 'text' : 'grab', color: n.style?.color || '#000', fontFamily: n.style?.fontFamily || 'sans-serif', fontSize: n.style?.fontSize || '14px', fontWeight: n.style?.fontWeight || 'normal', textDecoration: n.style?.textDecoration || 'none', whiteSpace: 'pre-wrap', lineHeight: '1.2', textAlign: textAlignment, transform: `translate(${textOffX}px, ${textOffY}px)`, writingMode: wMode }}
-                          ref={el => {
-                              if (!el) return;
-                              if (!isEditingNode) { const newHtml = renderHTMLWithMath(n.data?.content || ''); if (el.innerHTML !== newHtml) el.innerHTML = newHtml; el.dataset.editing = 'false'; } 
-                              else if (el.dataset.editing !== 'true') { el.dataset.editing = 'true'; el.innerHTML = n.data?.content || ''; setTimeout(() => { el.focus(); if (typeof window.getSelection !== 'undefined') { const range = document.createRange(); const sel = window.getSelection(); range.selectNodeContents(el); range.collapse(false); sel?.removeAllRanges(); sel?.addRange(range); } }, 10); }
-                          }}
-                      />
+    className="html-content"
+    style={{ 
+        pointerEvents: 'none', // ★ タッチしても編集処理が走らないように設定
+        width: '100%', 
+        height: 'auto', 
+        color: n.style?.color || '#000', 
+        fontFamily: n.style?.fontFamily || 'sans-serif', 
+        fontSize: n.style?.fontSize || '14px', 
+        fontWeight: n.style?.fontWeight || 'normal', 
+        textDecoration: n.style?.textDecoration || 'none', 
+        whiteSpace: 'pre-wrap', 
+        lineHeight: '1.2', 
+        textAlign: textAlignment, 
+        transform: `translate(${textOffX}px, ${textOffY}px)`, 
+        writingMode: wMode 
+    }}
+    // ★ refを削除し、表示専用の dangerouslySetInnerHTML に変更
+    dangerouslySetInnerHTML={{ __html: renderHTMLWithMath(n.data?.content || '') }}
+/>
                   </div>
                 </div>
               ) : n.id !== 'center-mark' && !n.data?.isTable && !n.data?.isTransparentHelper ? (
