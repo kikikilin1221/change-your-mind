@@ -1135,133 +1135,69 @@ return [...nds.map((n: any) => ({...n, selected: false})), { id: `img-${Date.now
 }; reader.readAsDataURL(file);
 };
 
-const onNodeDrag = useCallback((_: any, params: any) => {
-    // 【強力スナップ実装】吸い付く距離（ピクセル）
+// 1. 移動時の強力スナップ（あなたが提示してくれた完璧なコードです。そのまま使います！）
+const onNodeDrag = useCallback((_: any, node: any) => {
     const SNAP_THRESHOLD = 20; 
+    let snapX: number | undefined, snapY: number | undefined;
     let lineX: number | undefined, lineY: number | undefined;
-    
-    // params から現在の座標とサイズを取得
-    let { id, x, y, width, height } = params;
 
-    // nodesRef を使って最新の他ノード位置を取得
+    const nW = Number(node.style?.width) || 200;
+    const nH = Number(node.style?.height) || 100;
+
+    nodesRef.current.forEach(t => {
+        if (t.id === node.id || t.id === 'center-mark' || t.selected) return;
+
+        const tW = Number(t.style?.width) || 200;
+        const tH = Number(t.style?.height) || 100;
+        
+        const targetsX = [t.position.x, t.position.x + tW, t.position.x + tW / 2];
+        const targetsY = [t.position.y, t.position.y + tH, t.position.y + tH / 2];
+
+        targetsX.forEach(target => {
+            if (Math.abs(target - node.position.x) < SNAP_THRESHOLD) { snapX = target; lineX = target; }
+            if (Math.abs(target - (node.position.x + nW)) < SNAP_THRESHOLD) { snapX = target - nW; lineX = target; }
+        });
+
+        targetsY.forEach(target => {
+            if (Math.abs(target - node.position.y) < SNAP_THRESHOLD) { snapY = target; lineY = target; }
+            if (Math.abs(target - (node.position.y + nH)) < SNAP_THRESHOLD) { snapY = target - nH; lineY = target; }
+        });
+    });
+
+    if (snapX !== undefined) node.position.x = snapX;
+    if (snapY !== undefined) node.position.y = snapY;
+    setGuides(prev => (prev.lineX === lineX && prev.lineY === lineY) ? prev : { lineX, lineY });
+}, [nodesRef, setGuides]);
+
+
+// 2. 大きさ変更時の強力スナップ（これも重複しないように1つだけ置きます！）
+const onNodeResize = useCallback((_: any, params: any) => {
+    const SNAP_THRESHOLD = 20; 
+    let { id, x, y, width, height } = params;
+    let lineX: number | undefined, lineY: number | undefined;
+
     nodesRef.current.forEach(t => {
         if (t.id === id || t.id === 'center-mark' || t.selected) return;
 
         const tW = Number(t.style?.width) || 200;
         const tH = Number(t.style?.height) || 100;
-        const tLeft = t.position.x, tRight = t.position.x + tW, tCenter = tLeft + tW / 2;
-        const tTop = t.position.y, tBottom = t.position.y + tH, tMiddle = tTop + tH / 2;
-
-        // X軸（幅）のスナップ判定
-        [tLeft, tRight, tCenter].forEach(target => {
-            // 右端をスナップ
+        
+        [t.position.x, t.position.x + tW, t.position.x + tW / 2].forEach(target => {
             if (Math.abs(target - (x + width)) < SNAP_THRESHOLD) { width = target - x; lineX = target; }
-            // 左端をスナップ
             if (Math.abs(target - x) < SNAP_THRESHOLD) { width = (x + width) - target; x = target; lineX = target; }
         });
 
-        // Y軸（高さ）のスナップ判定
-        [tTop, tBottom, tMiddle].forEach(target => {
-            // 下端をスナップ
+        [t.position.y, t.position.y + tH, t.position.y + tH / 2].forEach(target => {
             if (Math.abs(target - (y + height)) < SNAP_THRESHOLD) { height = target - y; lineY = target; }
-            // 上端をスナップ
             if (Math.abs(target - y) < SNAP_THRESHOLD) { height = (y + height) - target; y = target; lineY = target; }
         });
     });
 
-    // 状態を更新（idを使って特定のノードのサイズと位置を同時に更新）
     setNodes(nds => nds.map(n => n.id === id ? { ...n, position: { x, y }, style: { ...n.style, width, height } } : n));
     setGuides(prev => (prev.lineX === lineX && prev.lineY === lineY) ? prev : { lineX, lineY });
 }, [nodesRef, setNodes, setGuides]);
 
-// ★ 改善：拡大・縮小している方向（左端・右端・上端・下端）のどこであっても、周囲のすべての図形と完璧にスナップして赤い線を出す
-const onNodeResize = useCallback((_: any, params: any) => {
-let { x, y, width, height } = params;
-let lineX: number | undefined, lineY: number | undefined; 
-let snapDiffX = 15, snapDiffY = 15;
 
-    // 現在リサイズ中のノードのリアルタイムな4辺の位置（絶対座標）
-    if (!primaryNode) return;
-
-    // 現在リサイズ中のノードのリアルタイムな4辺の位置
-const nLeft = x; 
-const nRight = x + width; 
-const nTop = y; 
-const nBottom = y + height;
-
-    // 直前のノードのサイズ・位置と比較して、「どの辺が動いているか」を特定する
-    const cW = primaryNode.measured?.width || Number(primaryNode.style?.width) || 200;
-    const cH = primaryNode.measured?.height || Number(primaryNode.style?.height) || 100;
-    const cLeft = primaryNode.position.x;
-    const cRight = cLeft + cW;
-    const cTop = primaryNode.position.y;
-    const cBottom = cTop + cH;
-
-    // xyflowの方向データ(direction)か、座標の差分で動いている辺を判定
-    const dirX = params.direction?.[0];
-    const dirY = params.direction?.[1];
-    const isLeftMoving = dirX === -1 || Math.abs(nLeft - cLeft) > 0.5;
-    const isRightMoving = dirX === 1 || Math.abs(nRight - cRight) > 0.5;
-    const isTopMoving = dirY === -1 || Math.abs(nTop - cTop) > 0.5;
-    const isBottomMoving = dirY === 1 || Math.abs(nBottom - cBottom) > 0.5;
-
-nodesRef.current.forEach(t => {
-// 自分自身、センターマーク、現在選択中のノードはスナップ対象から除外
-      if (t.id === primaryNode?.id || t.id === 'center-mark' || t.selected) return;
-
-const tW = t.measured?.width || Number(t.style?.width) || 200; 
-const tH = t.measured?.height || Number(t.style?.height) || 100; 
-
-const tLeft = t.position.x; 
-const tRight = t.position.x + tW; 
-const tTop = t.position.y; 
-const tBottom = t.position.y + tH;
-
-      // ーーー 横方向（X軸）のスナップ判定 ーーー
-      // 動いている「左端」または「右端」が、他ノードの「左端」または「右端」に接近しているかチェック
-      const xs = [];
-      if (isLeftMoving) {
-          xs.push({ target: tLeft, src: nLeft });
-          xs.push({ target: tRight, src: nLeft });
-      }
-      if (isRightMoving) {
-          xs.push({ target: tLeft, src: nRight });
-          xs.push({ target: tRight, src: nRight });
-      }
-
-xs.forEach(item => {
-const diff = Math.abs(item.target - item.src);
-if (diff < snapDiffX) {
-snapDiffX = diff;
-lineX = item.target; // スナップするターゲットの位置に赤い線を引く
-}
-});
-
-      // ーーー 縦方向（Y軸）のスナップ判定 ーーー
-      // 動いている「上端」または「下端」が、他ノードの「上端」または「下端」に接近しているかチェック
-      // ーーー 縦方向（Y軸）のスナップ判定（動いている辺だけ計算！） ーーー
-      const ys = [];
-      if (isTopMoving) {
-          ys.push({ target: tTop, src: nTop });
-          ys.push({ target: tBottom, src: nTop });
-      }
-      if (isBottomMoving) {
-          ys.push({ target: tTop, src: nBottom });
-          ys.push({ target: tBottom, src: nBottom });
-      }
-
-ys.forEach(item => {
-const diff = Math.abs(item.target - item.src);
-if (diff < snapDiffY) {
-snapDiffY = diff;
-lineY = item.target; // スナップするターゲットの位置に赤い線を引く
-}
-});
-});
-
-    // 計算したガイド線位置を反映（1つの軸で最も近いノードへ赤い線がビシッと走ります）
-setGuides({ lineX, lineY });
-}, [primaryNode]);
   
 
 
