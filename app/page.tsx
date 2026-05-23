@@ -1172,13 +1172,25 @@ const onNodeDrag = useCallback((_: any, node: any) => {
 
 // 2. 大きさ変更時の強力スナップ（これも重複しないように1つだけ置きます！）
 const onNodeResize = useCallback((id: string, params: any) => {
-    const SNAP_THRESHOLD = 30; // ガチッと吸い付く強さ
+    const SNAP_THRESHOLD = 30; 
+    const { direction } = params;
     let { x, y, width, height } = params;
-    const dirX = params.direction?.[0] || 0;
-    const dirY = params.direction?.[1] || 0;
-
+    
+    // スナップ先の座標（見つかったら更新する）
+    let snapX: number | undefined;
+    let snapY: number | undefined;
+    let snapW: number | undefined;
+    let snapH: number | undefined;
     let lineX: number | undefined;
     let lineY: number | undefined;
+
+    // どの方向のハンドルか（dirX: -1=左, 1=右, dirY: -1=上, 1=下）
+    const dirX = direction ? direction[0] : 0;
+    const dirY = direction ? direction[1] : 0;
+
+    // 最も近い線を見つける
+    let minDiffX = SNAP_THRESHOLD;
+    let minDiffY = SNAP_THRESHOLD;
 
     nodesRef.current.forEach(t => {
         if (t.id === id || t.id === 'center-mark' || t.selected) return;
@@ -1188,41 +1200,44 @@ const onNodeResize = useCallback((id: string, params: any) => {
         const tLeft = t.position.x, tRight = t.position.x + tW, tCenter = tLeft + tW / 2;
         const tTop = t.position.y, tBottom = t.position.y + tH, tMiddle = tTop + tH / 2;
 
-        // X軸（横）のスナップ
-        if (dirX === 1) { // 右端をドラッグ
-            const nRight = x + width;
-            [tLeft, tRight, tCenter].forEach(targetX => {
-                if (Math.abs(targetX - nRight) < SNAP_THRESHOLD) { width = targetX - x; lineX = targetX; }
+        // X軸（幅）のスナップ
+        if (dirX === 1) { // 右端を引いている
+            [tLeft, tRight, tCenter].forEach(target => {
+                const diff = Math.abs(target - (x + width));
+                if (diff < minDiffX) { minDiffX = diff; snapW = target - x; lineX = target; }
             });
-        } else if (dirX === -1) { // 左端をドラッグ
-            const nLeft = x;
-            const nRight = x + width;
-            [tLeft, tRight, tCenter].forEach(targetX => {
-                if (Math.abs(targetX - nLeft) < SNAP_THRESHOLD) { x = targetX; width = nRight - targetX; lineX = targetX; }
+        } else if (dirX === -1) { // 左端を引いている
+            [tLeft, tRight, tCenter].forEach(target => {
+                const diff = Math.abs(target - x);
+                if (diff < minDiffX) { minDiffX = diff; snapX = target; snapW = (x + width) - target; lineX = target; }
             });
         }
 
-        // Y軸（縦）のスナップ
-        if (dirY === 1) { // 下端をドラッグ
-            const nBottom = y + height;
-            [tTop, tBottom, tMiddle].forEach(targetY => {
-                if (Math.abs(targetY - nBottom) < SNAP_THRESHOLD) { height = targetY - y; lineY = targetY; }
+        // Y軸（高さ）のスナップ
+        if (dirY === 1) { // 下端を引いている
+            [tTop, tBottom, tMiddle].forEach(target => {
+                const diff = Math.abs(target - (y + height));
+                if (diff < minDiffY) { minDiffY = diff; snapH = target - y; lineY = target; }
             });
-        } else if (dirY === -1) { // 上端をドラッグ
-            const nTop = y;
-            const nBottom = y + height;
-            [tTop, tBottom, tMiddle].forEach(targetY => {
-                if (Math.abs(targetY - nTop) < SNAP_THRESHOLD) { y = targetY; height = nBottom - targetY; lineY = targetY; }
+        } else if (dirY === -1) { // 上端を引いている
+            [tTop, tBottom, tMiddle].forEach(target => {
+                const diff = Math.abs(target - y);
+                if (diff < minDiffY) { minDiffY = diff; snapY = target; snapH = (y + height) - target; lineY = target; }
             });
         }
     });
 
-    width = Math.max(width, 30);
-    height = Math.max(height, 30);
+    // 強制上書き：スナップ先が見つかれば、その数値を採用する
+    if (snapX !== undefined) params.x = snapX;
+    if (snapY !== undefined) params.y = snapY;
+    if (snapW !== undefined) params.width = Math.max(snapW, 30);
+    if (snapH !== undefined) params.height = Math.max(snapH, 30);
 
-    // ★ここで確実に図形の状態を上書き保存する
-    setNodes(nds => nds.map(n => n.id === id ? { ...n, position: { x, y }, style: { ...n.style, width, height } } : n));
+    // ガイド線を表示
     setGuides({ lineX, lineY });
+    
+    // 即座にノードの状態を更新
+    setNodes(nds => nds.map(n => n.id === id ? { ...n, position: { x: params.x, y: params.y }, style: { ...n.style, width: params.width, height: params.height } } : n));
 }, [setNodes, setGuides]);
 
 
@@ -1493,12 +1508,11 @@ else if (el.dataset.editing !== 'true') { el.dataset.editing = 'true'; el.innerH
             const dx = params.x - n.data._rsX; const dy = params.y - n.data._rsY; 
             setNodes((nds: any[]) => nds.map((node: any) => node.id === n.id ? { ...node, data: { ...node.data, cropOffsetX: n.data._rsCropOffX - dx, cropOffsetY: n.data._rsCropOffY - dy } } : node)); 
         } else {
-            // ★ここがすべての元凶でした！
-            // 古い生データの上書き処理を消し去り、上で作った完璧な関数に「図形のID」と「データ」を渡します
+            // ★ ここが原因でした！生の座標で上書きする処理を完全に消し去り、id付きでスナップ関数を呼び出します
             onNodeResize(n.id, params);
         }
     }} 
-    onResizeEnd={() => setGuides({})}
+    onResizeEnd={onNodeResizeStop}
 />
 ) : null}
 </div>
