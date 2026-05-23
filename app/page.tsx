@@ -1135,46 +1135,44 @@ return [...nds.map((n: any) => ({...n, selected: false})), { id: `img-${Date.now
 }; reader.readAsDataURL(file);
 };
 
-const onNodeDrag = useCallback((_: any, node: any) => {
+const onNodeDrag = useCallback((_: any, params: any) => {
     // 【強力スナップ実装】吸い付く距離（ピクセル）
     const SNAP_THRESHOLD = 20; 
-    let snapX: number | undefined, snapY: number | undefined;
     let lineX: number | undefined, lineY: number | undefined;
+    
+    // params から現在の座標とサイズを取得
+    let { id, x, y, width, height } = params;
 
-    const nW = Number(node.style?.width) || 200;
-    const nH = Number(node.style?.height) || 100;
-
-    // notesRef.current を使って最新のノード情報を取得
+    // nodesRef を使って最新の他ノード位置を取得
     nodesRef.current.forEach(t => {
-        if (t.id === node.id || t.id === 'center-mark' || t.selected) return;
+        if (t.id === id || t.id === 'center-mark' || t.selected) return;
 
         const tW = Number(t.style?.width) || 200;
         const tH = Number(t.style?.height) || 100;
-        
-        // 吸い付き判定のポイント（中心と端）
-        const targetsX = [t.position.x, t.position.x + tW, t.position.x + tW / 2];
-        const targetsY = [t.position.y, t.position.y + tH, t.position.y + tH / 2];
+        const tLeft = t.position.x, tRight = t.position.x + tW, tCenter = tLeft + tW / 2;
+        const tTop = t.position.y, tBottom = t.position.y + tH, tMiddle = tTop + tH / 2;
 
-        targetsX.forEach(target => {
-            // 自分の左端、右端が相手のいずれかのX座標に吸い付く
-            if (Math.abs(target - node.position.x) < SNAP_THRESHOLD) { snapX = target; lineX = target; }
-            if (Math.abs(target - (node.position.x + nW)) < SNAP_THRESHOLD) { snapX = target - nW; lineX = target; }
+        // X軸（幅）のスナップ判定
+        [tLeft, tRight, tCenter].forEach(target => {
+            // 右端をスナップ
+            if (Math.abs(target - (x + width)) < SNAP_THRESHOLD) { width = target - x; lineX = target; }
+            // 左端をスナップ
+            if (Math.abs(target - x) < SNAP_THRESHOLD) { width = (x + width) - target; x = target; lineX = target; }
         });
 
-        targetsY.forEach(target => {
-            // 自分の上端、下端が相手のいずれかのY座標に吸い付く
-            if (Math.abs(target - node.position.y) < SNAP_THRESHOLD) { snapY = target; lineY = target; }
-            if (Math.abs(target - (node.position.y + nH)) < SNAP_THRESHOLD) { snapY = target - nH; lineY = target; }
+        // Y軸（高さ）のスナップ判定
+        [tTop, tBottom, tMiddle].forEach(target => {
+            // 下端をスナップ
+            if (Math.abs(target - (y + height)) < SNAP_THRESHOLD) { height = target - y; lineY = target; }
+            // 上端をスナップ
+            if (Math.abs(target - y) < SNAP_THRESHOLD) { height = (y + height) - target; y = target; lineY = target; }
         });
     });
 
-    // 赤い補助線が出ている場所に、図形の座標を強制的に合わせる
-    if (snapX !== undefined) node.position.x = snapX;
-    if (snapY !== undefined) node.position.y = snapY;
-    
-    // ガイド線の表示状態を更新
+    // 状態を更新（idを使って特定のノードのサイズと位置を同時に更新）
+    setNodes(nds => nds.map(n => n.id === id ? { ...n, position: { x, y }, style: { ...n.style, width, height } } : n));
     setGuides(prev => (prev.lineX === lineX && prev.lineY === lineY) ? prev : { lineX, lineY });
-}, [nodesRef, setGuides]); // 依存配列には最新のノード参照を渡します
+}, [nodesRef, setNodes, setGuides]);
 
 // ★ 改善：拡大・縮小している方向（左端・右端・上端・下端）のどこであっても、周囲のすべての図形と完璧にスナップして赤い線を出す
 const onNodeResize = useCallback((_: any, params: any) => {
