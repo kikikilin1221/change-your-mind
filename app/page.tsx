@@ -1171,27 +1171,20 @@ const onNodeDrag = useCallback((_: any, node: any) => {
 
 
 // 2. 大きさ変更時の強力スナップ（これも重複しないように1つだけ置きます！）
-const onNodeResize = useCallback((_: any, params: any) => {
-    // 【超強力スナップ】30px以内に近づいたら、カーソルを動かさなくても磁石のようにガチッと吸い付きます
+const onNodeResize = useCallback((id: string, params: any) => {
+    // 【究極スナップ】30px以内に近づいたらガチッと吸い付きます
     const SNAP_THRESHOLD = 30; 
-    let { id, x, y, width, height, direction } = params;
+    let { x, y, width, height, direction } = params;
     let lineX: number | undefined;
     let lineY: number | undefined;
 
-    // リサイズ中のノードの元の状態を取得
     const currentNode = nodesRef.current.find(n => n.id === id);
     if (!currentNode) return;
 
-    // 動かしている方向を確実に判定（左端を引いているのか、右端を引いているのか）
-    const prevX = currentNode.position.x;
-    const prevY = currentNode.position.y;
-    const prevW = Number(currentNode.style?.width) || 200;
-    const prevH = Number(currentNode.style?.height) || 100;
+    // どの方向のハンドルを引っ張っているか
+    const dirX = direction ? direction[0] : 0;
+    const dirY = direction ? direction[1] : 0;
 
-    const dirX = direction ? direction[0] : (Math.abs(x - prevX) > 0.5 ? -1 : (Math.abs((x + width) - (prevX + prevW)) > 0.5 ? 1 : 0));
-    const dirY = direction ? direction[1] : (Math.abs(y - prevY) > 0.5 ? -1 : (Math.abs((y + height) - (prevY + prevH)) > 0.5 ? 1 : 0));
-
-    // ★重要：一番近い線にだけ吸い付くための距離記録
     let minDiffX = SNAP_THRESHOLD;
     let minDiffY = SNAP_THRESHOLD;
 
@@ -1203,14 +1196,13 @@ const onNodeResize = useCallback((_: any, params: any) => {
         const tLeft = t.position.x, tRight = t.position.x + tW, tCenter = tLeft + tW / 2;
         const tTop = t.position.y, tBottom = t.position.y + tH, tMiddle = tTop + tH / 2;
 
-        // ーーー X軸（横方向）のピタッとスナップ ーーー
+        // ーーー 横方向（X軸）のピタッとスナップ ーーー
         if (dirX === 1) { // 【右端】を引っ張っている時
             [tLeft, tRight, tCenter].forEach(targetX => {
                 const diff = Math.abs(targetX - (x + width));
-                // 複数の候補があっても、一番近い線(minDiffX)を優先して上書きする
                 if (diff < minDiffX) {
                     minDiffX = diff;
-                    width = targetX - x; // 右端をターゲットにガチッと合わせる
+                    width = targetX - x;
                     lineX = targetX;
                 }
             });
@@ -1219,20 +1211,20 @@ const onNodeResize = useCallback((_: any, params: any) => {
                 const diff = Math.abs(targetX - x);
                 if (diff < minDiffX) {
                     minDiffX = diff;
-                    width = (x + width) - targetX; // 右端を固定したまま幅を変える
-                    x = targetX; // 左端をターゲットにガチッと合わせる
+                    width = (x + width) - targetX;
+                    x = targetX;
                     lineX = targetX;
                 }
             });
         }
 
-        // ーーー Y軸（縦方向）のピタッとスナップ ーーー
+        // ーーー 縦方向（Y軸）のピタッとスナップ ーーー
         if (dirY === 1) { // 【下端】を引っ張っている時
             [tTop, tBottom, tMiddle].forEach(targetY => {
                 const diff = Math.abs(targetY - (y + height));
                 if (diff < minDiffY) {
                     minDiffY = diff;
-                    height = targetY - y; // 下端をターゲットにガチッと合わせる
+                    height = targetY - y;
                     lineY = targetY;
                 }
             });
@@ -1241,19 +1233,18 @@ const onNodeResize = useCallback((_: any, params: any) => {
                 const diff = Math.abs(targetY - y);
                 if (diff < minDiffY) {
                     minDiffY = diff;
-                    height = (y + height) - targetY; // 下端を固定したまま高さを変える
-                    y = targetY; // 上端をターゲットにガチッと合わせる
+                    height = (y + height) - targetY;
+                    y = targetY;
                     lineY = targetY;
                 }
             });
         }
     });
 
-    // 極端に潰れないよう最小サイズを保証
     width = Math.max(width, 30);
     height = Math.max(height, 30);
 
-    // 強制的に計算した完璧な位置とサイズを適用
+    // 計算した完璧な位置とサイズを適用
     setNodes(nds => nds.map(n => n.id === id ? { ...n, position: { x, y }, style: { ...n.style, width, height } } : n));
     setGuides({ lineX, lineY });
 }, [nodesRef, setNodes, setGuides]);
@@ -1509,31 +1500,29 @@ else if (el.dataset.editing !== 'true') { el.dataset.editing = 'true'; el.innerH
 
 {n.id !== 'center-mark' && !n.data?.isTransparentHelper ? (
 <NodeResizer 
-minWidth={30} 
-minHeight={30} 
-keepAspectRatio={!!n.data?.keepRatio} 
-isVisible={n.selected && !isTableAndCellEditing} 
-lineStyle={{ border: n.data?.isCropping ? '2px dashed #ef4444' : '1px solid #3b82f6', zIndex: 100 }} 
-handleStyle={{ background: n.data?.isCropping ? '#ef4444' : '#3b82f6', zIndex: 100, borderRadius: '50%' }} 
-onResizeStart={(_, params) => { 
-takeSnapshot(); 
-if (n.data?.isImage && n.data?.isCropping) { 
-n.data._rsX = params.x; n.data._rsY = params.y; 
-n.data._rsCropOffX = n.data.cropOffsetX || 0; n.data._rsCropOffY = n.data.cropOffsetY || 0; 
-} 
-}} 
-// ★ 改善：サイズ変更中と終了時にスナップ判定を呼び出す
-onResize={(e, params) => { 
-onNodeResize(e, params);
-if (n.data?.isImage && n.data?.isCropping) { 
-const dx = params.x - n.data._rsX; const dy = params.y - n.data._rsY; 
-setNodes((nds: any[]) => nds.map((node: any) => node.id === n.id ? { ...node, data: { ...node.data, cropOffsetX: n.data._rsCropOffX - dx, cropOffsetY: n.data._rsCropOffY - dy } } : node)); 
-} else {
-// リアルタイムに図形のサイズ幅を更新
-setNodes((nds: any[]) => nds.map((node: any) => node.id === n.id ? { ...node, position: { x: params.x, y: params.y }, style: { ...node.style, width: params.width, height: params.height } } : node));
-}
-}} 
-onResizeEnd={onNodeResizeStop}
+    minWidth={30} 
+    minHeight={30} 
+    keepAspectRatio={!!n.data?.keepRatio} 
+    isVisible={n.selected && !isTableAndCellEditing} 
+    lineStyle={{ border: n.data?.isCropping ? '2px dashed #ef4444' : '1px solid #3b82f6', zIndex: 100 }} 
+    handleStyle={{ background: n.data?.isCropping ? '#ef4444' : '#3b82f6', zIndex: 100, borderRadius: '50%' }} 
+    onResizeStart={(_, params) => { 
+        takeSnapshot(); 
+        if (n.data?.isImage && n.data?.isCropping) { 
+            n.data._rsX = params.x; n.data._rsY = params.y; 
+            n.data._rsCropOffX = n.data.cropOffsetX || 0; n.data._rsCropOffY = n.data.cropOffsetY || 0; 
+        } 
+    }} 
+    onResize={(e, params) => { 
+        if (n.data?.isImage && n.data?.isCropping) { 
+            const dx = params.x - n.data._rsX; const dy = params.y - n.data._rsY; 
+            setNodes((nds: any[]) => nds.map((node: any) => node.id === n.id ? { ...node, data: { ...node.data, cropOffsetX: n.data._rsCropOffX - dx, cropOffsetY: n.data._rsCropOffY - dy } } : node)); 
+        } else {
+            // ★ ここが原因でした！生の座標で上書きする処理を完全に消し去り、id付きでスナップ関数を呼び出します
+            onNodeResize(n.id, params);
+        }
+    }} 
+    onResizeEnd={onNodeResizeStop}
 />
 ) : null}
 </div>
