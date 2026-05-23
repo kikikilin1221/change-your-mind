@@ -1172,75 +1172,74 @@ const onNodeDrag = useCallback((_: any, node: any) => {
 
 // 2. 大きさ変更時の強力スナップ（これも重複しないように1つだけ置きます！）
 const onNodeResize = useCallback((_: any, params: any) => {
-    // 【強力スナップ】20px以内に近づいたらガチッと吸い付きます
-    const SNAP_THRESHOLD = 20; 
+    // 【超強力スナップ】30px以内に近づいたらガチッと吸い付きます
+    const SNAP_THRESHOLD = 30; 
     let lineX: number | undefined;
     let lineY: number | undefined;
 
-    // 現在選択されている図形が見つからない場合は処理しない（エラー回避）
     if (!primaryNode) return;
 
-    // ★最大のポイント：paramsの数値を「直接」書き換えることで、後続の処理にスナップ済みの完璧な数値を渡す
-    const nLeft = params.x;
-    const nRight = params.x + params.width;
-    const nTop = params.y;
-    const nBottom = params.y + params.height;
+    // 【重要】マウスの生データを一度変数に避難させます
+    let newX = params.x;
+    let newY = params.y;
+    let newW = params.width;
+    let newH = params.height;
 
-    // どの方向のハンドルを引っ張っているか（1なら右/下、-1なら左/上）
+    // どの方向のハンドルを引っ張っているか
     const dirX = params.direction?.[0] || 0;
     const dirY = params.direction?.[1] || 0;
 
-    // 複数の線があった場合、一番近い線にだけ吸い付くための変数
+    // 一番近い線にだけ反応するための距離記録
     let minDiffX = SNAP_THRESHOLD;
     let minDiffY = SNAP_THRESHOLD;
 
     nodesRef.current.forEach(t => {
         if (t.id === primaryNode.id || t.id === 'center-mark' || t.selected) return;
 
-        const tW = Number(t.style?.width) || 200;
-        const tH = Number(t.style?.height) || 100;
+        const tW = t.measured?.width || Number(t.style?.width) || 200;
+        const tH = t.measured?.height || Number(t.style?.height) || 100;
         const tLeft = t.position.x, tRight = t.position.x + tW, tCenter = tLeft + tW / 2;
         const tTop = t.position.y, tBottom = t.position.y + tH, tMiddle = tTop + tH / 2;
 
-        // ーーー X軸（横方向）のピタッとスナップ ーーー
+        // ーーー 横方向（X軸）のピタッとスナップ ーーー
         if (dirX === 1) { // 【右端】を引っ張っている時
             [tLeft, tRight, tCenter].forEach(targetX => {
-                const diff = Math.abs(targetX - nRight);
+                const diff = Math.abs(targetX - (newX + newW));
                 if (diff < minDiffX) {
                     minDiffX = diff;
-                    params.width = targetX - params.x; // 右端をターゲットにガチッと合わせる
+                    newW = targetX - newX;
                     lineX = targetX;
                 }
             });
         } else if (dirX === -1) { // 【左端】を引っ張っている時
             [tLeft, tRight, tCenter].forEach(targetX => {
-                const diff = Math.abs(targetX - nLeft);
+                const diff = Math.abs(targetX - newX);
                 if (diff < minDiffX) {
                     minDiffX = diff;
-                    params.width = nRight - targetX; // 右端を固定したまま幅を変える
-                    params.x = targetX;              // 左端をターゲットにガチッと合わせる
+                    newW = (newX + newW) - targetX;
+                    newX = targetX;
                     lineX = targetX;
                 }
             });
         }
 
-        // ーーー Y軸（縦方向）のピタッとスナップ ーーー
+        // ーーー 縦方向（Y軸）のピタッとスナップ ーーー
         if (dirY === 1) { // 【下端】を引っ張っている時
             [tTop, tBottom, tMiddle].forEach(targetY => {
-                const diff = Math.abs(targetY - nBottom);
+                const diff = Math.abs(targetY - (newY + newH));
                 if (diff < minDiffY) {
                     minDiffY = diff;
-                    params.height = targetY - params.y; // 下端をターゲットにガチッと合わせる
+                    newH = targetY - newY;
                     lineY = targetY;
                 }
             });
         } else if (dirY === -1) { // 【上端】を引っ張っている時
             [tTop, tBottom, tMiddle].forEach(targetY => {
-                const diff = Math.abs(targetY - nTop);
+                const diff = Math.abs(targetY - newY);
                 if (diff < minDiffY) {
                     minDiffY = diff;
-                    params.height = nBottom - targetY; // 下端を固定したまま高さを変える
-                    params.y = targetY;                // 上端をターゲットにガチッと合わせる
+                    newH = (newY + newH) - targetY;
+                    newY = targetY;
                     lineY = targetY;
                 }
             });
@@ -1248,13 +1247,20 @@ const onNodeResize = useCallback((_: any, params: any) => {
     });
 
     // 極端に潰れないよう最小サイズを保証
-    params.width = Math.max(params.width, 30);
-    params.height = Math.max(params.height, 30);
+    newW = Math.max(newW, 30);
+    newH = Math.max(newH, 30);
 
-    // ガイド線の表示
-    setGuides(prev => (prev.lineX === lineX && prev.lineY === lineY) ? prev : { lineX, lineY });
-}, [primaryNode]); // 依存配列もエラーが出ないよう最小限に
+    // ★★★ 魔法のコード ★★★
+    // ここで `params` の中身を「直接」スナップ済みの完璧な数値にすり替えます。
+    // こうすることで、この後裏側で動く処理が「強制的にこの座標を使わされる」ことになります。
+    params.x = newX;
+    params.y = newY;
+    params.width = newW;
+    params.height = newH;
 
+    // 赤いガイド線を表示
+    setGuides({ lineX, lineY });
+}, [primaryNode]); // 依存配列は最小限でエラー回避
 
 
   
