@@ -1136,16 +1136,55 @@ return [...nds.map((n: any) => ({...n, selected: false})), { id: `img-${Date.now
 };
 
 const onNodeDrag = useCallback((_: any, node: any) => {
-let snapX: number | undefined, snapY: number | undefined; let lineX: number | undefined, lineY: number | undefined; let snapDiffX = 15, snapDiffY = 15;
-const nW = Number(node.style?.width) || 200; const nH = Number(node.style?.height) || 100;
-const nLeft = node.position.x, nCenter = node.position.x + nW / 2, nRight = node.position.x + nW; const nTop = node.position.y, nMiddle = node.position.y + nH / 2, nBottom = node.position.y + nH;
-nodes.forEach(t => {
-if (t.id === node.id || t.id === 'center-mark' || t.selected) return;
-const tW = Number(t.style?.width) || 200; const tH = Number(t.style?.height) || 100; const tLeft = t.position.x, tCenter = t.position.x + tW / 2, tRight = t.position.x + tW; const tTop = t.position.y, tMiddle = t.position.y + tH / 2, tBottom = t.position.y + tH;
-const xs = [ { target: tLeft, src: nLeft, offset: 0 }, { target: tLeft, src: nRight, offset: -nW }, { target: tRight, src: nLeft, offset: 0 }, { target: tRight, src: nRight, offset: -nW }, { target: tCenter, src: nCenter, offset: -nW / 2 } ]; xs.forEach(x => { const diff = Math.abs(x.target - x.src); if (diff < snapDiffX) { snapDiffX = diff; snapX = x.target + x.offset; lineX = x.target; } });
-const ys = [ { target: tTop, src: nTop, offset: 0 }, { target: tTop, src: nBottom, offset: -nH }, { target: tBottom, src: nTop, offset: 0 }, { target: tBottom, src: nBottom, offset: -nH }, { target: tMiddle, src: nMiddle, offset: -nH / 2 } ]; ys.forEach(y => { const diff = Math.abs(y.target - y.src); if (diff < snapDiffY) { snapDiffY = diff; snapY = y.target + y.offset; lineY = y.target; } });
-});
-if (snapX !== undefined) node.position.x = snapX; if (snapY !== undefined) node.position.y = snapY; setGuides({ lineX, lineY });
+    const SNAP_THRESHOLD = 20; // 吸い付く距離（ピクセル）
+    let snapX: number | undefined, snapY: number | undefined;
+    let lineX: number | undefined, lineY: number | undefined;
+
+    const nW = Number(node.style?.width) || 200;
+    const nH = Number(node.style?.height) || 100;
+    const nLeft = node.position.x, nRight = node.position.x + nW;
+    const nTop = node.position.y, nBottom = node.position.y + nH;
+    const nCenter = nLeft + nW / 2;
+    const nMiddle = nTop + nH / 2;
+
+    nodes.forEach(t => {
+        if (t.id === node.id || t.id === 'center-mark' || t.selected) return;
+
+        const tW = Number(t.style?.width) || 200;
+        const tH = Number(t.style?.height) || 100;
+        const tLeft = t.position.x, tRight = t.position.x + tW;
+        const tTop = t.position.y, tBottom = t.position.y + tH;
+        const tCenter = tLeft + tW / 2;
+        const tMiddle = tTop + tH / 2;
+
+        // X軸スナップ（左端、右端、中心）
+        const xs = [tLeft, tRight, tCenter];
+        xs.forEach(target => {
+            const possiblePositions = [target, target - nW, target - nW / 2];
+            possiblePositions.forEach(pos => {
+                if (Math.abs(pos - node.position.x) < SNAP_THRESHOLD) {
+                    snapX = pos;
+                    lineX = target;
+                }
+            });
+        });
+
+        // Y軸スナップ（上端、下端、中心）
+        const ys = [tTop, tBottom, tMiddle];
+        ys.forEach(target => {
+            const possiblePositions = [target, target - nH, target - nH / 2];
+            possiblePositions.forEach(pos => {
+                if (Math.abs(pos - node.position.y) < SNAP_THRESHOLD) {
+                    snapY = pos;
+                    lineY = target;
+                }
+            });
+        });
+    });
+
+    if (snapX !== undefined) node.position.x = snapX;
+    if (snapY !== undefined) node.position.y = snapY;
+    setGuides(prev => (prev.lineX === lineX && prev.lineY === lineY) ? prev : { lineX, lineY });
 }, [nodes]);
 // ★ 改善：拡大・縮小している方向（左端・右端・上端・下端）のどこであっても、周囲のすべての図形と完璧にスナップして赤い線を出す
 const onNodeResize = useCallback((_: any, params: any) => {
