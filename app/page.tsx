@@ -1172,30 +1172,101 @@ const onNodeDrag = useCallback((_: any, node: any) => {
 
 // 2. 大きさ変更時の強力スナップ（これも重複しないように1つだけ置きます！）
 const onNodeResize = useCallback((_: any, params: any) => {
-    const SNAP_THRESHOLD = 20; 
+    // 【超強力スナップ実装】吸い付く距離（ピクセル）。ユーザー様の要望に応え、さらに大きく設定。
+    const SNAP_THRESHOLD = 30; 
     let { id, x, y, width, height } = params;
+    // リサイズ方向を取得（どのハンドルか）: dirX=-1(左), dirX=1(右), dirY=-1(上), dirY=1(下)
+    const dirX = params.direction?.[0]; 
+    const dirY = params.direction?.[1];
+
     let lineX: number | undefined, lineY: number | undefined;
 
+    // 現在リサイズ中のノードの境界
+    const nLeft = x;
+    const nRight = x + width;
+    const nTop = y;
+    const nBottom = y + height;
+
+    // 最新の全ノード位置を参照
     nodesRef.current.forEach(t => {
+        // 操作中のノード自身やガイド線用のマーカーは無視
         if (t.id === id || t.id === 'center-mark' || t.selected) return;
 
         const tW = Number(t.style?.width) || 200;
         const tH = Number(t.style?.height) || 100;
         
-        [t.position.x, t.position.x + tW, t.position.x + tW / 2].forEach(target => {
-            if (Math.abs(target - (x + width)) < SNAP_THRESHOLD) { width = target - x; lineX = target; }
-            if (Math.abs(target - x) < SNAP_THRESHOLD) { width = (x + width) - target; x = target; lineX = target; }
-        });
+        // 相手の基準点（左端、右端、中心）
+        const tLeft = t.position.x;
+        const tRight = t.position.x + tW;
+        const tCenter = tLeft + tW / 2;
 
-        [t.position.y, t.position.y + tH, t.position.y + tH / 2].forEach(target => {
-            if (Math.abs(target - (y + height)) < SNAP_THRESHOLD) { height = target - y; lineY = target; }
-            if (Math.abs(target - y) < SNAP_THRESHOLD) { height = (y + height) - target; y = target; lineY = target; }
-        });
+        const tTop = t.position.y;
+        const tBottom = t.position.y + tH;
+        const tMiddle = tTop + tH / 2;
+
+        // --- X軸（水平方向）のスナップ ---
+
+        // 右端のハンドル、または右方向を含む角のハンドルの場合
+        if (dirX === 1) { 
+            // 自分の右端を相手のいずれかの基準点に吸い付かせる
+            [tLeft, tRight, tCenter].forEach(targetX => {
+                if (Math.abs(targetX - nRight) < SNAP_THRESHOLD) {
+                    // 幅を相手に強制的に合わせる
+                    width = targetX - x;
+                    lineX = targetX;
+                }
+            });
+        } 
+        // 左端のハンドル、または左方向を含む角のハンドルの場合
+        else if (dirX === -1) { 
+            // 自分の左端を相手のいずれかの基準点に吸い付かせる
+            [tLeft, tRight, tCenter].forEach(targetX => {
+                if (Math.abs(targetX - nLeft) < SNAP_THRESHOLD) {
+                    // xの位置を相手に合わせ、widthを調整して右端の位置をキープ
+                    width = nRight - targetX;
+                    x = targetX; 
+                    lineX = targetX;
+                }
+            });
+        }
+
+        // --- Y軸（垂直方向）のスナップ ---
+
+        // 下端のハンドル、または下方向を含む角のハンドルの場合
+        if (dirY === 1) { 
+            // 自分の下端を相手のいずれかの基準点に吸い付かせる
+            [tTop, tBottom, tMiddle].forEach(targetY => {
+                if (Math.abs(targetY - nBottom) < SNAP_THRESHOLD) {
+                    // 高さを相手に強制的に合わせる
+                    height = targetY - y;
+                    lineY = targetY;
+                }
+            });
+        } 
+        // 上端のハンドル、または上方向を含む角のハンドルの場合
+        else if (dirY === -1) { 
+            // 自分の上端を相手のいずれかの基準点に吸い付かせる
+            [tTop, tBottom, tMiddle].forEach(targetY => {
+                if (Math.abs(targetY - nTop) < SNAP_THRESHOLD) {
+                    // yの位置を相手に合わせ、heightを調整して下端の位置をキープ
+                    height = nBottom - targetY;
+                    y = targetY; 
+                    lineY = targetY;
+                }
+            });
+        }
     });
 
+    // 幅と高さが極端に小さくならないように最低値を保証（ React Flowの設定に合わせて適宜調整してください）
+    width = Math.max(width, 30);
+    height = Math.max(height, 30);
+
+    // 状態を更新（idを使って特定のノードのサイズと位置を同時に更新）
     setNodes(nds => nds.map(n => n.id === id ? { ...n, position: { x, y }, style: { ...n.style, width, height } } : n));
+    // ガイド線の表示
     setGuides(prev => (prev.lineX === lineX && prev.lineY === lineY) ? prev : { lineX, lineY });
 }, [nodesRef, setNodes, setGuides]);
+
 
 
   
