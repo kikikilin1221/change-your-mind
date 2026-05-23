@@ -1172,54 +1172,65 @@ const onNodeDrag = useCallback((_: any, node: any) => {
 
 // 2. 大きさ変更時の強力スナップ（これも重複しないように1つだけ置きます！）
 const onNodeResize = useCallback((id: string, params: any) => {
-    // 【決定版】30px以内に近づいたら強制スナップ
     const SNAP_THRESHOLD = 30;
-    
-    // スナップ計算用にコピー
-    let x = params.x;
-    let y = params.y;
-    let width = params.width;
-    let height = params.height;
-    
+    let { x, y, width, height, direction } = params;
     let lineX: number | undefined;
     let lineY: number | undefined;
 
-    // 現在のノードの辺
-    const nR = x + width;
-    const nB = y + height;
+    const dirX = direction ? direction[0] : 0;
+    const dirY = direction ? direction[1] : 0;
 
-    nodesRef.current.forEach(n => {
-        if (n.id === id || n.id === 'center-mark' || n.selected) return;
-        
-        const tW = Number(n.style?.width) || 200;
-        const tH = Number(n.style?.height) || 100;
-        const tR = n.position.x + tW;
-        const tB = n.position.y + tH;
-        const tC = n.position.x + tW / 2;
-        const tM = n.position.y + tH / 2;
+    // 計算用コピー
+    let snappedX = x;
+    let snappedY = y;
+    let snappedW = width;
+    let snappedH = height;
 
-        // X軸スナップ
-        [n.position.x, tR, tC].forEach(target => {
-            if (Math.abs(target - (x + width)) < SNAP_THRESHOLD) { width = target - x; lineX = target; }
-            if (Math.abs(target - x) < SNAP_THRESHOLD) { width = (x + width) - target; x = target; lineX = target; }
-        });
+    nodesRef.current.forEach(t => {
+        if (t.id === id || t.id === 'center-mark' || t.selected) return;
 
-        // Y軸スナップ
-        [n.position.y, tB, tM].forEach(target => {
-            if (Math.abs(target - (y + height)) < SNAP_THRESHOLD) { height = target - y; lineY = target; }
-            if (Math.abs(target - y) < SNAP_THRESHOLD) { height = (y + height) - target; y = target; lineY = target; }
-        });
+        const tW = Number(t.style?.width) || 200;
+        const tH = Number(t.style?.height) || 100;
+        const tL = t.position.x, tR = t.position.x + tW, tC = tL + tW / 2;
+        const tT = t.position.y, tB = t.position.y + tH, tM = tT + tH / 2;
+
+        // X軸スナップ（右か左か、現在引いている辺で判定）
+        if (dirX === 1) { // 右端を引いている
+            [tL, tR, tC].forEach(target => {
+                if (Math.abs(target - (x + width)) < SNAP_THRESHOLD) { snappedW = target - x; lineX = target; }
+            });
+        } else if (dirX === -1) { // 左端を引いている
+            [tL, tR, tC].forEach(target => {
+                if (Math.abs(target - x) < SNAP_THRESHOLD) { snappedX = target; snappedW = (x + width) - target; lineX = target; }
+            });
+        }
+
+        // Y軸スナップ（下か上か、現在引いている辺で判定）
+        if (dirY === 1) { // 下端を引いている
+            [tT, tB, tM].forEach(target => {
+                if (Math.abs(target - (y + height)) < SNAP_THRESHOLD) { snappedH = target - y; lineY = target; }
+            });
+        } else if (dirY === -1) { // 上端を引いている
+            [tT, tB, tM].forEach(target => {
+                if (Math.abs(target - y) < SNAP_THRESHOLD) { snappedY = target; snappedH = (y + height) - target; lineY = target; }
+            });
+        }
     });
 
-    // ★ 魔法：ReactFlowへ「強制的にこの数値を使え」と伝える
-    params.x = x;
-    params.y = y;
-    params.width = Math.max(width, 30);
-    params.height = Math.max(height, 30);
-    
-    // 描画へ反映
+    // ★重要：React Flowのparamsを書き換えつつ、stateも直接強制更新する
+    params.x = snappedX;
+    params.y = snappedY;
+    params.width = Math.max(snappedW, 30);
+    params.height = Math.max(snappedH, 30);
+
     setGuides({ lineX, lineY });
-    setNodes(nds => nds.map(n => n.id === id ? { ...n, position: { x, y }, style: { ...n.style, width, height } } : n));
+    
+    // このsetNodesが、ReactFlowに「今の計算結果を採用しろ」という命令になります
+    setNodes(nds => nds.map(n => n.id === id ? { 
+        ...n, 
+        position: { x: snappedX, y: snappedY }, 
+        style: { ...n.style, width: Math.max(snappedW, 30), height: Math.max(snappedH, 30) } 
+    } : n));
 }, [setNodes, setGuides]);
 
 
@@ -1486,14 +1497,15 @@ else if (el.dataset.editing !== 'true') { el.dataset.editing = 'true'; el.innerH
         } 
     }} 
     onResize={(e, params) => { 
-        if (n.data?.isImage && n.data?.isCropping) { 
-            const dx = params.x - n.data._rsX; const dy = params.y - n.data._rsY; 
-            setNodes((nds: any[]) => nds.map((node: any) => node.id === n.id ? { ...node, data: { ...node.data, cropOffsetX: n.data._rsCropOffX - dx, cropOffsetY: n.data._rsCropOffY - dy } } : node)); 
-        } else {
-            // ★ ここが原因でした！生の座標で上書きする処理を完全に消し去り、id付きでスナップ関数を呼び出します
-            onNodeResize(n.id, params);
-        }
-    }} 
+    if (n.data?.isImage && n.data?.isCropping) { 
+        // 画像トリミングの特殊処理
+        const dx = params.x - n.data._rsX; const dy = params.y - n.data._rsY; 
+        setNodes((nds: any[]) => nds.map((node: any) => node.id === n.id ? { ...node, data: { ...node.data, cropOffsetX: n.data._rsCropOffX - dx, cropOffsetY: n.data._rsCropOffY - dy } } : node)); 
+    } else {
+        // ★ここをこう変えるだけで変わります！
+        onNodeResize(n.id, params);
+    }
+}}
     onResizeEnd={onNodeResizeStop}
 />
 ) : null}
