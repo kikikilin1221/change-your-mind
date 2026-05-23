@@ -1171,83 +1171,89 @@ const onNodeDrag = useCallback((_: any, node: any) => {
 
 
 // 2. 大きさ変更時の強力スナップ（これも重複しないように1つだけ置きます！）
-const onNodeResize = useCallback((id: string, params: any) => {
-    // 【究極スナップ】30px以内に近づいたらガチッと吸い付きます
-    const SNAP_THRESHOLD = 30; 
-    let { x, y, width, height, direction } = params;
+const onNodeResize = useCallback((_: any, params: any) => {
+    // 【強力スナップ】20px以内に近づいたらガチッと吸い付きます
+    const SNAP_THRESHOLD = 20; 
     let lineX: number | undefined;
     let lineY: number | undefined;
 
-    const currentNode = nodesRef.current.find(n => n.id === id);
-    if (!currentNode) return;
+    // 現在選択されている図形が見つからない場合は処理しない（エラー回避）
+    if (!primaryNode) return;
 
-    // どの方向のハンドルを引っ張っているか
-    const dirX = direction ? direction[0] : 0;
-    const dirY = direction ? direction[1] : 0;
+    // ★最大のポイント：paramsの数値を「直接」書き換えることで、後続の処理にスナップ済みの完璧な数値を渡す
+    const nLeft = params.x;
+    const nRight = params.x + params.width;
+    const nTop = params.y;
+    const nBottom = params.y + params.height;
 
+    // どの方向のハンドルを引っ張っているか（1なら右/下、-1なら左/上）
+    const dirX = params.direction?.[0] || 0;
+    const dirY = params.direction?.[1] || 0;
+
+    // 複数の線があった場合、一番近い線にだけ吸い付くための変数
     let minDiffX = SNAP_THRESHOLD;
     let minDiffY = SNAP_THRESHOLD;
 
     nodesRef.current.forEach(t => {
-        if (t.id === id || t.id === 'center-mark' || t.selected) return;
+        if (t.id === primaryNode.id || t.id === 'center-mark' || t.selected) return;
 
         const tW = Number(t.style?.width) || 200;
         const tH = Number(t.style?.height) || 100;
         const tLeft = t.position.x, tRight = t.position.x + tW, tCenter = tLeft + tW / 2;
         const tTop = t.position.y, tBottom = t.position.y + tH, tMiddle = tTop + tH / 2;
 
-        // ーーー 横方向（X軸）のピタッとスナップ ーーー
+        // ーーー X軸（横方向）のピタッとスナップ ーーー
         if (dirX === 1) { // 【右端】を引っ張っている時
             [tLeft, tRight, tCenter].forEach(targetX => {
-                const diff = Math.abs(targetX - (x + width));
+                const diff = Math.abs(targetX - nRight);
                 if (diff < minDiffX) {
                     minDiffX = diff;
-                    width = targetX - x;
+                    params.width = targetX - params.x; // 右端をターゲットにガチッと合わせる
                     lineX = targetX;
                 }
             });
         } else if (dirX === -1) { // 【左端】を引っ張っている時
             [tLeft, tRight, tCenter].forEach(targetX => {
-                const diff = Math.abs(targetX - x);
+                const diff = Math.abs(targetX - nLeft);
                 if (diff < minDiffX) {
                     minDiffX = diff;
-                    width = (x + width) - targetX;
-                    x = targetX;
+                    params.width = nRight - targetX; // 右端を固定したまま幅を変える
+                    params.x = targetX;              // 左端をターゲットにガチッと合わせる
                     lineX = targetX;
                 }
             });
         }
 
-        // ーーー 縦方向（Y軸）のピタッとスナップ ーーー
+        // ーーー Y軸（縦方向）のピタッとスナップ ーーー
         if (dirY === 1) { // 【下端】を引っ張っている時
             [tTop, tBottom, tMiddle].forEach(targetY => {
-                const diff = Math.abs(targetY - (y + height));
+                const diff = Math.abs(targetY - nBottom);
                 if (diff < minDiffY) {
                     minDiffY = diff;
-                    height = targetY - y;
+                    params.height = targetY - params.y; // 下端をターゲットにガチッと合わせる
                     lineY = targetY;
                 }
             });
         } else if (dirY === -1) { // 【上端】を引っ張っている時
             [tTop, tBottom, tMiddle].forEach(targetY => {
-                const diff = Math.abs(targetY - y);
+                const diff = Math.abs(targetY - nTop);
                 if (diff < minDiffY) {
                     minDiffY = diff;
-                    height = (y + height) - targetY;
-                    y = targetY;
+                    params.height = nBottom - targetY; // 下端を固定したまま高さを変える
+                    params.y = targetY;                // 上端をターゲットにガチッと合わせる
                     lineY = targetY;
                 }
             });
         }
     });
 
-    width = Math.max(width, 30);
-    height = Math.max(height, 30);
+    // 極端に潰れないよう最小サイズを保証
+    params.width = Math.max(params.width, 30);
+    params.height = Math.max(params.height, 30);
 
-    // 計算した完璧な位置とサイズを適用
-    setNodes(nds => nds.map(n => n.id === id ? { ...n, position: { x, y }, style: { ...n.style, width, height } } : n));
-    setGuides({ lineX, lineY });
-}, [nodesRef, setNodes, setGuides]);
+    // ガイド線の表示
+    setGuides(prev => (prev.lineX === lineX && prev.lineY === lineY) ? prev : { lineX, lineY });
+}, [primaryNode]); // 依存配列もエラーが出ないよう最小限に
 
 
 
