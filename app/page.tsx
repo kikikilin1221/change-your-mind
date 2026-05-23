@@ -1172,72 +1172,54 @@ const onNodeDrag = useCallback((_: any, node: any) => {
 
 // 2. 大きさ変更時の強力スナップ（これも重複しないように1つだけ置きます！）
 const onNodeResize = useCallback((id: string, params: any) => {
-    const SNAP_THRESHOLD = 30; 
-    const { direction } = params;
-    let { x, y, width, height } = params;
+    // 【決定版】30px以内に近づいたら強制スナップ
+    const SNAP_THRESHOLD = 30;
     
-    // スナップ先の座標（見つかったら更新する）
-    let snapX: number | undefined;
-    let snapY: number | undefined;
-    let snapW: number | undefined;
-    let snapH: number | undefined;
+    // スナップ計算用にコピー
+    let x = params.x;
+    let y = params.y;
+    let width = params.width;
+    let height = params.height;
+    
     let lineX: number | undefined;
     let lineY: number | undefined;
 
-    // どの方向のハンドルか（dirX: -1=左, 1=右, dirY: -1=上, 1=下）
-    const dirX = direction ? direction[0] : 0;
-    const dirY = direction ? direction[1] : 0;
+    // 現在のノードの辺
+    const nR = x + width;
+    const nB = y + height;
 
-    // 最も近い線を見つける
-    let minDiffX = SNAP_THRESHOLD;
-    let minDiffY = SNAP_THRESHOLD;
+    nodesRef.current.forEach(n => {
+        if (n.id === id || n.id === 'center-mark' || n.selected) return;
+        
+        const tW = Number(n.style?.width) || 200;
+        const tH = Number(n.style?.height) || 100;
+        const tR = n.position.x + tW;
+        const tB = n.position.y + tH;
+        const tC = n.position.x + tW / 2;
+        const tM = n.position.y + tH / 2;
 
-    nodesRef.current.forEach(t => {
-        if (t.id === id || t.id === 'center-mark' || t.selected) return;
+        // X軸スナップ
+        [n.position.x, tR, tC].forEach(target => {
+            if (Math.abs(target - (x + width)) < SNAP_THRESHOLD) { width = target - x; lineX = target; }
+            if (Math.abs(target - x) < SNAP_THRESHOLD) { width = (x + width) - target; x = target; lineX = target; }
+        });
 
-        const tW = Number(t.style?.width) || 200;
-        const tH = Number(t.style?.height) || 100;
-        const tLeft = t.position.x, tRight = t.position.x + tW, tCenter = tLeft + tW / 2;
-        const tTop = t.position.y, tBottom = t.position.y + tH, tMiddle = tTop + tH / 2;
-
-        // X軸（幅）のスナップ
-        if (dirX === 1) { // 右端を引いている
-            [tLeft, tRight, tCenter].forEach(target => {
-                const diff = Math.abs(target - (x + width));
-                if (diff < minDiffX) { minDiffX = diff; snapW = target - x; lineX = target; }
-            });
-        } else if (dirX === -1) { // 左端を引いている
-            [tLeft, tRight, tCenter].forEach(target => {
-                const diff = Math.abs(target - x);
-                if (diff < minDiffX) { minDiffX = diff; snapX = target; snapW = (x + width) - target; lineX = target; }
-            });
-        }
-
-        // Y軸（高さ）のスナップ
-        if (dirY === 1) { // 下端を引いている
-            [tTop, tBottom, tMiddle].forEach(target => {
-                const diff = Math.abs(target - (y + height));
-                if (diff < minDiffY) { minDiffY = diff; snapH = target - y; lineY = target; }
-            });
-        } else if (dirY === -1) { // 上端を引いている
-            [tTop, tBottom, tMiddle].forEach(target => {
-                const diff = Math.abs(target - y);
-                if (diff < minDiffY) { minDiffY = diff; snapY = target; snapH = (y + height) - target; lineY = target; }
-            });
-        }
+        // Y軸スナップ
+        [n.position.y, tB, tM].forEach(target => {
+            if (Math.abs(target - (y + height)) < SNAP_THRESHOLD) { height = target - y; lineY = target; }
+            if (Math.abs(target - y) < SNAP_THRESHOLD) { height = (y + height) - target; y = target; lineY = target; }
+        });
     });
 
-    // 強制上書き：スナップ先が見つかれば、その数値を採用する
-    if (snapX !== undefined) params.x = snapX;
-    if (snapY !== undefined) params.y = snapY;
-    if (snapW !== undefined) params.width = Math.max(snapW, 30);
-    if (snapH !== undefined) params.height = Math.max(snapH, 30);
-
-    // ガイド線を表示
-    setGuides({ lineX, lineY });
+    // ★ 魔法：ReactFlowへ「強制的にこの数値を使え」と伝える
+    params.x = x;
+    params.y = y;
+    params.width = Math.max(width, 30);
+    params.height = Math.max(height, 30);
     
-    // 即座にノードの状態を更新
-    setNodes(nds => nds.map(n => n.id === id ? { ...n, position: { x: params.x, y: params.y }, style: { ...n.style, width: params.width, height: params.height } } : n));
+    // 描画へ反映
+    setGuides({ lineX, lineY });
+    setNodes(nds => nds.map(n => n.id === id ? { ...n, position: { x, y }, style: { ...n.style, width, height } } : n));
 }, [setNodes, setGuides]);
 
 
