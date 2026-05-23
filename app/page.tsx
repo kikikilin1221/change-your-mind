@@ -1137,36 +1137,34 @@ return [...nds.map((n: any) => ({...n, selected: false})), { id: `img-${Date.now
 
 // 1. 移動時の強力スナップ（あなたが提示してくれた完璧なコードです。そのまま使います！）
 const onNodeDrag = useCallback((_: any, node: any) => {
-    const SNAP_THRESHOLD = 20; 
-    let snapX: number | undefined, snapY: number | undefined;
+    const SNAP_THRESHOLD = 30;
     let lineX: number | undefined, lineY: number | undefined;
-
     const nW = Number(node.style?.width) || 200;
     const nH = Number(node.style?.height) || 100;
+    const nX = node.position.x;
+    const nY = node.position.y;
 
     nodesRef.current.forEach(t => {
         if (t.id === node.id || t.id === 'center-mark' || t.selected) return;
-
         const tW = Number(t.style?.width) || 200;
         const tH = Number(t.style?.height) || 100;
-        
-        const targetsX = [t.position.x, t.position.x + tW, t.position.x + tW / 2];
-        const targetsY = [t.position.y, t.position.y + tH, t.position.y + tH / 2];
+        const tX = t.position.x;
+        const tY = t.position.y;
 
-        targetsX.forEach(target => {
-            if (Math.abs(target - node.position.x) < SNAP_THRESHOLD) { snapX = target; lineX = target; }
-            if (Math.abs(target - (node.position.x + nW)) < SNAP_THRESHOLD) { snapX = target - nW; lineX = target; }
+        // 【辺だけ】に反応するロジック（左・右・上・下）
+        const targetsX = [tX, tX + tW]; // 相手の左辺・右辺
+        const targetsY = [tY, tY + tH]; // 相手の上辺・下辺
+
+        targetsX.forEach(tx => {
+            if (Math.abs(tx - nX) < SNAP_THRESHOLD) { node.position.x = tx; lineX = tx; }
+            if (Math.abs(tx - (nX + nW)) < SNAP_THRESHOLD) { node.position.x = tx - nW; lineX = tx; }
         });
-
-        targetsY.forEach(target => {
-            if (Math.abs(target - node.position.y) < SNAP_THRESHOLD) { snapY = target; lineY = target; }
-            if (Math.abs(target - (node.position.y + nH)) < SNAP_THRESHOLD) { snapY = target - nH; lineY = target; }
+        targetsY.forEach(ty => {
+            if (Math.abs(ty - nY) < SNAP_THRESHOLD) { node.position.y = ty; lineY = ty; }
+            if (Math.abs(ty - (nY + nH)) < SNAP_THRESHOLD) { node.position.y = ty - nH; lineY = ty; }
         });
     });
-
-    if (snapX !== undefined) node.position.x = snapX;
-    if (snapY !== undefined) node.position.y = snapY;
-    setGuides(prev => (prev.lineX === lineX && prev.lineY === lineY) ? prev : { lineX, lineY });
+    setGuides({ lineX, lineY });
 }, [nodesRef, setGuides]);
 
 
@@ -1174,63 +1172,36 @@ const onNodeDrag = useCallback((_: any, node: any) => {
 const onNodeResize = useCallback((id: string, params: any) => {
     const SNAP_THRESHOLD = 30;
     let { x, y, width, height, direction } = params;
-    let lineX: number | undefined;
-    let lineY: number | undefined;
-
+    let lineX: number | undefined, lineY: number | undefined;
     const dirX = direction ? direction[0] : 0;
     const dirY = direction ? direction[1] : 0;
 
-    // 計算用コピー
-    let snappedX = x;
-    let snappedY = y;
-    let snappedW = width;
-    let snappedH = height;
-
     nodesRef.current.forEach(t => {
         if (t.id === id || t.id === 'center-mark' || t.selected) return;
-
         const tW = Number(t.style?.width) || 200;
         const tH = Number(t.style?.height) || 100;
-        const tL = t.position.x, tR = t.position.x + tW, tC = tL + tW / 2;
-        const tT = t.position.y, tB = t.position.y + tH, tM = tT + tH / 2;
+        const tX = t.position.x;
+        const tR = t.position.x + tW;
+        const tY = t.position.y;
+        const tB = t.position.y + tH;
 
-        // X軸スナップ（右か左か、現在引いている辺で判定）
-        if (dirX === 1) { // 右端を引いている
-            [tL, tR, tC].forEach(target => {
-                if (Math.abs(target - (x + width)) < SNAP_THRESHOLD) { snappedW = target - x; lineX = target; }
-            });
-        } else if (dirX === -1) { // 左端を引いている
-            [tL, tR, tC].forEach(target => {
-                if (Math.abs(target - x) < SNAP_THRESHOLD) { snappedX = target; snappedW = (x + width) - target; lineX = target; }
-            });
+        // 【辺だけ】に反応するリサイズロジック
+        if (dirX === 1) { // 右端を引く
+            [tX, tR].forEach(target => { if (Math.abs(target - (x + width)) < SNAP_THRESHOLD) { width = target - x; lineX = target; } });
+        } else if (dirX === -1) { // 左端を引く
+            [tX, tR].forEach(target => { if (Math.abs(target - x) < SNAP_THRESHOLD) { width = (x + width) - target; x = target; lineX = target; } });
         }
 
-        // Y軸スナップ（下か上か、現在引いている辺で判定）
-        if (dirY === 1) { // 下端を引いている
-            [tT, tB, tM].forEach(target => {
-                if (Math.abs(target - (y + height)) < SNAP_THRESHOLD) { snappedH = target - y; lineY = target; }
-            });
-        } else if (dirY === -1) { // 上端を引いている
-            [tT, tB, tM].forEach(target => {
-                if (Math.abs(target - y) < SNAP_THRESHOLD) { snappedY = target; snappedH = (y + height) - target; lineY = target; }
-            });
+        if (dirY === 1) { // 下端を引く
+            [tY, tB].forEach(target => { if (Math.abs(target - (y + height)) < SNAP_THRESHOLD) { height = target - y; lineY = target; } });
+        } else if (dirY === -1) { // 上端を引く
+            [tY, tB].forEach(target => { if (Math.abs(target - y) < SNAP_THRESHOLD) { height = (y + height) - target; y = target; lineY = target; } });
         }
     });
 
-    // ★重要：React Flowのparamsを書き換えつつ、stateも直接強制更新する
-    params.x = snappedX;
-    params.y = snappedY;
-    params.width = Math.max(snappedW, 30);
-    params.height = Math.max(snappedH, 30);
-
+    params.x = x; params.y = y; params.width = Math.max(width, 30); params.height = Math.max(height, 30);
     setGuides({ lineX, lineY });
-    
-    // このsetNodesが、ReactFlowに「今の計算結果を採用しろ」という命令になります
-    setNodes(nds => nds.map(n => n.id === id ? { 
-        ...n, 
-        position: { x: snappedX, y: snappedY }, 
-        style: { ...n.style, width: Math.max(snappedW, 30), height: Math.max(snappedH, 30) } 
-    } : n));
+    setNodes(nds => nds.map(n => n.id === id ? { ...n, position: { x, y }, style: { ...n.style, width, height } } : n));
 }, [setNodes, setGuides]);
 
 
