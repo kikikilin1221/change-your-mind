@@ -1172,99 +1172,90 @@ const onNodeDrag = useCallback((_: any, node: any) => {
 
 // 2. 大きさ変更時の強力スナップ（これも重複しないように1つだけ置きます！）
 const onNodeResize = useCallback((_: any, params: any) => {
-    // 【超強力スナップ実装】吸い付く距離（ピクセル）。ユーザー様の要望に応え、さらに大きく設定。
+    // 【超強力スナップ】30px以内に近づいたら、カーソルを動かさなくても磁石のようにガチッと吸い付きます
     const SNAP_THRESHOLD = 30; 
-    let { id, x, y, width, height } = params;
-    // リサイズ方向を取得（どのハンドルか）: dirX=-1(左), dirX=1(右), dirY=-1(上), dirY=1(下)
-    const dirX = params.direction?.[0]; 
-    const dirY = params.direction?.[1];
+    let { id, x, y, width, height, direction } = params;
+    let lineX: number | undefined;
+    let lineY: number | undefined;
 
-    let lineX: number | undefined, lineY: number | undefined;
+    // リサイズ中のノードの元の状態を取得
+    const currentNode = nodesRef.current.find(n => n.id === id);
+    if (!currentNode) return;
 
-    // 現在リサイズ中のノードの境界
-    const nLeft = x;
-    const nRight = x + width;
-    const nTop = y;
-    const nBottom = y + height;
+    // 動かしている方向を確実に判定（左端を引いているのか、右端を引いているのか）
+    const prevX = currentNode.position.x;
+    const prevY = currentNode.position.y;
+    const prevW = Number(currentNode.style?.width) || 200;
+    const prevH = Number(currentNode.style?.height) || 100;
 
-    // 最新の全ノード位置を参照
+    const dirX = direction ? direction[0] : (Math.abs(x - prevX) > 0.5 ? -1 : (Math.abs((x + width) - (prevX + prevW)) > 0.5 ? 1 : 0));
+    const dirY = direction ? direction[1] : (Math.abs(y - prevY) > 0.5 ? -1 : (Math.abs((y + height) - (prevY + prevH)) > 0.5 ? 1 : 0));
+
+    // ★重要：一番近い線にだけ吸い付くための距離記録
+    let minDiffX = SNAP_THRESHOLD;
+    let minDiffY = SNAP_THRESHOLD;
+
     nodesRef.current.forEach(t => {
-        // 操作中のノード自身やガイド線用のマーカーは無視
         if (t.id === id || t.id === 'center-mark' || t.selected) return;
 
         const tW = Number(t.style?.width) || 200;
         const tH = Number(t.style?.height) || 100;
-        
-        // 相手の基準点（左端、右端、中心）
-        const tLeft = t.position.x;
-        const tRight = t.position.x + tW;
-        const tCenter = tLeft + tW / 2;
+        const tLeft = t.position.x, tRight = t.position.x + tW, tCenter = tLeft + tW / 2;
+        const tTop = t.position.y, tBottom = t.position.y + tH, tMiddle = tTop + tH / 2;
 
-        const tTop = t.position.y;
-        const tBottom = t.position.y + tH;
-        const tMiddle = tTop + tH / 2;
-
-        // --- X軸（水平方向）のスナップ ---
-
-        // 右端のハンドル、または右方向を含む角のハンドルの場合
-        if (dirX === 1) { 
-            // 自分の右端を相手のいずれかの基準点に吸い付かせる
+        // ーーー X軸（横方向）のピタッとスナップ ーーー
+        if (dirX === 1) { // 【右端】を引っ張っている時
             [tLeft, tRight, tCenter].forEach(targetX => {
-                if (Math.abs(targetX - nRight) < SNAP_THRESHOLD) {
-                    // 幅を相手に強制的に合わせる
-                    width = targetX - x;
+                const diff = Math.abs(targetX - (x + width));
+                // 複数の候補があっても、一番近い線(minDiffX)を優先して上書きする
+                if (diff < minDiffX) {
+                    minDiffX = diff;
+                    width = targetX - x; // 右端をターゲットにガチッと合わせる
                     lineX = targetX;
                 }
             });
-        } 
-        // 左端のハンドル、または左方向を含む角のハンドルの場合
-        else if (dirX === -1) { 
-            // 自分の左端を相手のいずれかの基準点に吸い付かせる
+        } else if (dirX === -1) { // 【左端】を引っ張っている時
             [tLeft, tRight, tCenter].forEach(targetX => {
-                if (Math.abs(targetX - nLeft) < SNAP_THRESHOLD) {
-                    // xの位置を相手に合わせ、widthを調整して右端の位置をキープ
-                    width = nRight - targetX;
-                    x = targetX; 
+                const diff = Math.abs(targetX - x);
+                if (diff < minDiffX) {
+                    minDiffX = diff;
+                    width = (x + width) - targetX; // 右端を固定したまま幅を変える
+                    x = targetX; // 左端をターゲットにガチッと合わせる
                     lineX = targetX;
                 }
             });
         }
 
-        // --- Y軸（垂直方向）のスナップ ---
-
-        // 下端のハンドル、または下方向を含む角のハンドルの場合
-        if (dirY === 1) { 
-            // 自分の下端を相手のいずれかの基準点に吸い付かせる
+        // ーーー Y軸（縦方向）のピタッとスナップ ーーー
+        if (dirY === 1) { // 【下端】を引っ張っている時
             [tTop, tBottom, tMiddle].forEach(targetY => {
-                if (Math.abs(targetY - nBottom) < SNAP_THRESHOLD) {
-                    // 高さを相手に強制的に合わせる
-                    height = targetY - y;
+                const diff = Math.abs(targetY - (y + height));
+                if (diff < minDiffY) {
+                    minDiffY = diff;
+                    height = targetY - y; // 下端をターゲットにガチッと合わせる
                     lineY = targetY;
                 }
             });
-        } 
-        // 上端のハンドル、または上方向を含む角のハンドルの場合
-        else if (dirY === -1) { 
-            // 自分の上端を相手のいずれかの基準点に吸い付かせる
+        } else if (dirY === -1) { // 【上端】を引っ張っている時
             [tTop, tBottom, tMiddle].forEach(targetY => {
-                if (Math.abs(targetY - nTop) < SNAP_THRESHOLD) {
-                    // yの位置を相手に合わせ、heightを調整して下端の位置をキープ
-                    height = nBottom - targetY;
-                    y = targetY; 
+                const diff = Math.abs(targetY - y);
+                if (diff < minDiffY) {
+                    minDiffY = diff;
+                    height = (y + height) - targetY; // 下端を固定したまま高さを変える
+                    y = targetY; // 上端をターゲットにガチッと合わせる
                     lineY = targetY;
                 }
             });
         }
     });
 
-    // 幅と高さが極端に小さくならないように最低値を保証（ React Flowの設定に合わせて適宜調整してください）
+    // 極端に潰れないよう最小サイズを保証
     width = Math.max(width, 30);
     height = Math.max(height, 30);
 
-    // 状態を更新（idを使って特定のノードのサイズと位置を同時に更新）
+    // 強制的に計算した完璧な位置とサイズを適用
     setNodes(nds => nds.map(n => n.id === id ? { ...n, position: { x, y }, style: { ...n.style, width, height } } : n));
-    // ガイド線の表示
-    setGuides(prev => (prev.lineX === lineX && prev.lineY === lineY) ? prev : { lineX, lineY });
+    setGuides({ lineX, lineY });
 }, [nodesRef, setNodes, setGuides]);
 
 
