@@ -1,12 +1,27 @@
 'use client';
 import React, { useState, useCallback, useMemo, useRef, useEffect } from 'react';
 import { 
-ReactFlow, Background, Controls, applyNodeChanges, applyEdgeChanges, addEdge,
-NodeResizer, ReactFlowProvider, useStore, MarkerType, getBezierPath, EdgeProps, BaseEdge, EdgeLabelRenderer, useReactFlow, Position, Handle, ConnectionMode, SelectionMode
+ ReactFlow, Background, Controls, applyNodeChanges, applyEdgeChanges, addEdge,
+ NodeResizer, ReactFlowProvider, useStore, MarkerType, getBezierPath, EdgeProps, BaseEdge, EdgeLabelRenderer, useReactFlow, Position, Handle, ConnectionMode, SelectionMode
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import katex from 'katex';
 import 'katex/dist/katex.min.css';
+
+// ★ 完全修復：Next.jsよりも早くResizeObserverのエラーを捕まえて完全に握り潰す最強の盾
+if (typeof window !== 'undefined') {
+    const originalError = console.error;
+    console.error = (...args) => {
+        if (typeof args[0] === 'string' && args[0].includes('ResizeObserver')) return;
+        originalError.apply(console, args);
+    };
+    window.addEventListener('error', (e) => {
+        if (e.message && e.message.includes('ResizeObserver')) {
+            e.preventDefault();
+            e.stopImmediatePropagation();
+        }
+    }, true); 
+}
 
 const GLOBAL_CSS = `
  .html-content p { margin: 0; }
@@ -69,7 +84,6 @@ else { px = cx + (dx > 0 ? w / 2 : -w / 2); py = cy + (px - cx) * tanTheta; }
 return { x: px, y: py };
 };
 
-// ▼引数に selected を追加します
 const DoubleEdge = ({ id, sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, style = {}, markerEnd, markerStart, data, label, selected }: EdgeProps) => {
 const [edgePath, labelX, labelY] = getBezierPath({ sourceX, sourceY, sourcePosition, targetX, targetY, targetPosition });
 const isDouble = (data as any)?.double; 
@@ -91,7 +105,6 @@ const customArrowSize = strokeWidth * 2 + 18;
 
 return (
 <>
-{/* ★ 改善：線が選択されている時に青いハイライトを表示する */}
 {selected && (
 <BaseEdge path={edgePath} style={{ strokeWidth: strokeWidth + 12, stroke: 'rgba(59, 130, 246, 0.3)', fill: 'none', strokeLinecap: 'round' }} />
 )}
@@ -99,7 +112,6 @@ return (
 {isDouble && !hideLine && (
 <svg style={{ position: 'absolute', width: 0, height: 0 }}>
 <defs>
-{/* ★ お客様から頂いた「完璧な矢印」のコードを一切変更せずに、refX のみ 12 に修正して食い込みを防止 */}
 <marker id={`custom-arrow-${id}`} viewBox="0 0 24 24" refX="12" refY="12" markerWidth={customArrowSize} markerHeight={customArrowSize} markerUnits="userSpaceOnUse" orient="auto">
 <polygon points="0,0 20,12 0,24" fill="var(--bg-color, #ffffff)" stroke="none" />
 <polyline points="4,4 18,12 4,20" fill="none" stroke={edgeColor} strokeWidth={strokeWidth >= 3 ? 3 : 2} strokeLinecap="round" strokeLinejoin="round" />
@@ -180,7 +192,7 @@ const safeCloneNodes = (nds: any[]) => nds.map(n => ({ ...n, data: { ...n.data }
 const safeCloneEdges = (eds: any[]) => eds.map(e => ({ ...e, data: { ...e.data }, style: { ...e.style }, zIndex: e.zIndex }));
 const edgeTypes = { default: DoubleEdge };
 const PASTEL_COLORS = ['#FFB7B2', '#FFDAC1', '#E2F0CB', '#B5EAD7', '#C7CEEA', '#F3E5F5', '#E1F5FE', '#FFF9C4', '#FCE4EC', '#E8F5E9'];
-const QUICK_TEXT_COLORS = ['#000000', '#FF0000', '#008000', '#0000FF', '#FFF000'];
+const QUICK_TEXT_COLORS = ['#000000', '#ef4444', '#eab308', '#10b981', '#3b82f6']; // ★ 線の色用にも流用します
 
 type TableActionType = { id: string; type: string; startX: number; startY: number; startR: number; startC: number; minC: number; maxC: number; minR: number; maxR: number; initWidths: number[]; initHeights: number[]; };
 
@@ -231,6 +243,16 @@ const [future, setFuture] = useState<{nodes: any[], edges: any[]}[]>([]);
 useEffect(() => { nodesRef.current = nodes; }, [nodes]);
 useEffect(() => { edgesRef.current = edges; }, [edges]);
 useEffect(() => { currentLabelRef.current = currentLabel; }, [currentLabel]);
+
+useEffect(() => {
+    const hideResizeObserverError = (e: ErrorEvent) => {
+        if (e.message === 'ResizeObserver loop limit exceeded' || e.message === 'ResizeObserver loop completed with undelivered notifications.') {
+            e.stopImmediatePropagation();
+        }
+    };
+    window.addEventListener('error', hideResizeObserverError);
+    return () => window.removeEventListener('error', hideResizeObserverError);
+}, []);
 
 const selectedNodes = useMemo(() => nodes.filter((n: any) => n.selected), [nodes]);
 const primaryNode = selectedNodes.length > 0 ? selectedNodes[0] : null;
@@ -1159,7 +1181,6 @@ const nBottom = y + height;
 nodesRef.current.forEach(t => {
 // 自分自身、センターマーク、現在選択中のノードはスナップ対象から除外
       if (t.id === primaryNode?.id || t.id === 'center-mark' || t.selected) return;
-      if (t.id === primaryNode.id || t.id === 'center-mark' || t.selected) return;
 
 const tW = t.measured?.width || Number(t.style?.width) || 200; 
 const tH = t.measured?.height || Number(t.style?.height) || 100; 
@@ -1169,7 +1190,8 @@ const tRight = t.position.x + tW;
 const tTop = t.position.y; 
 const tBottom = t.position.y + tH;
 
-      // ーーー 横方向（X軸）のスナップ判定（動いている辺だけ計算！） ーーー
+      // ーーー 横方向（X軸）のスナップ判定 ーーー
+      // 動いている「左端」または「右端」が、他ノードの「左端」または「右端」に接近しているかチェック
       const xs = [];
       if (isLeftMoving) {
           xs.push({ target: tLeft, src: nLeft });
@@ -1188,6 +1210,8 @@ lineX = item.target; // スナップするターゲットの位置に赤い線�
 }
 });
 
+      // ーーー 縦方向（Y軸）のスナップ判定 ーーー
+      // 動いている「上端」または「下端」が、他ノードの「上端」または「下端」に接近しているかチェック
       // ーーー 縦方向（Y軸）のスナップ判定（動いている辺だけ計算！） ーーー
       const ys = [];
       if (isTopMoving) {
