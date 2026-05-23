@@ -1581,15 +1581,25 @@ return (
 
 <div style={{ flexGrow: 1, position: 'relative' }}>
 <ReactFlow 
-connectionMode={ConnectionMode.Loose} nodes={flowNodes} edges={edges} edgeTypes={edgeTypes} elevateNodesOnSelect={false} multiSelectionKeyCode={['Shift', 'Meta', 'Control']}
-panOnDrag={!isLassoMode || selectedNodes.length === 1} 
-selectionOnDrag={isLassoMode && selectedNodes.length !== 1} 
-selectionMode={SelectionMode.Partial}
-onNodesChange={u => {
-const hasSelect = u.some((c: any) => c.type === 'select' && c.selected);
-if (hasSelect) { setNodes(nds => nds.map(n => ({ ...n, data: { ...n.data, isEditing: false, editingCell: null } }))); setEdges(eds => eds.map(e => ({ ...e, data: { ...e.data, isEditing: false } }))); }
-setNodes((nds: any[]) => applyNodeChanges(u, nds));
-}} 
+    connectionMode={ConnectionMode.Loose} 
+    nodes={flowNodes} 
+    edges={edges} 
+    edgeTypes={edgeTypes} 
+    elevateNodesOnSelect={false} 
+    multiSelectionKeyCode={['Shift', 'Meta', 'Control']}
+    panOnDrag={!isLassoMode || selectedNodes.length === 1} 
+    selectionOnDrag={isLassoMode && selectedNodes.length !== 1} 
+    selectionMode={SelectionMode.Partial}
+    
+    // ★ ここを追加・変更
+    minZoom={0.05} 
+    maxZoom={4}
+    
+    onNodesChange={u => {
+        const hasSelect = u.some((c: any) => c.type === 'select' && c.selected);
+        if (hasSelect) { setNodes(nds => nds.map(n => ({ ...n, data: { ...n.data, isEditing: false, editingCell: null } }))); setEdges(eds => eds.map(e => ({ ...e, data: { ...e.data, isEditing: false } }))); }
+        setNodes((nds: any[]) => applyNodeChanges(u, nds));
+    }}
 onEdgesChange={u => setEdges((eds: any[]) => applyEdgeChanges(u, eds))} 
 onConnect={p => { takeSnapshot(); setEdges((eds: any[]) => addEdge({...p, type:'default', label: '', style: {strokeWidth: 1}, data: { markerType: 'arrow'}}, eds)); }} 
 onNodeDragStart={() => takeSnapshot()} onNodeDoubleClick={(_, n) => { enterLevel(n.id, extractFirstLineText(n.data?.content)); }} 
@@ -1888,9 +1898,14 @@ el.innerHTML = currentVal;
 <u>マウスで文字をなぞって選択してから</u>押してください。
 </p>
 <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '10px' }}>
-<div style={{ display:'flex', gap:'5px' }}>
+<div style={{ display:'flex', gap:'5px', alignItems: 'center' }}>
 <button onMouseDown={(e) => e.preventDefault()} onClick={() => applyUnifiedFormat('bold')} style={{ cursor:'pointer', border:'1px solid #ccc', padding: '4px 8px', fontSize:'11px', borderRadius: '4px', background: '#fff' }}>太字</button>
-<input type="color" onMouseDown={(e) => e.preventDefault()} onChange={(e) => applyUnifiedFormat('foreColor', e.target.value)} style={{width:'24px', height:'24px', cursor: 'pointer', border: 'none', padding: 0}} />
+
+{/* ★ 線の文字色用の5色選抜クイックボタン */}
+{['#000000', '#ef4444', '#eab308', '#10b981', '#3b82f6'].map(c => (
+  <button key={c} onMouseDown={(e) => e.preventDefault()} onClick={() => applyUnifiedFormat('foreColor', c)} style={{ width: '18px', height: '18px', backgroundColor: c, border: '1px solid #ddd', borderRadius: '3px', cursor: 'pointer' }} />
+))}
+<input type="color" onMouseDown={(e) => e.preventDefault()} onChange={(e) => applyUnifiedFormat('foreColor', e.target.value)} style={{width:'24px', height:'24px', cursor: 'pointer', border: 'none', padding: 0, marginLeft: '2px'}} />
 </div>
 <div style={{ display:'flex', gap:'5px' }}>
 <button onClick={() => updateEdgeDesign({ labelStyle: { ...selectedEdge.data?.labelStyle, textAlign: 'left' } })} style={{ cursor:'pointer', border:'1px solid #ccc', padding: '4px 8px', fontSize:'11px', borderRadius: '4px', background: '#fff' }}>左詰</button>
@@ -1918,7 +1933,13 @@ el.innerHTML = currentVal;
 </div>
 
 <label style={{fontSize:'11px', fontWeight: 'bold'}}>線の色</label>
-<input type="color" value={selectedEdge.data?.color || '#333333'} onChange={(e) => updateEdgeDesign({ color: e.target.value })} style={{width:'100%', height:'24px', border:'none', cursor:'pointer', padding:0, marginBottom:'20px', marginTop: '5px'}} />
+{/* ★ 線の色用の5色デフォルトカラーボタン */}
+<div style={{ display: 'flex', gap: '5px', marginTop: '5px', marginBottom: '20px', alignItems: 'center' }}>
+  {['#000000', '#ef4444', '#eab308', '#10b981', '#3b82f6'].map(c => (
+    <button key={c} onClick={() => updateEdgeDesign({ color: c })} style={{ width: '24px', height: '24px', backgroundColor: c, border: '1px solid #ddd', borderRadius: '4px', cursor: 'pointer' }} />
+  ))}
+  <input type="color" value={selectedEdge.data?.color || '#333333'} onChange={(e) => updateEdgeDesign({ color: e.target.value })} style={{flex: 1, height: '24px', border: 'none', cursor: 'pointer', padding: 0}} />
+</div>
 
 {/* ★ 新機能：種類を8種に変更し、論理記号のデザインを適用 */}
 <label style={{fontSize:'11px', fontWeight: 'bold'}}>種類 (8種)</label>
