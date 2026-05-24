@@ -225,6 +225,7 @@ const [partialFontSize, setPartialFontSize] = useState<number>(14);
 // ▼ ここから追加 ▼
 const [sizeSource, setSizeSource] = useState<{width: number, height: number} | null>(null);
 // ▲ ここまで追加 ▲
+const [alignSource, setAlignSource] = useState<{ id: string, x: number, y: number, width: number, height: number } | null>(null);
 const [selectedCells, setSelectedCells] = useState<Record<string, string[]>>({});
 const [tableBorderWidth, setTableBorderWidth] = useState('1px');
 const [tableBorderStyle, setTableBorderStyle] = useState('solid');
@@ -330,7 +331,50 @@ const handleApplySize = useCallback(() => {
     }));
     setSizeSource(null);
 }, [sizeSource, takeSnapshot, setNodes]);
+// ▼ ここから追加 ▼
+const handleSetAlignSource = useCallback(() => {
+    if (!primaryNode) return;
+    setAlignSource({
+        id: primaryNode.id,
+        x: primaryNode.position.x,
+        y: primaryNode.position.y,
+        width: primaryNode.measured?.width || Number(primaryNode.style?.width) || 200,
+        height: primaryNode.measured?.height || Number(primaryNode.style?.height) || 100
+    });
+}, [primaryNode]);
 
+const handleApplyAlign = useCallback((direction: 'left' | 'right' | 'top' | 'bottom') => {
+    if (!alignSource) return;
+    takeSnapshot();
+
+    setNodes(nds => nds.map(n => {
+        // 選択されていない図形、または基準にした図形自身はスキップ
+        if (!n.selected || n.id === alignSource.id) return n;
+
+        const tW = n.measured?.width || Number(n.style?.width) || 200;
+        const tH = n.measured?.height || Number(n.style?.height) || 100;
+        
+        let newX = n.position.x;
+        let newY = n.position.y;
+
+        // 指定された辺に合わせて座標を計算（もう片方の軸は絶対に動かさない）
+        if (direction === 'left') {
+            newX = alignSource.x;
+        } else if (direction === 'right') {
+            newX = (alignSource.x + alignSource.width) - tW;
+        } else if (direction === 'top') {
+            newY = alignSource.y;
+        } else if (direction === 'bottom') {
+            newY = (alignSource.y + alignSource.height) - tH;
+        }
+
+        return {
+            ...n,
+            position: { x: newX, y: newY }
+        };
+    }));
+}, [alignSource, takeSnapshot, setNodes]);
+// ▲ ここまで追加 ▲
 
 const selectCellsBox = useCallback((nodeId: string, r1: number, c1: number, r2: number, c2: number, append: boolean) => {
 const minR = Math.min(r1, r2); const maxR = Math.max(r1, r2);
@@ -1647,7 +1691,31 @@ onNodeDrag={onNodeDrag} onNodeDragStop={onNodeDragStop} fitView
     )}
 </div>
 {/* ▲ ここまで追加 ▲ */}
-
+{/* ▼ ここから追加：整列ツール ▼ */}
+<div style={{ padding: '10px', background: '#fff7ed', borderRadius: '8px', marginBottom: '15px', border: '1px solid #fed7aa' }}>
+    <label style={{fontSize: '11px', fontWeight: 'bold', color: '#c2410c', marginBottom: '8px', display: 'block'}}>📐 辺を揃える（整列）</label>
+    {!alignSource ? (
+        <button onClick={handleSetAlignSource} style={{ width: '100%', padding: '8px', fontSize: '11px', background: '#fff', color: '#c2410c', border: '1px solid #fed7aa', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}>
+            基準にする図形を登録
+        </button>
+    ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
+            <p style={{fontSize: '9px', color: '#ea580c', margin: '0 0 5px 0', lineHeight: 1.2}}>
+                合わせたい図形を選択し、<br/>揃える方向をクリックしてください。
+            </p>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '5px' }}>
+                <button onClick={() => handleApplyAlign('top')} style={{ padding: '6px', fontSize: '11px', background: '#fdba74', color: '#78350f', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}>上辺に合わせる</button>
+                <button onClick={() => handleApplyAlign('bottom')} style={{ padding: '6px', fontSize: '11px', background: '#fdba74', color: '#78350f', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}>下辺に合わせる</button>
+                <button onClick={() => handleApplyAlign('left')} style={{ padding: '6px', fontSize: '11px', background: '#fdba74', color: '#78350f', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}>左辺に合わせる</button>
+                <button onClick={() => handleApplyAlign('right')} style={{ padding: '6px', fontSize: '11px', background: '#fdba74', color: '#78350f', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}>右辺に合わせる</button>
+            </div>
+            <button onClick={() => setAlignSource(null)} style={{ marginTop: '5px', padding: '6px', fontSize: '10px', background: '#f1f5f9', color: '#64748b', border: '1px solid #cbd5e1', borderRadius: '4px', cursor: 'pointer' }}>
+                整列モードを解除
+            </button>
+        </div>
+    )}
+</div>
+{/* ▲ ここまで追加 ▲ */}
 
 <div style={{ display:'flex', gap:'5px', marginBottom:'15px' }}>
 <button onClick={() => { takeSnapshot(); setNodes((nds: any[]) => { const maxZ = Math.max(0, ...nds.map((n: any) => Number(n.zIndex) || 0)); return nds.map((n: any) => n.selected ? {...n, zIndex: maxZ + 1} : n); })}} style={{flex:1, padding:'6px', fontSize:'11px', fontWeight: 'bold', background: '#f0f0f0', border: '1px solid #ccc', cursor: 'pointer', borderRadius: '4px'}}>↑ 最前面へ</button>
