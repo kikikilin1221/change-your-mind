@@ -222,6 +222,9 @@ const [currentLabel, setCurrentLabel] = useState('TOP層');
 const [guides, setGuides] = useState<{ lineX?: number, lineY?: number }>({});
 
 const [partialFontSize, setPartialFontSize] = useState<number>(14);
+// ▼ ここから追加 ▼
+const [sizeSource, setSizeSource] = useState<{width: number, height: number} | null>(null);
+// ▲ ここまで追加 ▲
 const [selectedCells, setSelectedCells] = useState<Record<string, string[]>>({});
 const [tableBorderWidth, setTableBorderWidth] = useState('1px');
 const [tableBorderStyle, setTableBorderStyle] = useState('solid');
@@ -288,6 +291,24 @@ setFuture(f => f.slice(1));
 setNodes(safeCloneNodes(next.nodes));
 setEdges(safeCloneEdges(next.edges));
 }, [future]);
+const handleCopySize = useCallback(() => {
+    if (!primaryNode) return;
+    setSizeSource({ 
+        width: Number(primaryNode.style?.width) || 200, 
+        height: Number(primaryNode.style?.height) || 100 
+    });
+}, [primaryNode]);
+
+const handleApplySize = useCallback(() => {
+    if (!sizeSource) return;
+    takeSnapshot();
+    setNodes(nds => nds.map(n => 
+        n.selected 
+        ? { ...n, style: { ...n.style, width: sizeSource.width, height: sizeSource.height } } 
+        : n
+    ));
+    setSizeSource(null);
+}, [sizeSource, takeSnapshot, setNodes]);
 
 const selectCellsBox = useCallback((nodeId: string, r1: number, c1: number, r2: number, c2: number, append: boolean) => {
 const minR = Math.min(r1, r2); const maxR = Math.max(r1, r2);
@@ -1584,6 +1605,27 @@ onNodeDrag={onNodeDrag} onNodeDragStop={onNodeDragStop} fitView
 <h3 style={{fontSize:'14px', margin: 0}}>{selectedNodes.length > 1 ? `${selectedNodes.length}個の要素を一括編集` : primaryNode.data?.isTable ? '表の設定' : primaryNode.data?.isImage ? '画像編集' : primaryNode.data?.isShape ? '図形設定' : 'テキスト設定'}</h3>
 <button onClick={clearSelection} style={{ border: 'none', background: 'none', fontSize: '18px', cursor: 'pointer', padding: '0 5px' }}>×</button>
 </div>
+
+{/* ▼ ここから追加 ▼ */}
+<div style={{ padding: '10px', background: '#f0fdf4', borderRadius: '8px', marginBottom: '15px', border: '1px solid #bbf7d0' }}>
+    <label style={{fontSize: '11px', fontWeight: 'bold', color: '#166534', marginBottom: '8px', display: 'block'}}>📏 サイズコピー（書式）</label>
+    {!sizeSource ? (
+        <button onClick={handleCopySize} style={{ width: '100%', padding: '8px', fontSize: '11px', background: '#fff', color: '#166534', border: '1px solid #bbf7d0', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}>
+            現在のサイズをコピー
+        </button>
+    ) : (
+        <div style={{ display: 'flex', gap: '5px' }}>
+            <button onClick={handleApplySize} style={{ flex: 1, padding: '8px', fontSize: '11px', background: '#10b981', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}>
+                適用する ({Math.round(sizeSource.width)}×{Math.round(sizeSource.height)})
+            </button>
+            <button onClick={() => setSizeSource(null)} style={{ padding: '8px', fontSize: '11px', background: '#f1f5f9', color: '#64748b', border: '1px solid #cbd5e1', borderRadius: '4px', cursor: 'pointer' }}>
+                解除
+            </button>
+        </div>
+    )}
+</div>
+{/* ▲ ここまで追加 ▲ */}
+
 
 <div style={{ display:'flex', gap:'5px', marginBottom:'15px' }}>
 <button onClick={() => { takeSnapshot(); setNodes((nds: any[]) => { const maxZ = Math.max(0, ...nds.map((n: any) => Number(n.zIndex) || 0)); return nds.map((n: any) => n.selected ? {...n, zIndex: maxZ + 1} : n); })}} style={{flex:1, padding:'6px', fontSize:'11px', fontWeight: 'bold', background: '#f0f0f0', border: '1px solid #ccc', cursor: 'pointer', borderRadius: '4px'}}>↑ 最前面へ</button>
