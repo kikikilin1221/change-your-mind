@@ -293,22 +293,44 @@ setEdges(safeCloneEdges(next.edges));
 }, [future]);
 const handleCopySize = useCallback(() => {
     if (!primaryNode) return;
+    // 画面に表示されている「実際のサイズ」を正確に取得するよう強化
     setSizeSource({ 
-        width: Number(primaryNode.style?.width) || 200, 
-        height: Number(primaryNode.style?.height) || 100 
+        width: primaryNode.measured?.width || Number(primaryNode.style?.width) || 200, 
+        height: primaryNode.measured?.height || Number(primaryNode.style?.height) || 100 
     });
 }, [primaryNode]);
 
 const handleApplySize = useCallback(() => {
     if (!sizeSource) return;
     takeSnapshot();
-    setNodes(nds => nds.map(n => 
-        n.selected 
-        ? { ...n, style: { ...n.style, width: sizeSource.width, height: sizeSource.height } } 
-        : n
-    ));
+    
+    setNodes(nds => nds.map(n => {
+        if (!n.selected) return n;
+
+        // 画像ノードの場合は、中身の枠も同時に合わせる
+        const newData = { ...n.data };
+        if (newData.isImage) {
+            newData.cropBaseW = sizeSource.width;
+            newData.cropBaseH = sizeSource.height;
+        }
+
+        return {
+            ...n,
+            // ★追加：ReactFlowのシステム本体にサイズ変更を強制認識させる
+            width: sizeSource.width,
+            height: sizeSource.height,
+            measured: undefined, // ★魔法：古いサイズの記憶を消去して画面を強制更新
+            data: newData,
+            style: { 
+                ...n.style, 
+                width: sizeSource.width, 
+                height: sizeSource.height 
+            }
+        };
+    }));
     setSizeSource(null);
 }, [sizeSource, takeSnapshot, setNodes]);
+
 
 const selectCellsBox = useCallback((nodeId: string, r1: number, c1: number, r2: number, c2: number, append: boolean) => {
 const minR = Math.min(r1, r2); const maxR = Math.max(r1, r2);
