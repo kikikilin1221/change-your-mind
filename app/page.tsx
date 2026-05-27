@@ -659,37 +659,85 @@ label: newLabel
 }, [takeSnapshot]);
 
 const applyUnifiedFormat = (type: string, value: any = '') => {
-const activeEl = document.activeElement as HTMLElement;
-if (!activeEl || (!activeEl.isContentEditable && activeEl.tagName !== 'DIV')) { alert('文字を選択してから実行してください。'); return; }
-takeSnapshot();
-if (type === 'fontSize') {
-document.execCommand('fontSize', false, '7');
-const fonts = activeEl.querySelectorAll('font[size="7"], span');
-fonts.forEach((f) => {
-const element = f as HTMLElement;
-if (element.tagName === 'FONT' && element.getAttribute('size') === '7') { element.removeAttribute('size'); element.style.fontSize = value; element.style.lineHeight = '1.2'; } 
-else if (element.tagName === 'SPAN') { const size = element.style.fontSize; if (size === '48px' || size === 'xxx-large' || size === '-webkit-xxx-large') { element.style.fontSize = value; element.style.lineHeight = '1.2'; } }
-});
-} else { document.execCommand(type, false, value); }
+    const activeEl = document.activeElement as HTMLElement;
+    
+    // ★ 改善：編集モード（文字入力状態）でなければ完全に無視する（エラーも出さない）
+    if (!activeEl || activeEl.getAttribute('contentEditable') !== 'true') {
+        return;
+    }
 
-// ★ 改善：装飾が適用された瞬間に、即座にキャンバスのデータにも反映させる
-activeEl.dispatchEvent(new Event('input', { bubbles: true }));
+    takeSnapshot();
+    if (type === 'fontSize') {
+        // ブラウザ標準の機能で一旦ダミーのサイズ「7」を割り当て
+        document.execCommand('fontSize', false, '7');
+        
+        let applied = false;
+        // 1. 【文字が選択されている場合】付与された要素を探し出し、px指定に書き換える
+        const fonts = activeEl.querySelectorAll('font[size="7"], font[style*="xxx-large"], span[style*="xxx-large"]');
+        fonts.forEach((el) => {
+            const htmlEl = el as HTMLElement;
+            if (htmlEl.tagName === 'FONT') {
+                htmlEl.removeAttribute('size');
+            }
+            htmlEl.style.fontSize = value;
+            htmlEl.style.lineHeight = '1.2';
+            applied = true;
+        });
+
+        // 2. 【カーソルのみ（選択範囲なし）の場合】の強力なフォールバック
+        // カーソルが点滅しているだけの時は、ゼロ幅スペースを挿入してそこにサイズを適用し、その後の入力に引き継がせる
+        const sel = window.getSelection();
+        if (!applied && sel && sel.isCollapsed && sel.rangeCount > 0) {
+            const range = sel.getRangeAt(0);
+            const span = document.createElement('span');
+            span.style.fontSize = value;
+            span.style.lineHeight = '1.2';
+            span.innerHTML = '\u200B'; // ゼロ幅スペース（見えない文字）を挿入
+            range.insertNode(span);
+            
+            // カーソルを新しいサイズを持ったspanの直後にセット
+            range.setStart(span.firstChild!, 1);
+            range.setEnd(span.firstChild!, 1);
+            sel.removeAllRanges();
+            sel.addRange(range);
+        }
+    } else {
+        document.execCommand(type, false, value);
+    }
+
+    // キャンバスのデータに反映
+    activeEl.dispatchEvent(new Event('input', { bubbles: true }));
 };
 
 const handleResetFormat = () => {
-const activeEl = document.activeElement as HTMLElement;
-if (!activeEl || (!activeEl.isContentEditable && activeEl.tagName !== 'DIV')) { alert('文字を選択してから実行してください。'); return; }
-takeSnapshot();
-document.execCommand('removeFormat'); document.execCommand('fontSize', false, '7');
-const fonts = activeEl.querySelectorAll('font[size="7"], span');
-fonts.forEach((f) => {
-const element = f as HTMLElement;
-if (element.tagName === 'FONT' || element.tagName === 'SPAN') { element.removeAttribute('size'); element.style.fontSize = '14px'; element.style.color = '#000000'; element.style.fontWeight = 'normal'; element.style.textDecoration = 'none'; element.style.fontFamily = 'sans-serif'; element.style.lineHeight = '1.2'; }
-});
+    const activeEl = document.activeElement as HTMLElement;
+    
+    // 編集モードでなければ何もしない
+    if (!activeEl || activeEl.getAttribute('contentEditable') !== 'true') {
+        return;
+    }
+    
+    takeSnapshot();
+    document.execCommand('removeFormat'); 
+    document.execCommand('fontSize', false, '7');
+    
+    const fonts = activeEl.querySelectorAll('font[size="7"], span');
+    fonts.forEach((f) => {
+        const element = f as HTMLElement;
+        if (element.tagName === 'FONT' || element.tagName === 'SPAN') { 
+            element.removeAttribute('size'); 
+            element.style.fontSize = '14px'; // デフォルトの14pxに戻す
+            element.style.color = '#000000'; 
+            element.style.fontWeight = 'normal'; 
+            element.style.textDecoration = 'none'; 
+            element.style.fontFamily = 'sans-serif'; 
+            element.style.lineHeight = '1.2'; 
+        }
+    });
 
-// ★ 改善：リセットされた瞬間に、即座にキャンバスのデータにも反映させる
-activeEl.dispatchEvent(new Event('input', { bubbles: true }));
+    activeEl.dispatchEvent(new Event('input', { bubbles: true }));
 };
+
 
 const handleLayout = (hAlign?: string, vAlign?: string, wMode?: string) => {
 takeSnapshot();
