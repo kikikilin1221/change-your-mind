@@ -658,129 +658,115 @@ label: newLabel
 }));
 }, [takeSnapshot]);
 
-const applyUnifiedFormat = (type: string, value: any = '', delta: number = 0) => {
+const applyUnifiedFormat = (type: string, value: any = '') => {
+    const activeEl = document.activeElement as HTMLElement;
+    if (!activeEl || activeEl.getAttribute('contentEditable') !== 'true') return;
+    takeSnapshot();
+    if (type === 'fontSize') {
+        document.execCommand('fontSize', false, '7');
+        const fonts = activeEl.querySelectorAll('font[size="7"], span');
+        fonts.forEach((f) => {
+            const element = f as HTMLElement;
+            if (element.tagName === 'FONT' && element.getAttribute('size') === '7') { element.removeAttribute('size'); element.style.fontSize = value; element.style.lineHeight = '1.2'; } 
+            else if (element.tagName === 'SPAN') { const size = element.style.fontSize; if (size === '48px' || size === 'xxx-large' || size === '-webkit-xxx-large') { element.style.fontSize = value; element.style.lineHeight = '1.2'; } }
+        });
+    } else { document.execCommand(type, false, value); }
+    activeEl.dispatchEvent(new Event('input', { bubbles: true }));
+};
+
+const handleResetFormat = () => {
+    const activeEl = document.activeElement as HTMLElement;
+    if (!activeEl || activeEl.getAttribute('contentEditable') !== 'true') return;
+    takeSnapshot();
+    document.execCommand('removeFormat'); document.execCommand('fontSize', false, '7');
+    const fonts = activeEl.querySelectorAll('font[size="7"], span');
+    fonts.forEach((f) => {
+        const element = f as HTMLElement;
+        if (element.tagName === 'FONT' || element.tagName === 'SPAN') { element.removeAttribute('size'); element.style.fontSize = '14px'; element.style.color = '#000000'; element.style.fontWeight = 'normal'; element.style.textDecoration = 'none'; element.style.fontFamily = 'sans-serif'; element.style.lineHeight = '1.2'; }
+    });
+    activeEl.dispatchEvent(new Event('input', { bubbles: true }));
+};
+
+// ▼▼ 新規追加：文字サイズ変更の完全統括ロジック ▼▼
+const handleFontSizeChange = useCallback((newVal: number, oldVal: number, target: 'node' | 'edge') => {
     const activeEl = document.activeElement as HTMLElement;
     const isEditing = activeEl && activeEl.getAttribute('contentEditable') === 'true';
-
-    // 編集モードでない場合、フォントサイズ以外の装飾（太字など）は無視する
-    if (!isEditing && type !== 'fontSize') return;
+    const delta = newVal - oldVal;
 
     takeSnapshot();
 
-    if (type === 'fontSize') {
-        if (!isEditing) {
-            // 【何も選択していない時】図形全体の文字を相対的にサイズ変更する
-            setNodes((nds: any[]) => nds.map(n => {
-                if (!n.selected || n.type === 'printZone' || n.id === 'center-mark' || n.data?.isTable) return n;
-
-                const adjustHtmlFontSize = (html: string, d: number) => {
-                    if (!html) return html;
-                    const tempDiv = document.createElement('div');
-                    tempDiv.innerHTML = html;
-
-                    // 直下のテキストノードを span で囲んで基準(14px)として扱う
-                    Array.from(tempDiv.childNodes).forEach(child => {
-                        if (child.nodeType === Node.TEXT_NODE && child.textContent?.trim()) {
-                            const span = document.createElement('span');
-                            span.style.fontSize = `${14 + d}px`;
-                            span.style.lineHeight = '1.2';
-                            span.textContent = child.textContent;
-                            tempDiv.replaceChild(span, child);
-                        }
-                    });
-
-                    // 内部の全要素のフォントサイズを相対的に再計算
-                    tempDiv.querySelectorAll('*').forEach(el => {
-                        const htmlEl = el as HTMLElement;
-                        let currentSize = 14; // 基準サイズ
-                        if (htmlEl.style.fontSize) {
-                            currentSize = parseFloat(htmlEl.style.fontSize);
-                            if (isNaN(currentSize)) currentSize = 14;
-                        }
-                        htmlEl.style.fontSize = `${currentSize + d}px`;
-                        htmlEl.style.lineHeight = '1.2';
-                    });
-                    return tempDiv.innerHTML;
-                };
-
-                return {
-                    ...n,
-                    data: { ...n.data, content: adjustHtmlFontSize(n.data.content, delta) }
-                };
-            }));
-            return;
-        }
-
-        // 【編集モード（入力状態）の場合】
+    if (isEditing) {
+        // 【文字入力・選択モード】 指定部分または次の文字に絶対値(newVal)を適用
         document.execCommand('fontSize', false, '7');
         let applied = false;
-        
-        // 1. 文字がドラッグ選択されている場合
         const fonts = activeEl.querySelectorAll('font[size="7"], font[style*="xxx-large"], span[style*="xxx-large"]');
         fonts.forEach((el) => {
             const htmlEl = el as HTMLElement;
-            if (htmlEl.tagName === 'FONT') {
-                htmlEl.removeAttribute('size');
-            }
-            htmlEl.style.fontSize = value;
+            if (htmlEl.tagName === 'FONT') htmlEl.removeAttribute('size');
+            htmlEl.style.fontSize = `${newVal}px`;
             htmlEl.style.lineHeight = '1.2';
             applied = true;
         });
 
-        // 2. カーソルのみ（選択範囲なし）の場合
         const sel = window.getSelection();
         if (!applied && sel && sel.isCollapsed && sel.rangeCount > 0) {
             const range = sel.getRangeAt(0);
             const span = document.createElement('span');
-            span.style.fontSize = value;
+            span.style.fontSize = `${newVal}px`;
             span.style.lineHeight = '1.2';
-            span.innerHTML = '\u200B'; // ゼロ幅スペースを挿入して次の入力文字から適用
+            span.innerHTML = '\u200B'; // ゼロ幅スペース
             range.insertNode(span);
-            
-            // カーソルを新しいサイズを持ったspanの直後にセット
             range.setStart(span.firstChild!, 1);
             range.setEnd(span.firstChild!, 1);
             sel.removeAllRanges();
             sel.addRange(range);
         }
-    } else {
-        document.execCommand(type, false, value);
-    }
-
-    if (isEditing) {
         activeEl.dispatchEvent(new Event('input', { bubbles: true }));
-    }
-};
+    } else {
+        // 【非編集モード】 相対的なサイズアップ/ダウンを各文字に適用
+        const adjustHtmlFontSize = (html: string) => {
+            if (!html) return html;
+            const tempDiv = document.createElement('div');
+            tempDiv.innerHTML = html;
 
-const handleResetFormat = () => {
-    const activeEl = document.activeElement as HTMLElement;
-    
-    // 編集モードでなければ何もしない
-    if (!activeEl || activeEl.getAttribute('contentEditable') !== 'true') {
-        return;
-    }
-    
-    takeSnapshot();
-    document.execCommand('removeFormat'); 
-    document.execCommand('fontSize', false, '7');
-    
-    const fonts = activeEl.querySelectorAll('font[size="7"], span');
-    fonts.forEach((f) => {
-        const element = f as HTMLElement;
-        if (element.tagName === 'FONT' || element.tagName === 'SPAN') { 
-            element.removeAttribute('size'); 
-            element.style.fontSize = '14px'; // デフォルトの14pxに戻す
-            element.style.color = '#000000'; 
-            element.style.fontWeight = 'normal'; 
-            element.style.textDecoration = 'none'; 
-            element.style.fontFamily = 'sans-serif'; 
-            element.style.lineHeight = '1.2'; 
+            Array.from(tempDiv.childNodes).forEach(child => {
+                if (child.nodeType === Node.TEXT_NODE && child.textContent?.trim()) {
+                    const span = document.createElement('span');
+                    span.style.fontSize = `14px`; // 基準値
+                    span.style.lineHeight = '1.2';
+                    span.textContent = child.textContent;
+                    tempDiv.replaceChild(span, child);
+                }
+            });
+
+            tempDiv.querySelectorAll('*').forEach(el => {
+                const htmlEl = el as HTMLElement;
+                let currentSize = 14;
+                if (htmlEl.style.fontSize) {
+                    currentSize = parseFloat(htmlEl.style.fontSize);
+                    if (isNaN(currentSize)) currentSize = 14;
+                }
+                htmlEl.style.fontSize = `${Math.max(1, currentSize + delta)}px`;
+                htmlEl.style.lineHeight = '1.2';
+            });
+            return tempDiv.innerHTML;
+        };
+
+        if (target === 'node') {
+            setNodes(nds => nds.map(n => {
+                if (!n.selected || n.type === 'printZone' || n.id === 'center-mark' || n.data?.isTable) return n;
+                return { ...n, style: { ...n.style, fontSize: `${Math.max(1, (parseFloat(n.style?.fontSize) || 14) + delta)}px` }, data: { ...n.data, content: adjustHtmlFontSize(n.data.content) } };
+            }));
+        } else if (target === 'edge') {
+            setEdges(eds => eds.map(e => {
+                if (!e.selected) return e;
+                const newFontSize = Math.max(1, (e.data?.fontSize || 14) + delta);
+                return { ...e, data: { ...e.data, fontSize: newFontSize, labelStyle: { ...e.data?.labelStyle, fontSize: `${newFontSize}px` } }, label: adjustHtmlFontSize(e.label as string) };
+            }));
         }
-    });
-
-    activeEl.dispatchEvent(new Event('input', { bubbles: true }));
-};
-
+    }
+    if (target === 'node') setPartialFontSize(newVal);
+}, [takeSnapshot, setNodes, setEdges, setPartialFontSize]);
 
 const handleLayout = (hAlign?: string, vAlign?: string, wMode?: string) => {
 takeSnapshot();
@@ -1923,8 +1909,8 @@ el.innerHTML = currentVal;
 
 <label style={{fontSize:'10px', fontWeight: 'bold'}}>文字サイズ (px)</label>
 <div style={{display:'flex', alignItems:'center', gap:'8px', marginBottom: '15px'}}>
-<input type="range" min="10" max="100" value={partialFontSize} onMouseDown={(e) => e.preventDefault()} onChange={(e) => { const val = Number(e.target.value); const delta = val - partialFontSize; setPartialFontSize(val); applyUnifiedFormat('fontSize', `${val}px`, delta); }} style={{flex:1}} />
-<input type="number" min="10" max="100" value={partialFontSize} onMouseDown={(e) => e.preventDefault()} onChange={(e) => { const val = Number(e.target.value); const delta = val - partialFontSize; setPartialFontSize(val); applyUnifiedFormat('fontSize', `${val}px`, delta); }} style={{width:'40px', padding:'2px', fontSize:'11px', border:'1px solid #ccc', borderRadius:'4px'}} />
+<input type="range" min="10" max="100" value={partialFontSize} onMouseDown={(e) => e.preventDefault()} onChange={(e) => handleFontSizeChange(Number(e.target.value), partialFontSize, 'node')} style={{flex:1}} />
+<input type="number" min="10" max="100" value={partialFontSize} onMouseDown={(e) => e.preventDefault()} onChange={(e) => handleFontSizeChange(Number(e.target.value), partialFontSize, 'node')} style={{width:'40px', padding:'2px', fontSize:'11px', border:'1px solid #ccc', borderRadius:'4px'}} />
 <button onMouseDown={(e) => e.preventDefault()} onClick={handleResetFormat} style={{fontSize:'10px', padding:'4px 6px', border:'1px solid #ccc', borderRadius:'4px', cursor:'pointer', background:'#fff', fontWeight:'bold'}}>標準へ</button>
 </div>
 </div>
@@ -2107,8 +2093,8 @@ el.innerHTML = currentVal;
 
 <label style={{fontSize:'10px', fontWeight: 'bold'}}>線の文字サイズ (px)</label>
 <div style={{display:'flex', alignItems:'center', gap:'8px', marginTop: '5px'}}>
-<input type="range" min="10" max="50" value={Number(selectedEdge.data?.fontSize || 14)} onChange={(e) => updateEdgeDesign({ fontSize: Number(e.target.value) })} style={{flex:1}} />
-<input type="number" min="10" max="50" value={Number(selectedEdge.data?.fontSize || 14)} onChange={(e) => updateEdgeDesign({ fontSize: Number(e.target.value) })} style={{width:'40px', padding:'2px', fontSize:'11px', border:'1px solid #ccc', borderRadius:'4px'}} />
+<input type="range" min="10" max="50" value={Number(selectedEdge.data?.fontSize || 14)} onMouseDown={(e) => e.preventDefault()} onChange={(e) => handleFontSizeChange(Number(e.target.value), Number(selectedEdge.data?.fontSize || 14), 'edge')} style={{flex:1}} />
+<input type="number" min="10" max="50" value={Number(selectedEdge.data?.fontSize || 14)} onMouseDown={(e) => e.preventDefault()} onChange={(e) => handleFontSizeChange(Number(e.target.value), Number(selectedEdge.data?.fontSize || 14), 'edge')} style={{width:'40px', padding:'2px', fontSize:'11px', border:'1px solid #ccc', borderRadius:'4px'}} />
 </div>
 </div>
 
