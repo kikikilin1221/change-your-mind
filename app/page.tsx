@@ -660,82 +660,72 @@ const handleResetFormat = () => {
 };
 
 const handleFontSizeChange = useCallback((newVal: number, oldVal: number, target: 'node' | 'edge') => {
-    const activeEl = document.activeElement as HTMLElement;
-    const isEditing = activeEl && activeEl.getAttribute('contentEditable') === 'true';
-    const delta = newVal - oldVal;
-
     takeSnapshot();
+    const delta = newVal - oldVal;
+    
+    // 現在の選択範囲を取得
+    const sel = window.getSelection();
+    // 文字がハイライト選択されているかチェック
+    const isTextSelected = sel && sel.rangeCount > 0 && !sel.isCollapsed;
 
-    if (isEditing) {
+    if (isTextSelected) {
+        // 【1. 文字が選択されている時】選択範囲だけを絶対値で変更
         document.execCommand('fontSize', false, '7');
-        let applied = false;
-        const fonts = activeEl.querySelectorAll('font[size="7"], font[style*="xxx-large"], span[style*="xxx-large"]');
+        const fonts = document.querySelectorAll('font[size="7"], font[style*="size"], span[style*="size"]');
         fonts.forEach((el) => {
             const htmlEl = el as HTMLElement;
             if (htmlEl.tagName === 'FONT') htmlEl.removeAttribute('size');
             htmlEl.style.fontSize = `${newVal}px`;
             htmlEl.style.lineHeight = '1.2';
-            applied = true;
         });
+        const activeEl = document.activeElement as HTMLElement;
+        if (activeEl) activeEl.dispatchEvent(new Event('input', { bubbles: true }));
 
-        const sel = window.getSelection();
-        if (!applied && sel && sel.isCollapsed && sel.rangeCount > 0) {
-            const range = sel.getRangeAt(0);
+    } else {
+        // 【2. 文字が選択されていない時（カーソルのみ、または全体適用）】
+        // 既存の「相対的なサイズ変更」ロジックを実行
+        const activeEl = document.activeElement as HTMLElement;
+        const isEditing = activeEl && activeEl.getAttribute('contentEditable') === 'true';
+
+        if (isEditing) {
+            // カーソルのみの場合は、見えない文字を挿入してそこからのサイズを固定
+            const range = sel!.getRangeAt(0);
             const span = document.createElement('span');
             span.style.fontSize = `${newVal}px`;
             span.style.lineHeight = '1.2';
-            span.innerHTML = '\u200B'; 
+            span.innerHTML = '\u200B';
             range.insertNode(span);
-            range.setStart(span.firstChild!, 1);
-            range.setEnd(span.firstChild!, 1);
-            sel.removeAllRanges();
-            sel.addRange(range);
-        }
-        activeEl.dispatchEvent(new Event('input', { bubbles: true }));
-    } else {
-        const adjustHtmlFontSize = (html: string) => {
-            if (!html) return html;
-            const tempDiv = document.createElement('div');
-            tempDiv.innerHTML = html;
+            activeEl.dispatchEvent(new Event('input', { bubbles: true }));
+        } else {
+            // 全体適用（非編集モード）
+            const adjustHtmlFontSize = (html: string) => {
+                const tempDiv = document.createElement('div');
+                tempDiv.innerHTML = html;
+                tempDiv.querySelectorAll('*').forEach(el => {
+                    const htmlEl = el as HTMLElement;
+                    const currentSize = parseFloat(htmlEl.style.fontSize) || 14;
+                    htmlEl.style.fontSize = `${Math.max(1, currentSize + delta)}px`;
+                });
+                return tempDiv.innerHTML;
+            };
 
-            Array.from(tempDiv.childNodes).forEach(child => {
-                if (child.nodeType === Node.TEXT_NODE && child.textContent?.trim()) {
-                    const span = document.createElement('span');
-                    span.style.fontSize = `14px`; 
-                    span.style.lineHeight = '1.2';
-                    span.textContent = child.textContent;
-                    tempDiv.replaceChild(span, child);
-                }
-            });
-
-            tempDiv.querySelectorAll('*').forEach(el => {
-                const htmlEl = el as HTMLElement;
-                let currentSize = 14;
-                if (htmlEl.style.fontSize) {
-                    currentSize = parseFloat(htmlEl.style.fontSize);
-                    if (isNaN(currentSize)) currentSize = 14;
-                }
-                htmlEl.style.fontSize = `${Math.max(1, currentSize + delta)}px`;
-                htmlEl.style.lineHeight = '1.2';
-            });
-            return tempDiv.innerHTML;
-        };
-
-        if (target === 'node') {
-            setNodes(nds => nds.map(n => {
-                if (!n.selected || n.type === 'printZone' || n.id === 'center-mark' || n.data?.isTable) return n;
-                return { ...n, style: { ...n.style, fontSize: `${Math.max(1, (parseFloat(n.style?.fontSize) || 14) + delta)}px` }, data: { ...n.data, content: adjustHtmlFontSize(n.data.content) } };
-            }));
-        } else if (target === 'edge') {
-            setEdges(eds => eds.map(e => {
-                if (!e.selected) return e;
-                const newFontSize = Math.max(1, (e.data?.fontSize || 14) + delta);
-                return { ...e, data: { ...e.data, fontSize: newFontSize, labelStyle: { ...e.data?.labelStyle, fontSize: `${newFontSize}px` } }, label: adjustHtmlFontSize(e.label as string) };
-            }));
+            if (target === 'node') {
+                setNodes(nds => nds.map(n => {
+                    if (!n.selected || n.type === 'printZone' || n.id === 'center-mark' || n.data?.isTable) return n;
+                    return { ...n, style: { ...n.style, fontSize: `${Math.max(1, (parseFloat(n.style?.fontSize) || 14) + delta)}px` }, data: { ...n.data, content: adjustHtmlFontSize(n.data.content) } };
+                }));
+                setPartialFontSize(newVal);
+            } else {
+                setEdges(eds => eds.map(e => {
+                    if (!e.selected) return e;
+                    const next = Math.max(1, (e.data?.fontSize || 14) + delta);
+                    return { ...e, data: { ...e.data, fontSize: next, labelStyle: { ...e.data?.labelStyle, fontSize: `${next}px` } }, label: adjustHtmlFontSize(e.label as string) };
+                }));
+            }
         }
     }
-    if (target === 'node') setPartialFontSize(newVal);
 }, [takeSnapshot, setNodes, setEdges, setPartialFontSize]);
+
 
 
 const handleLayout = (hAlign?: string, vAlign?: string, wMode?: string) => {
