@@ -195,33 +195,58 @@ const { setViewport, getZoom } = useReactFlow();
 const fileInputRef = useRef<HTMLInputElement>(null);
 const jsonImportRef = useRef<HTMLInputElement>(null);
 
-const SelectionFontSizeBar = () => {
-    const applySize = (val: number) => {
-        const activeEl = document.activeElement as HTMLElement;
-        if (!activeEl || activeEl.getAttribute('contentEditable') !== 'true') return;
+const SimpleFontSizeSlider = () => {
+    // 選択範囲を一時保存する（フォーカスがサイドバーに移動しても保持するため）
+    const rangeRef = useRef<Range | null>(null);
+
+    const updateRange = () => {
+        const sel = window.getSelection();
+        if (sel && sel.rangeCount > 0 && !sel.isCollapsed) {
+            rangeRef.current = sel.getRangeAt(0);
+        }
+    };
+
+    const changeSize = (size: number) => {
+        if (!rangeRef.current) return;
         
-        // 選択範囲を維持したままサイズ変更を適用
+        // 保持した選択範囲を復元
+        const sel = window.getSelection();
+        sel?.removeAllRanges();
+        sel?.addRange(rangeRef.current);
+
+        // ブラウザ標準のサイズ変更を実行
         document.execCommand('fontSize', false, '7');
-        const elements = activeEl.querySelectorAll('font[size="7"], font[style], span[style]');
+        const elements = document.querySelectorAll('font[size="7"], span');
         elements.forEach(el => {
             const h = el as HTMLElement;
             if (h.tagName === 'FONT') h.removeAttribute('size');
-            h.style.fontSize = `${val}px`;
+            h.style.fontSize = `${size}px`;
             h.style.lineHeight = '1.2';
         });
-        activeEl.dispatchEvent(new Event('input', { bubbles: true }));
+        
+        // 変更を通知
+        const activeEl = document.activeElement as HTMLElement;
+        if (activeEl) activeEl.dispatchEvent(new Event('input', { bubbles: true }));
     };
 
     return (
-        <div style={{ marginTop: '10px', padding: '10px', background: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
-            <label style={{ fontSize: '10px', fontWeight: 'bold', color: '#475569', marginBottom: '5px', display: 'block' }}>
-                選択文字の拡大縮小 (px)
+        <div 
+            onMouseDown={updateRange} // バーを触る直前に選択範囲を記録
+            style={{ padding: '10px', background: '#fef3c7', borderRadius: '8px', border: '1px solid #f59e0b', marginBottom: '10px' }}
+        >
+            <label style={{ fontSize: '10px', fontWeight: 'bold', color: '#92400e' }}>
+                選択文字のサイズ (px):
             </label>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <div style={{ display: 'flex', gap: '5px', marginTop: '5px' }}>
                 <input 
                     type="range" min="10" max="100" defaultValue="14"
-                    onChange={(e) => applySize(Number(e.target.value))}
+                    onChange={(e) => changeSize(Number(e.target.value))}
                     style={{ flex: 1 }}
+                />
+                <input 
+                    type="number" min="10" max="100" defaultValue="14"
+                    onChange={(e) => changeSize(Number(e.target.value))}
+                    style={{ width: '40px', fontSize: '12px' }}
                 />
             </div>
         </div>
@@ -1701,10 +1726,11 @@ onNodeDrag={onNodeDrag} onNodeDragStop={onNodeDragStop} fitView
 <button onClick={clearSelection} style={{ border: 'none', background: 'none', fontSize: '18px', cursor: 'pointer', padding: '0 5px' }}>×</button>
 </div>
 
+{/* テキストを安全に編集のすぐ上に追加 */}
+<SimpleFontSizeSlider />
+
 <div style={{ padding: '10px', background: '#f0fdf4', borderRadius: '8px', marginBottom: '15px', border: '1px solid #bbf7d0' }}>
     <label style={{fontSize: '11px', fontWeight: 'bold', color: '#166534', marginBottom: '8px', display: 'block'}}>📏 サイズコピー（書式）</label>
-    {/* ★ここに追加！ */}
-    <SelectionFontSizeBar />
     {!sizeSource ? (
         <button onClick={handleCopySize} style={{ width: '100%', padding: '8px', fontSize: '11px', background: '#fff', color: '#166534', border: '1px solid #bbf7d0', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}>
             現在のサイズをコピー
@@ -1752,9 +1778,9 @@ onNodeDrag={onNodeDrag} onNodeDragStop={onNodeDragStop} fitView
 
 {primaryNode.data?.isTable && (
 <div style={{ padding: '10px', background: '#f8f9fa', borderRadius: '8px', marginBottom: '15px', border: '1px solid #ddd' }}>
+    {/* テキストを安全に編集のすぐ上に追加 */}
+<SimpleFontSizeSlider />
 <label style={{fontSize: '11px', fontWeight: 'bold'}}>表の構成</label>
-{/* ★ここに追加！ */}
-    <SelectionFontSizeBar />
 <div style={{ display: 'flex', gap: '5px', marginTop: '5px', marginBottom: '15px' }}>
 <button onClick={() => addTableRowCol('row')} style={{ flex:1, padding: '4px', fontSize: '12px', cursor: 'pointer', borderRadius: '4px', border: '1px solid #ccc', background: '#fff' }}>行を追加</button>
 <button onClick={() => addTableRowCol('col')} style={{ flex:1, padding: '4px', fontSize: '12px', cursor: 'pointer', borderRadius: '4px', border: '1px solid #ccc', background: '#fff' }}>列を追加</button>
@@ -1778,14 +1804,14 @@ onNodeDrag={onNodeDrag} onNodeDragStop={onNodeDragStop} fitView
 
 {primaryNode.data?.isImage && selectedNodes.length === 1 && (
 <div style={{ marginBottom: '20px', padding: '10px', border: '1px solid #eee', borderRadius: '8px' }}>
+    {/* テキストを安全に編集のすぐ上に追加 */}
+<SimpleFontSizeSlider />
 <button onClick={() => { takeSnapshot(); const w = Number(primaryNode.style?.width) || 300; const h = Number(primaryNode.style?.height) || 200; if (!primaryNode.data?.isCropping) updateSelectedNodes({ isCropping: true, cropBaseW: w, cropBaseH: h, cropOffsetX: 0, cropOffsetY: 0 }); else updateSelectedNodes({ isCropping: false }); }} style={{ width: '100%', padding: '8px', fontSize: '12px', background: primaryNode.data?.isCropping ? '#ef4444' : '#fff', color: primaryNode.data?.isCropping ? '#fff' : '#333', border: primaryNode.data?.isCropping ? 'none' : '1px solid #ccc', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', transition: 'all 0.2s', marginBottom: '15px' }}>
 {primaryNode.data?.isCropping ? '✅ トリミング完了' : '✂️ トリミング'}
 </button>
 {primaryNode.data?.isCropping ? ( <div style={{ padding: '10px', backgroundColor: '#fef2f2', borderRadius: '6px', marginBottom: '10px', border: '1px dashed #fca5a5' }}><p style={{fontSize: '10px', color: '#b91c1c', margin: 0}}><strong>トリミングモード中</strong><br/>・画像の周囲の<span style={{color:'red'}}>赤い枠</span>を動かして切り取れます。<br/>・画像を直接ドラッグして位置を調整できます。</p></div> ) : (
 <>
 <label style={{fontSize: '10px', fontWeight: 'bold'}}>微調整 (X / Y位置)</label>
-{/* ★ここに追加！ */}
-    <SelectionFontSizeBar />
 <input type="range" min="-600" max="600" value={Number(primaryNode.data?.imgPosX || 0)} onChange={(e) => updateSelectedNodes({ imgPosX: parseInt(e.target.value) })} style={{width:'100%', marginBottom: '5px'}} />
 <input type="range" min="-600" max="600" value={Number(primaryNode.data?.imgPosY || 0)} onChange={(e) => updateSelectedNodes({ imgPosY: parseInt(e.target.value) })} style={{width:'100%', marginBottom: '10px'}} />
 </>
