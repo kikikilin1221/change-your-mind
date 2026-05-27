@@ -8,7 +8,6 @@ import '@xyflow/react/dist/style.css';
 import katex from 'katex';
 import 'katex/dist/katex.min.css';
 
-// ★ 完全修復：Next.jsよりも早くResizeObserverのエラーを捕まえて完全に握り潰す最強の盾
 if (typeof window !== 'undefined') {
     const originalError = console.error;
     console.error = (...args) => {
@@ -38,7 +37,6 @@ const GLOBAL_CSS = `
      .react-flow__node { box-shadow: none !important; }
  }
 
- /* ★ ReactFlowデフォルトの不要な枠線を完全破壊 */
  .react-flow__node, .react-flow__node-default, .react-flow__node-custom {
      border: none !important;
      box-shadow: none !important;
@@ -50,21 +48,17 @@ const GLOBAL_CSS = `
 
  .react-flow__handle { background: transparent !important; border: none !important; width: 1px !important; height: 1px !important; min-width: 0 !important; min-height: 0 !important; box-shadow: none !important; }
  
- /* ★ 改善：普通の線が繋がる距離を枠線ギリギリに設定するため、実体を0pxにし、当たり判定を24pxにする */
  .custom-handle, .custom-handle-target { width: 0px !important; height: 0px !important; background: transparent !important; border: none !important; z-index: 10 !important; cursor: crosshair !important; pointer-events: auto !important; display: flex; justify-content: center; align-items: center; position: absolute; }
  .custom-handle::after, .custom-handle-target::after { content: ""; display: block; position: absolute; width: 24px; height: 24px; background: transparent; }
  
- /* ★ 改善：黒い点は絶対に出さず、ホバー時のみ「青い丸」を表示する */
  .custom-handle::before, .custom-handle-target::before { content: ""; display: block; position: absolute; width: 0px; height: 0px; background: #3b82f6; border-radius: 50%; transition: all 0.2s cubic-bezier(0.34, 1.56, 0.64, 1); border: 2px solid #fff; opacity: 0; pointer-events: none; z-index: 1; }
  .custom-handle:hover::before, .custom-handle-target:hover::before { width: 14px; height: 14px; opacity: 1; box-shadow: 0 1px 3px rgba(0,0,0,0.2); }
  
- /* ★ ハンドル位置を枠線上にぴったり合わせる（0px） */
  .custom-handle-offset-top { top: 0px !important; }
  .custom-handle-offset-bottom { bottom: 0px !important; }
  .custom-handle-offset-left { left: 0px !important; }
  .custom-handle-offset-right { right: 0px !important; }
 
- /* ★ 論理ブロック専用の隠しハンドル（論理記号の距離や見た目は絶対に維持する） */
  .logical-handle { width: 0px !important; height: 0px !important; min-width: 0 !important; min-height: 0 !important; border: none !important; background: transparent !important; }
  .logical-handle-offset-top { top: -8px !important; }
  .logical-handle-offset-bottom { bottom: -8px !important; }
@@ -192,7 +186,7 @@ const safeCloneNodes = (nds: any[]) => nds.map(n => ({ ...n, data: { ...n.data }
 const safeCloneEdges = (eds: any[]) => eds.map(e => ({ ...e, data: { ...e.data }, style: { ...e.style }, zIndex: e.zIndex }));
 const edgeTypes = { default: DoubleEdge };
 const PASTEL_COLORS = ['#FFB7B2', '#FFDAC1', '#E2F0CB', '#B5EAD7', '#C7CEEA', '#F3E5F5', '#E1F5FE', '#FFF9C4', '#FCE4EC', '#E8F5E9'];
-const QUICK_TEXT_COLORS = ['#000000', '#ef4444', '#eab308', '#10b981', '#3b82f6']; // ★ 線の色用にも流用します
+const QUICK_TEXT_COLORS = ['#000000', '#ef4444', '#eab308', '#10b981', '#3b82f6']; 
 
 type TableActionType = { id: string; type: string; startX: number; startY: number; startR: number; startC: number; minC: number; maxC: number; minR: number; maxR: number; initWidths: number[]; initHeights: number[]; };
 
@@ -219,13 +213,12 @@ const [levelData, setLevelData] = useState<Record<string, { nodes: any[]; edges:
 const [historyLevel, setHistoryLevel] = useState<string[]>([]);
 const [currentLevel, setCurrentLevel] = useState('root');
 const [currentLabel, setCurrentLabel] = useState('TOP層');
-const [guides, setGuides] = useState<{ lineX?: number, lineY?: number }>({});
 
-const [partialFontSize, setPartialFontSize] = useState<number>(14);
-// ▼ ここから追加 ▼
+const [guides, setGuides] = useState<{ lineX?: number, lineY?: number }>({});
 const [sizeSource, setSizeSource] = useState<{width: number, height: number} | null>(null);
-// ▲ ここまで追加 ▲
 const [alignSource, setAlignSource] = useState<{ id: string, x: number, y: number, width: number, height: number } | null>(null);
+const [partialFontSize, setPartialFontSize] = useState<number>(14);
+
 const [selectedCells, setSelectedCells] = useState<Record<string, string[]>>({});
 const [tableBorderWidth, setTableBorderWidth] = useState('1px');
 const [tableBorderStyle, setTableBorderStyle] = useState('solid');
@@ -292,89 +285,6 @@ setFuture(f => f.slice(1));
 setNodes(safeCloneNodes(next.nodes));
 setEdges(safeCloneEdges(next.edges));
 }, [future]);
-const handleCopySize = useCallback(() => {
-    if (!primaryNode) return;
-    // 画面に表示されている「実際のサイズ」を正確に取得するよう強化
-    setSizeSource({ 
-        width: primaryNode.measured?.width || Number(primaryNode.style?.width) || 200, 
-        height: primaryNode.measured?.height || Number(primaryNode.style?.height) || 100 
-    });
-}, [primaryNode]);
-
-const handleApplySize = useCallback(() => {
-    if (!sizeSource) return;
-    takeSnapshot();
-    
-    setNodes(nds => nds.map(n => {
-        if (!n.selected) return n;
-
-        // 画像ノードの場合は、中身の枠も同時に合わせる
-        const newData = { ...n.data };
-        if (newData.isImage) {
-            newData.cropBaseW = sizeSource.width;
-            newData.cropBaseH = sizeSource.height;
-        }
-
-        return {
-            ...n,
-            // ★追加：ReactFlowのシステム本体にサイズ変更を強制認識させる
-            width: sizeSource.width,
-            height: sizeSource.height,
-            measured: undefined, // ★魔法：古いサイズの記憶を消去して画面を強制更新
-            data: newData,
-            style: { 
-                ...n.style, 
-                width: sizeSource.width, 
-                height: sizeSource.height 
-            }
-        };
-    }));
-    setSizeSource(null);
-}, [sizeSource, takeSnapshot, setNodes]);
-// ▼ ここから追加 ▼
-const handleSetAlignSource = useCallback(() => {
-    if (!primaryNode) return;
-    setAlignSource({
-        id: primaryNode.id,
-        x: primaryNode.position.x,
-        y: primaryNode.position.y,
-        width: primaryNode.measured?.width || Number(primaryNode.style?.width) || 200,
-        height: primaryNode.measured?.height || Number(primaryNode.style?.height) || 100
-    });
-}, [primaryNode]);
-
-const handleApplyAlign = useCallback((direction: 'left' | 'right' | 'top' | 'bottom') => {
-    if (!alignSource) return;
-    takeSnapshot();
-
-    setNodes(nds => nds.map(n => {
-        // 選択されていない図形、または基準にした図形自身はスキップ
-        if (!n.selected || n.id === alignSource.id) return n;
-
-        const tW = n.measured?.width || Number(n.style?.width) || 200;
-        const tH = n.measured?.height || Number(n.style?.height) || 100;
-        
-        let newX = n.position.x;
-        let newY = n.position.y;
-
-        // 指定された辺に合わせて座標を計算（もう片方の軸は絶対に動かさない）
-        if (direction === 'left') {
-            newX = alignSource.x;
-        } else if (direction === 'right') {
-            newX = (alignSource.x + alignSource.width) - tW;
-        } else if (direction === 'top') {
-            newY = alignSource.y;
-        } else if (direction === 'bottom') {
-            newY = (alignSource.y + alignSource.height) - tH;
-        }
-
-        return {
-            ...n,
-            position: { x: newX, y: newY }
-        };
-    }));
-}, [alignSource, takeSnapshot, setNodes]);
-// ▲ ここまで追加 ▲
 
 const selectCellsBox = useCallback((nodeId: string, r1: number, c1: number, r2: number, c2: number, append: boolean) => {
 const minR = Math.min(r1, r2); const maxR = Math.max(r1, r2);
@@ -479,6 +389,69 @@ sourceHandle: 'logical-right-src', targetHandle: 'logical-left-tgt',
 }]);
 }, [primaryNode, takeSnapshot]);
 
+const handleCopySize = useCallback(() => {
+    if (!primaryNode) return;
+    setSizeSource({ 
+        width: primaryNode.measured?.width || Number(primaryNode.style?.width) || 200, 
+        height: primaryNode.measured?.height || Number(primaryNode.style?.height) || 100 
+    });
+}, [primaryNode]);
+
+const handleApplySize = useCallback(() => {
+    if (!sizeSource) return;
+    takeSnapshot();
+    
+    setNodes(nds => nds.map(n => {
+        if (!n.selected) return n;
+        const newData = { ...n.data };
+        if (newData.isImage) {
+            newData.cropBaseW = sizeSource.width;
+            newData.cropBaseH = sizeSource.height;
+        }
+        return {
+            ...n,
+            width: sizeSource.width,
+            height: sizeSource.height,
+            measured: undefined,
+            data: newData,
+            style: { ...n.style, width: sizeSource.width, height: sizeSource.height }
+        };
+    }));
+    setSizeSource(null);
+}, [sizeSource, takeSnapshot, setNodes]);
+
+const handleSetAlignSource = useCallback(() => {
+    if (!primaryNode) return;
+    setAlignSource({
+        id: primaryNode.id,
+        x: primaryNode.position.x,
+        y: primaryNode.position.y,
+        width: primaryNode.measured?.width || Number(primaryNode.style?.width) || 200,
+        height: primaryNode.measured?.height || Number(primaryNode.style?.height) || 100
+    });
+}, [primaryNode]);
+
+const handleApplyAlign = useCallback((direction: 'left' | 'right' | 'top' | 'bottom') => {
+    if (!alignSource) return;
+    takeSnapshot();
+
+    setNodes(nds => nds.map(n => {
+        if (!n.selected || n.id === alignSource.id) return n;
+
+        const tW = n.measured?.width || Number(n.style?.width) || 200;
+        const tH = n.measured?.height || Number(n.style?.height) || 100;
+        
+        let newX = n.position.x;
+        let newY = n.position.y;
+
+        if (direction === 'left') { newX = alignSource.x; } 
+        else if (direction === 'right') { newX = (alignSource.x + alignSource.width) - tW; } 
+        else if (direction === 'top') { newY = alignSource.y; } 
+        else if (direction === 'bottom') { newY = (alignSource.y + alignSource.height) - tH; }
+
+        return { ...n, position: { x: newX, y: newY } };
+    }));
+}, [alignSource, takeSnapshot, setNodes]);
 
 useEffect(() => {
 if (primaryNode && !primaryNode.data?.isTable) {
@@ -628,7 +601,6 @@ newMarkerType = config.markerType || 'none';
 newHideLine = config.hideLine || false; 
 if(config.label !== undefined) newLabel = config.label; 
 
-// ★ 改善：二重矢印や論理記号の場合は、-8pxオフセットの「logical-」ハンドルに自動で切り替えて食い込みを完全に防ぐ
 const isLogical = newMarkerType === 'custom-double-arrow' || newMarkerType === 'custom-double-both' || newHideLine;
 if (isLogical) {
 if (newSourceHandle && !newSourceHandle.startsWith('logical-')) newSourceHandle = 'logical-' + newSourceHandle;
@@ -687,7 +659,6 @@ const handleResetFormat = () => {
     activeEl.dispatchEvent(new Event('input', { bubbles: true }));
 };
 
-// ▼▼ 新規追加：文字サイズ変更の完全統括ロジック ▼▼
 const handleFontSizeChange = useCallback((newVal: number, oldVal: number, target: 'node' | 'edge') => {
     const activeEl = document.activeElement as HTMLElement;
     const isEditing = activeEl && activeEl.getAttribute('contentEditable') === 'true';
@@ -696,7 +667,6 @@ const handleFontSizeChange = useCallback((newVal: number, oldVal: number, target
     takeSnapshot();
 
     if (isEditing) {
-        // 【文字入力・選択モード】 指定部分または次の文字に絶対値(newVal)を適用
         document.execCommand('fontSize', false, '7');
         let applied = false;
         const fonts = activeEl.querySelectorAll('font[size="7"], font[style*="xxx-large"], span[style*="xxx-large"]');
@@ -714,7 +684,7 @@ const handleFontSizeChange = useCallback((newVal: number, oldVal: number, target
             const span = document.createElement('span');
             span.style.fontSize = `${newVal}px`;
             span.style.lineHeight = '1.2';
-            span.innerHTML = '\u200B'; // ゼロ幅スペース
+            span.innerHTML = '\u200B'; 
             range.insertNode(span);
             range.setStart(span.firstChild!, 1);
             range.setEnd(span.firstChild!, 1);
@@ -723,7 +693,6 @@ const handleFontSizeChange = useCallback((newVal: number, oldVal: number, target
         }
         activeEl.dispatchEvent(new Event('input', { bubbles: true }));
     } else {
-        // 【非編集モード】 相対的なサイズアップ/ダウンを各文字に適用
         const adjustHtmlFontSize = (html: string) => {
             if (!html) return html;
             const tempDiv = document.createElement('div');
@@ -732,7 +701,7 @@ const handleFontSizeChange = useCallback((newVal: number, oldVal: number, target
             Array.from(tempDiv.childNodes).forEach(child => {
                 if (child.nodeType === Node.TEXT_NODE && child.textContent?.trim()) {
                     const span = document.createElement('span');
-                    span.style.fontSize = `14px`; // 基準値
+                    span.style.fontSize = `14px`; 
                     span.style.lineHeight = '1.2';
                     span.textContent = child.textContent;
                     tempDiv.replaceChild(span, child);
@@ -767,6 +736,7 @@ const handleFontSizeChange = useCallback((newVal: number, oldVal: number, target
     }
     if (target === 'node') setPartialFontSize(newVal);
 }, [takeSnapshot, setNodes, setEdges, setPartialFontSize]);
+
 
 const handleLayout = (hAlign?: string, vAlign?: string, wMode?: string) => {
 takeSnapshot();
@@ -806,13 +776,11 @@ return { ...n, data: { ...n.data, cells: newCells } };
 };
 
 const handleCopy = useCallback(() => { 
-// 選択されているすべての図形（ノード）と線（エッジ）をコピー用の参照に保存
 const selectedN = nodesRef.current.filter(n => n.selected); 
 const selectedE = edgesRef.current.filter(e => e.selected);
 
 if (selectedN.length > 0) {
 copiedNodesRef.current = safeCloneNodes(selectedN);
-// 線（エッジ）も複製時に追従させるため退避
 (window as any)._copiedEdges = safeCloneEdges(selectedE);
 } 
 }, []);
@@ -821,7 +789,6 @@ const handlePaste = useCallback(() => {
 if (copiedNodesRef.current && copiedNodesRef.current.length > 0) {
 takeSnapshot();
 
-// 1. 古いノードIDと新しいノードIDの対応マップを作成
 const idMap = new Map<string, string>();
 
 const newNodes = copiedNodesRef.current.map(original => { 
@@ -837,16 +804,13 @@ zIndex: Math.max(0, ...nodesRef.current.map(n => Number(n.zIndex) || 0)) + 1
 }; 
 });
 
-// 2. コピーされた線（エッジ）の中から「コピーされた図形同士を結ぶ線」だけを抽出して複製
 const savedEdges = (window as any)._copiedEdges || [];
 const newEdges: any[] = [];
 
 savedEdges.forEach((originalEdge: any) => {
-// 線の出発点と到達点の両方が、今回コピーされた図形の中に存在する場合のみ複製
 if (idMap.has(originalEdge.source) && idMap.has(originalEdge.target)) {
 const newEdgeId = `edge-${Date.now()}-${Math.random()}`;
 
-// 元のハンドル設定を維持しつつ、新しいIDへマッピング
 let newSrcHandle = originalEdge.sourceHandle;
 let newTgtHandle = originalEdge.targetHandle;
 
@@ -857,13 +821,12 @@ source: idMap.get(originalEdge.source)!,
 target: idMap.get(originalEdge.target)!,
 sourceHandle: newSrcHandle,
 targetHandle: newTgtHandle,
-selected: true, // ペースト直後は線も選択状態にする
+selected: true, 
 zIndex: originalEdge.zIndex || 0
 });
 }
 });
 
-// 既存の選択状態を解除し、新しいノードとエッジを適用
 setNodes((nds: any[]) => [...nds.map((n: any) => ({...n, selected: false})), ...newNodes]);
 setEdges((eds: any[]) => [...eds.map((e: any) => ({...e, selected: false})), ...newEdges]);
 }
@@ -956,7 +919,6 @@ if (!targetNode) return;
 
 let siblingNodes = [];
 
-// 兄弟ノード（同じ階層の行）を取得
 if (targetNode.data?.isDerivationBlock) {
 const parentId = targetNode.data.parentNodeId;
 siblingNodes = nodesRef.current.filter((n:any) => n.data?.isDerivationBlock && n.data?.parentNodeId === parentId && !n.data?.isTransparentHelper);
@@ -972,14 +934,12 @@ siblingNodes.sort((a, b) => a.position.y - b.position.y);
 const targetIndex = siblingNodes.findIndex(n => n.id === tId);
 if (targetIndex === -1) return;
 
-// 入れ替える相手のノードを特定
 let swapNode = null;
 if (direction === 'up' && targetIndex > 0) swapNode = siblingNodes[targetIndex - 1];
 else if (direction === 'down' && targetIndex < siblingNodes.length - 1) swapNode = siblingNodes[targetIndex + 1];
 
 if (!swapNode) return;
 
-// ★ 完璧なサブツリー取得関数：自身を親とする透明ヘルパー（子孫）は一緒に動かすが、自身を支えている根元のヘルパーは置いていく
 const getSubtree = (rootId: string) => {
 const ids = new Set<string>();
 const queue = [rootId];
@@ -1012,7 +972,6 @@ const dySwap = targetNode.position.y - swapNode.position.y;
 const edgeTarget = edgesRef.current.find((e:any) => e.target === targetNode.id);
 const edgeSwap = edgesRef.current.find((e:any) => e.target === swapNode.id);
 
-// ★ 魔法のロジック：線の「出発点（source）」だけを入れ替えることで、物理的なY座標と一致させ、斜めに曲がるのを完全に防ぐ
 setEdges((eds: any[]) => eds.map((e: any) => {
 if (edgeTarget && edgeSwap) {
 if (e.id === edgeTarget.id) return { ...e, source: edgeSwap.source };
@@ -1021,7 +980,6 @@ if (e.id === edgeSwap.id) return { ...e, source: edgeTarget.source };
 return e;
 }));
 
-// サブツリー全体のY座標を移動
 setNodes((nds: any[]) => nds.map((n: any) => {
 if (targetDesc.includes(n.id)) return { ...n, position: { ...n.position, y: n.position.y + dyTarget } };
 if (swapDesc.includes(n.id)) return { ...n, position: { ...n.position, y: n.position.y + dySwap } };
@@ -1030,7 +988,6 @@ return n;
 }, [selectedEdge, takeSnapshot]);
 
 
-// ★ このまま上書き
 const toggleSwapX = useCallback(() => {
 if (!selectedEdge) return;
 takeSnapshot();
@@ -1107,7 +1064,6 @@ return n;
 }));
 }, [selectedEdge, takeSnapshot]);
 
-// ★ このまま上書き
 const alignSelectedEdgeTarget = useCallback((direction: 'horizontal' | 'vertical') => {
 if (!selectedEdge) return;
 takeSnapshot();
@@ -1119,7 +1075,6 @@ sourceNode = nodesRef.current.find(n => n.id === sourceNode.data.parentNodeId);
 const targetNode = nodesRef.current.find(n => n.id === selectedEdge.target);
 if (!sourceNode || !targetNode) return;
 
-// ★ 改善：図形の「実際のレンダリングサイズ (measured)」を取得して、正確に中心を割り出す
 const sW = sourceNode.measured?.width || Number(sourceNode.style?.width) || 200;
 const sH = sourceNode.measured?.height || Number(sourceNode.style?.height) || 100;
 const tW = targetNode.measured?.width || Number(targetNode.style?.width) || 200;
@@ -1128,10 +1083,8 @@ const tH = targetNode.measured?.height || Number(targetNode.style?.height) || 10
 setNodes(nds => nds.map(n => {
 if (n.id === targetNode.id) {
 if (direction === 'horizontal') {
-// 高さが違っても中心(Y座標)をぴったり合わせる
 return { ...n, position: { ...n.position, y: sourceNode.position.y + (sH - tH) / 2 } };
 } else {
-// 幅が違っても中心(X座標)をぴったり合わせる
 return { ...n, position: { ...n.position, x: sourceNode.position.x + (sW - tW) / 2 } };
 }
 }
@@ -1178,7 +1131,6 @@ if (type === 'shape') { data = { content: '', isShape: true, shapeType: 'rect', 
 if (type === 'table') {
 data = { 
 isTable: true, rows: 2, cols: 2, textOffsetX: 0, textOffsetY: 0, editingCell: null, tableTitle: '',
-// ★ 改善：デフォルトの枠線を none に設定
 cells: { "0-0": { content: "セル", style: { border: 'none', hAlign: 'left', vAlign: 'top', writingMode: 'horizontal-tb' } }, "0-1": { content: "セル", style: { border: 'none', hAlign: 'left', vAlign: 'top', writingMode: 'horizontal-tb' } }, "1-0": { content: "セル", style: { border: 'none', hAlign: 'left', vAlign: 'top', writingMode: 'horizontal-tb' } }, "1-1": { content: "セル", style: { border: 'none', hAlign: 'left', vAlign: 'top', writingMode: 'horizontal-tb' } } } 
 };
 style = { ...style, width: 300, height: 150, padding: 0, backgroundColor: '#fff', display: 'block', borderRadius: '8px', borderColor: '#000000', borderWidth: 0 };
@@ -1299,7 +1251,6 @@ return [...nds.map((n: any) => ({...n, selected: false})), { id: `img-${Date.now
 }; reader.readAsDataURL(file);
 };
 
-// 1. 移動時の強力スナップ（あなたが提示してくれた完璧なコードです。そのまま使います！）
 const onNodeDrag = useCallback((_: any, node: any) => {
     const SNAP_THRESHOLD = 30;
     let lineX: number | undefined, lineY: number | undefined;
@@ -1315,9 +1266,8 @@ const onNodeDrag = useCallback((_: any, node: any) => {
         const tX = t.position.x;
         const tY = t.position.y;
 
-        // 【辺だけ】に反応するロジック（左・右・上・下）
-        const targetsX = [tX, tX + tW]; // 相手の左辺・右辺
-        const targetsY = [tY, tY + tH]; // 相手の上辺・下辺
+        const targetsX = [tX, tX + tW]; 
+        const targetsY = [tY, tY + tH]; 
 
         targetsX.forEach(tx => {
             if (Math.abs(tx - nX) < SNAP_THRESHOLD) { node.position.x = tx; lineX = tx; }
@@ -1332,7 +1282,6 @@ const onNodeDrag = useCallback((_: any, node: any) => {
 }, [nodesRef, setGuides]);
 
 
-// 2. 大きさ変更時の強力スナップ（これも重複しないように1つだけ置きます！）
 const onNodeResize = useCallback((id: string, params: any) => {
     const SNAP_THRESHOLD = 30;
     let { x, y, width, height, direction } = params;
@@ -1349,16 +1298,15 @@ const onNodeResize = useCallback((id: string, params: any) => {
         const tY = t.position.y;
         const tB = t.position.y + tH;
 
-        // 【辺だけ】に反応するリサイズロジック
-        if (dirX === 1) { // 右端を引く
+        if (dirX === 1) { 
             [tX, tR].forEach(target => { if (Math.abs(target - (x + width)) < SNAP_THRESHOLD) { width = target - x; lineX = target; } });
-        } else if (dirX === -1) { // 左端を引く
+        } else if (dirX === -1) { 
             [tX, tR].forEach(target => { if (Math.abs(target - x) < SNAP_THRESHOLD) { width = (x + width) - target; x = target; lineX = target; } });
         }
 
-        if (dirY === 1) { // 下端を引く
+        if (dirY === 1) { 
             [tY, tB].forEach(target => { if (Math.abs(target - (y + height)) < SNAP_THRESHOLD) { height = target - y; lineY = target; } });
-        } else if (dirY === -1) { // 上端を引く
+        } else if (dirY === -1) { 
             [tY, tB].forEach(target => { if (Math.abs(target - y) < SNAP_THRESHOLD) { height = (y + height) - target; y = target; lineY = target; } });
         }
     });
@@ -1367,9 +1315,6 @@ const onNodeResize = useCallback((id: string, params: any) => {
     setGuides({ lineX, lineY });
     setNodes(nds => nds.map(n => n.id === id ? { ...n, position: { x, y }, style: { ...n.style, width, height } } : n));
 }, [setNodes, setGuides]);
-
-
-  
 
 
 const onNodeResizeStop = useCallback(() => {
@@ -1561,25 +1506,15 @@ label: (
 
 {n.id !== 'center-mark' && (
 <>
-{/* ★ 通常の線が接続されるハンドル（枠線にぴったり接する 0px 設定） */}
-<Handle type="target" position={Position.Top} id="top-tgt" className="custom-handle-target custom-handle-offset-top" />
-<Handle type="target" position={Position.Bottom} id="bottom-tgt" className="custom-handle-target custom-handle-offset-bottom" />
 <Handle type="target" position={Position.Left} id="left-tgt" className="custom-handle-target custom-handle-offset-left" />
 <Handle type="target" position={Position.Right} id="right-tgt" className="custom-handle-target custom-handle-offset-right" />
 <Handle type="source" position={Position.Left} id="left-src" className="custom-handle custom-handle-offset-left" />
 <Handle type="source" position={Position.Right} id="right-src" className="custom-handle custom-handle-offset-right" />
-<Handle type="source" position={Position.Top} id="top-src" className="custom-handle custom-handle-offset-top" />
-<Handle type="source" position={Position.Bottom} id="bottom-src" className="custom-handle custom-handle-offset-bottom" />
 
-{/* ★ 論理ブロック専用の隠しハンドル（論理記号の距離や見た目を絶対に維持するため、8pxの隙間を確保） */}
-<Handle type="target" position={Position.Top} id="logical-top-tgt" className="logical-handle logical-handle-offset-top" />
-<Handle type="target" position={Position.Bottom} id="logical-bottom-tgt" className="logical-handle logical-handle-offset-bottom" />
 <Handle type="target" position={Position.Left} id="logical-left-tgt" className="logical-handle logical-handle-offset-left" />
 <Handle type="target" position={Position.Right} id="logical-right-tgt" className="logical-handle logical-handle-offset-right" />
 <Handle type="source" position={Position.Left} id="logical-left-src" className="logical-handle logical-handle-offset-left" />
 <Handle type="source" position={Position.Right} id="logical-right-src" className="logical-handle logical-handle-offset-right" />
-<Handle type="source" position={Position.Top} id="logical-top-src" className="logical-handle logical-handle-offset-top" />
-<Handle type="source" position={Position.Bottom} id="logical-bottom-src" className="logical-handle logical-handle-offset-bottom" />
 </>
 )}
 
@@ -1633,11 +1568,9 @@ else if (el.dataset.editing !== 'true') { el.dataset.editing = 'true'; el.innerH
     }} 
     onResize={(e, params) => { 
     if (n.data?.isImage && n.data?.isCropping) { 
-        // 画像トリミングの特殊処理
         const dx = params.x - n.data._rsX; const dy = params.y - n.data._rsY; 
         setNodes((nds: any[]) => nds.map((node: any) => node.id === n.id ? { ...node, data: { ...node.data, cropOffsetX: n.data._rsCropOffX - dx, cropOffsetY: n.data._rsCropOffY - dy } } : node)); 
     } else {
-        // ★ここをこう変えるだけで変わります！
         onNodeResize(n.id, params);
     }
 }}
@@ -1685,7 +1618,6 @@ return (
 <input type="file" ref={jsonImportRef} style={{ display: 'none' }} onChange={importData} accept=".json" />
 <input type="file" ref={fileInputRef} style={{ display: 'none' }} onChange={handleFileChange} accept="image/*" />
 
-{/* サイドバー */}
 <div className="no-print" style={{ width: isSidebarOpen ? '220px' : '0px', transition: 'width 0.3s ease', backgroundColor: '#f8f9fa', borderRight: isSidebarOpen ? '1px solid #ddd' : 'none', display: 'flex', flexDirection: 'column', overflow: 'hidden', zIndex: 10 }}>
 <div style={{ width: '220px', display: 'flex', flexDirection: 'column', height: '100%', padding: '15px' }}>
 <h2>ファイル一覧</h2>
@@ -1701,7 +1633,6 @@ return (
 </div>
 
 <div style={{ flexGrow: 1, display: 'flex', flexDirection: 'column', backgroundColor: levelData[currentLevel]?.bgColor || '#ffffff', transition: 'background-color 0.3s', position: 'relative', '--bg-color': levelData[currentLevel]?.bgColor || '#f1f1f1' } as React.CSSProperties}>
-{/* 上部バー */}
 {isTopBarOpen ? (
 <div className="no-print" style={{ padding: '8px 15px', backgroundColor: 'rgba(255,255,255,0.9)', borderBottom: '1px solid #eee', display: 'flex', alignItems: 'center', zIndex: 100, backdropFilter: 'blur(4px)' }}>
 <button onClick={() => setIsSidebarOpen(!isSidebarOpen)} style={{ background: 'none', border: 'none', fontSize: '20px', cursor: 'pointer', marginRight: '15px', padding: '0 5px' }}>☰</button>
@@ -1724,7 +1655,6 @@ return (
     selectionOnDrag={isLassoMode && selectedNodes.length !== 1} 
     selectionMode={SelectionMode.Partial}
     
-    // ★ ここを追加・変更
     minZoom={0.05} 
     maxZoom={4}
     
@@ -1741,7 +1671,6 @@ onNodeDrag={onNodeDrag} onNodeDragStop={onNodeDragStop} fitView
 <Background color="#f1f1f1" className="no-print" /><Controls className="no-print" /><SmartGuides guides={guides} />
 </ReactFlow>
 
-{/* ★ メニューパネルでのクリックがキャンバスに伝播しないように onMouseDown を追加 */}
 {selectedNodes.length > 0 && primaryNode && primaryNode.type !== 'printZone' && (
 <div className="no-print" onMouseDown={(e) => e.stopPropagation()} onClick={(e) => e.stopPropagation()} style={{ position:'absolute', right:0, top:0, bottom:0, width:'320px', borderLeft:'1px solid #ddd', padding:'15px', backgroundColor:'#fff', zIndex:1000, overflowY: 'auto', boxShadow: '-4px 0 10px rgba(0,0,0,0.05)' }}>
 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
@@ -1749,7 +1678,6 @@ onNodeDrag={onNodeDrag} onNodeDragStop={onNodeDragStop} fitView
 <button onClick={clearSelection} style={{ border: 'none', background: 'none', fontSize: '18px', cursor: 'pointer', padding: '0 5px' }}>×</button>
 </div>
 
-{/* ▼ ここから追加 ▼ */}
 <div style={{ padding: '10px', background: '#f0fdf4', borderRadius: '8px', marginBottom: '15px', border: '1px solid #bbf7d0' }}>
     <label style={{fontSize: '11px', fontWeight: 'bold', color: '#166534', marginBottom: '8px', display: 'block'}}>📏 サイズコピー（書式）</label>
     {!sizeSource ? (
@@ -1767,8 +1695,7 @@ onNodeDrag={onNodeDrag} onNodeDragStop={onNodeDragStop} fitView
         </div>
     )}
 </div>
-{/* ▲ ここまで追加 ▲ */}
-{/* ▼ ここから追加：整列ツール ▼ */}
+
 <div style={{ padding: '10px', background: '#fff7ed', borderRadius: '8px', marginBottom: '15px', border: '1px solid #fed7aa' }}>
     <label style={{fontSize: '11px', fontWeight: 'bold', color: '#c2410c', marginBottom: '8px', display: 'block'}}>📐 辺を揃える（整列）</label>
     {!alignSource ? (
@@ -1792,7 +1719,6 @@ onNodeDrag={onNodeDrag} onNodeDragStop={onNodeDragStop} fitView
         </div>
     )}
 </div>
-{/* ▲ ここまで追加 ▲ */}
 
 <div style={{ display:'flex', gap:'5px', marginBottom:'15px' }}>
 <button onClick={() => { takeSnapshot(); setNodes((nds: any[]) => { const maxZ = Math.max(0, ...nds.map((n: any) => Number(n.zIndex) || 0)); return nds.map((n: any) => n.selected ? {...n, zIndex: maxZ + 1} : n); })}} style={{flex:1, padding:'6px', fontSize:'11px', fontWeight: 'bold', background: '#f0f0f0', border: '1px solid #ccc', cursor: 'pointer', borderRadius: '4px'}}>↑ 最前面へ</button>
@@ -1849,7 +1775,6 @@ onNodeDrag={onNodeDrag} onNodeDragStop={onNodeDragStop} fitView
 </div>
 )}
 
-{/* ★ 新機能：キャンバス上でクリックしづらい時のための安全なテキスト編集エリア */}
 {(!primaryNode.data?.isTable || isTableEditing) && (
 <div style={{ padding: '10px', background: '#eef2ff', borderRadius: '8px', marginBottom: '15px', border: '1px solid #c7d2fe' }}>
 <label style={{fontSize: '11px', fontWeight: 'bold', color: '#3730a3'}}>📝 テキストを安全に編集</label>
@@ -1915,7 +1840,6 @@ el.innerHTML = currentVal;
 </div>
 </div>
 
-{/* ★ 論理ブロック（証明展開）追加ボタン */}
 {!primaryNode.data?.isShape && !primaryNode.data?.isImage && !primaryNode.data?.isTable && (
 <div style={{ padding: '10px', background: '#f8f9fa', borderRadius: '8px', marginBottom: '15px', border: '1px solid #ddd' }}>
 <label style={{fontSize: '11px', fontWeight: 'bold', color: '#1d4ed8'}}>論理ブロック追加（証明展開）</label>
@@ -2007,18 +1931,13 @@ setSelectedCells({});
 </div>
 )}
 
-{/* ★ メニュー操作時に選択が解除されないよう onMouseDown と onClick でイベント伝播を停止 */}
-{/* ★ メニュー操作時に選択が解除されないよう onMouseDown と onClick でイベント伝播を停止 */}
-{/* ★ メニュー操作時に選択が解除されないよう onMouseDown と onClick でイベント伝播を停止 */}
 {selectedEdge && (
 <div className="no-print" onMouseDown={(e) => e.stopPropagation()} onClick={(e) => e.stopPropagation()} style={{ position:'absolute', right: 0, top:0, bottom:0, width:'300px', borderLeft:'1px solid #ddd', padding:'20px', backgroundColor:'#fff', zIndex:1000, overflowY: 'auto', boxShadow: '-4px 0 10px rgba(0,0,0,0.05)' }}>
 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
 <h3 style={{fontSize:'14px', margin: 0}}>線のデザイン</h3>
-{/* ★ ×ボタンを押したときに「線（エッジ）の選択」だけを解除し、ノード選択は維持する */}
 <button onClick={(e) => { e.stopPropagation(); setEdges((eds: any[]) => eds.map((edge: any) => ({ ...edge, selected: false }))); }} style={{ border: 'none', background: 'none', fontSize: '18px', cursor: 'pointer', padding: '0 5px' }}>×</button>
 </div>
 
-{/* ★ 新機能：線とノードが両方選択されている場合、「線だけ」にするボタンを追加 */}
 {selectedNodes.length > 0 && (
 <button onClick={() => setNodes(nds => nds.map(n => ({...n, selected: false})))} style={{ width: '100%', padding: '8px', marginBottom: '15px', fontSize: '11px', fontWeight: 'bold', background: '#eff6ff', color: '#1d4ed8', border: '1px solid #bfdbfe', borderRadius: '4px', cursor: 'pointer', boxShadow: '0 2px 4px rgba(0,0,0,0.05)' }}>
 ✂️ 図形の選択を解除し「線」だけを残す
@@ -2030,17 +1949,14 @@ setSelectedCells({});
 <button onClick={() => { takeSnapshot(); setEdges((eds: any[]) => { const minZ = Math.min(0, ...eds.map((n: any) => Number(n.zIndex) || 0)); return eds.map((n: any) => n.selected ? {...n, zIndex: minZ - 1} : n); })}} style={{flex:1, padding:'6px', fontSize:'11px', fontWeight: 'bold', background: '#f0f0f0', border: '1px solid #ccc', cursor: 'pointer', borderRadius: '4px'}}>↓ 最背面へ</button>
 </div>
 
-{/* ★ 新機能：上下入替・左右入替・自動直線調整を追加 */}
 <div style={{ display:'flex', gap:'5px', marginBottom:'5px' }}>
 <button onClick={() => moveSubtreeY('up')} style={{flex:1, padding:'6px', fontSize:'11px', fontWeight: 'bold', background: '#e0e7ff', color: '#3730a3', border: '1px solid #c7d2fe', cursor: 'pointer', borderRadius: '4px'}}>🔺 上へ入替</button>
 <button onClick={() => moveSubtreeY('down')} style={{flex:1, padding:'6px', fontSize:'11px', fontWeight: 'bold', background: '#e0e7ff', color: '#3730a3', border: '1px solid #c7d2fe', cursor: 'pointer', borderRadius: '4px'}}>🔻 下へ入替</button>
 </div>
 
-{/* ▼▼▼ ここが新しくなります（1ボタンに統合） ▼▼▼ */}
 <div style={{ display:'flex', gap:'5px', marginBottom:'15px' }}>
 <button onClick={toggleSwapX} style={{flex:1, padding:'6px', fontSize:'11px', fontWeight: 'bold', background: '#e0e7ff', color: '#3730a3', border: '1px solid #c7d2fe', cursor: 'pointer', borderRadius: '4px'}}>🔄 左右のテキストを入替</button>
 </div>
-{/* ▲▲▲ ここまで ▲▲▲ */}
 
 <label style={{fontSize:'11px', fontWeight: 'bold'}}>直線の自動調整 (終点を移動)</label>
 <div style={{ display:'flex', gap:'5px', marginTop: '5px', marginBottom: '15px' }}>
@@ -2048,7 +1964,6 @@ setSelectedCells({});
 <button onClick={() => alignSelectedEdgeTarget('vertical')} style={{flex:1, padding:'6px', border: '1px solid #ccc', cursor: 'pointer', borderRadius: '4px', fontWeight: 'bold', fontSize: '11px', background: '#fff'}}>垂直(縦)に揃える</button>
 </div>
 
-{/* ★ 新機能：キャンバス上でクリックしづらい時のための安全なテキスト編集エリア（線用） */}
 <div style={{ padding: '10px', background: '#eef2ff', borderRadius: '8px', marginBottom: '15px', border: '1px solid #c7d2fe' }}>
 <label style={{fontSize: '11px', fontWeight: 'bold', color: '#3730a3'}}>📝 線のテキストを安全に編集</label>
 <p style={{fontSize: '9px', color: '#666', margin: '2px 0 5px 0'}}>※ここで文字を選択して、下の装飾ボタンを直接使えます！</p>
@@ -2079,7 +1994,6 @@ el.innerHTML = currentVal;
 <div style={{ display:'flex', gap:'5px', alignItems: 'center' }}>
 <button onMouseDown={(e) => e.preventDefault()} onClick={() => applyUnifiedFormat('bold')} style={{ cursor:'pointer', border:'1px solid #ccc', padding: '4px 8px', fontSize:'11px', borderRadius: '4px', background: '#fff' }}>太字</button>
 
-{/* ★ 線の文字色用の5色選抜クイックボタン */}
 {['#000000', '#ef4444', '#eab308', '#10b981', '#3b82f6'].map(c => (
   <button key={c} onMouseDown={(e) => e.preventDefault()} onClick={() => applyUnifiedFormat('foreColor', c)} style={{ width: '18px', height: '18px', backgroundColor: c, border: '1px solid #ddd', borderRadius: '3px', cursor: 'pointer' }} />
 ))}
@@ -2111,7 +2025,6 @@ el.innerHTML = currentVal;
 </div>
 
 <label style={{fontSize:'11px', fontWeight: 'bold'}}>線の色</label>
-{/* ★ 線の色用の5色デフォルトカラーボタン */}
 <div style={{ display: 'flex', gap: '5px', marginTop: '5px', marginBottom: '20px', alignItems: 'center' }}>
   {['#000000', '#ef4444', '#eab308', '#10b981', '#3b82f6'].map(c => (
     <button key={c} onClick={() => updateEdgeDesign({ color: c })} style={{ width: '24px', height: '24px', backgroundColor: c, border: '1px solid #ddd', borderRadius: '4px', cursor: 'pointer' }} />
@@ -2119,7 +2032,6 @@ el.innerHTML = currentVal;
   <input type="color" value={selectedEdge.data?.color || '#333333'} onChange={(e) => updateEdgeDesign({ color: e.target.value })} style={{flex: 1, height: '24px', border: 'none', cursor: 'pointer', padding: 0}} />
 </div>
 
-{/* ★ 新機能：種類を8種に変更し、論理記号のデザインを適用 */}
 <label style={{fontSize:'11px', fontWeight: 'bold'}}>種類 (8種)</label>
 <div style={{ display:'flex', flexDirection:'column', gap:'5px', marginTop: '5px' }}>
 {[
@@ -2140,7 +2052,6 @@ el.innerHTML = currentVal;
 )}
 </div>
 
-{/* 下部バー */}
 {isBottomBarOpen ? (
 <div className="no-print" style={{ padding: '8px 10px', backgroundColor: 'rgba(255,255,255,0.95)', borderTop: '1px solid #eee', display: 'flex', flexWrap: 'nowrap', overflowX: 'auto', justifyContent: 'center', alignItems: 'center', gap: '6px', zIndex: 1001, boxShadow: '0 -4px 10px rgba(0,0,0,0.03)', backdropFilter: 'blur(4px)' }}>
 
