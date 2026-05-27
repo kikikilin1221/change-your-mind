@@ -658,21 +658,64 @@ label: newLabel
 }));
 }, [takeSnapshot]);
 
-const applyUnifiedFormat = (type: string, value: any = '') => {
+const applyUnifiedFormat = (type: string, value: any = '', delta: number = 0) => {
     const activeEl = document.activeElement as HTMLElement;
-    
-    // ★ 改善：編集モード（文字入力状態）でなければ完全に無視する（エラーも出さない）
-    if (!activeEl || activeEl.getAttribute('contentEditable') !== 'true') {
-        return;
-    }
+    const isEditing = activeEl && activeEl.getAttribute('contentEditable') === 'true';
+
+    // 編集モードでない場合、フォントサイズ以外の装飾（太字など）は無視する
+    if (!isEditing && type !== 'fontSize') return;
 
     takeSnapshot();
+
     if (type === 'fontSize') {
-        // ブラウザ標準の機能で一旦ダミーのサイズ「7」を割り当て
+        if (!isEditing) {
+            // 【何も選択していない時】図形全体の文字を相対的にサイズ変更する
+            setNodes((nds: any[]) => nds.map(n => {
+                if (!n.selected || n.type === 'printZone' || n.id === 'center-mark' || n.data?.isTable) return n;
+
+                const adjustHtmlFontSize = (html: string, d: number) => {
+                    if (!html) return html;
+                    const tempDiv = document.createElement('div');
+                    tempDiv.innerHTML = html;
+
+                    // 直下のテキストノードを span で囲んで基準(14px)として扱う
+                    Array.from(tempDiv.childNodes).forEach(child => {
+                        if (child.nodeType === Node.TEXT_NODE && child.textContent?.trim()) {
+                            const span = document.createElement('span');
+                            span.style.fontSize = `${14 + d}px`;
+                            span.style.lineHeight = '1.2';
+                            span.textContent = child.textContent;
+                            tempDiv.replaceChild(span, child);
+                        }
+                    });
+
+                    // 内部の全要素のフォントサイズを相対的に再計算
+                    tempDiv.querySelectorAll('*').forEach(el => {
+                        const htmlEl = el as HTMLElement;
+                        let currentSize = 14; // 基準サイズ
+                        if (htmlEl.style.fontSize) {
+                            currentSize = parseFloat(htmlEl.style.fontSize);
+                            if (isNaN(currentSize)) currentSize = 14;
+                        }
+                        htmlEl.style.fontSize = `${currentSize + d}px`;
+                        htmlEl.style.lineHeight = '1.2';
+                    });
+                    return tempDiv.innerHTML;
+                };
+
+                return {
+                    ...n,
+                    data: { ...n.data, content: adjustHtmlFontSize(n.data.content, delta) }
+                };
+            }));
+            return;
+        }
+
+        // 【編集モード（入力状態）の場合】
         document.execCommand('fontSize', false, '7');
-        
         let applied = false;
-        // 1. 【文字が選択されている場合】付与された要素を探し出し、px指定に書き換える
+        
+        // 1. 文字がドラッグ選択されている場合
         const fonts = activeEl.querySelectorAll('font[size="7"], font[style*="xxx-large"], span[style*="xxx-large"]');
         fonts.forEach((el) => {
             const htmlEl = el as HTMLElement;
@@ -684,15 +727,14 @@ const applyUnifiedFormat = (type: string, value: any = '') => {
             applied = true;
         });
 
-        // 2. 【カーソルのみ（選択範囲なし）の場合】の強力なフォールバック
-        // カーソルが点滅しているだけの時は、ゼロ幅スペースを挿入してそこにサイズを適用し、その後の入力に引き継がせる
+        // 2. カーソルのみ（選択範囲なし）の場合
         const sel = window.getSelection();
         if (!applied && sel && sel.isCollapsed && sel.rangeCount > 0) {
             const range = sel.getRangeAt(0);
             const span = document.createElement('span');
             span.style.fontSize = value;
             span.style.lineHeight = '1.2';
-            span.innerHTML = '\u200B'; // ゼロ幅スペース（見えない文字）を挿入
+            span.innerHTML = '\u200B'; // ゼロ幅スペースを挿入して次の入力文字から適用
             range.insertNode(span);
             
             // カーソルを新しいサイズを持ったspanの直後にセット
@@ -705,8 +747,9 @@ const applyUnifiedFormat = (type: string, value: any = '') => {
         document.execCommand(type, false, value);
     }
 
-    // キャンバスのデータに反映
-    activeEl.dispatchEvent(new Event('input', { bubbles: true }));
+    if (isEditing) {
+        activeEl.dispatchEvent(new Event('input', { bubbles: true }));
+    }
 };
 
 const handleResetFormat = () => {
@@ -1880,8 +1923,8 @@ el.innerHTML = currentVal;
 
 <label style={{fontSize:'10px', fontWeight: 'bold'}}>文字サイズ (px)</label>
 <div style={{display:'flex', alignItems:'center', gap:'8px', marginBottom: '15px'}}>
-<input type="range" min="10" max="100" value={partialFontSize} onMouseDown={(e) => e.preventDefault()} onChange={(e) => { const val = Number(e.target.value); setPartialFontSize(val); applyUnifiedFormat('fontSize', `${val}px`); }} style={{flex:1}} />
-<input type="number" min="10" max="100" value={partialFontSize} onMouseDown={(e) => e.preventDefault()} onChange={(e) => { const val = Number(e.target.value); setPartialFontSize(val); applyUnifiedFormat('fontSize', `${val}px`); }} style={{width:'40px', padding:'2px', fontSize:'11px', border:'1px solid #ccc', borderRadius:'4px'}} />
+<input type="range" min="10" max="100" value={partialFontSize} onMouseDown={(e) => e.preventDefault()} onChange={(e) => { const val = Number(e.target.value); const delta = val - partialFontSize; setPartialFontSize(val); applyUnifiedFormat('fontSize', `${val}px`, delta); }} style={{flex:1}} />
+<input type="number" min="10" max="100" value={partialFontSize} onMouseDown={(e) => e.preventDefault()} onChange={(e) => { const val = Number(e.target.value); const delta = val - partialFontSize; setPartialFontSize(val); applyUnifiedFormat('fontSize', `${val}px`, delta); }} style={{width:'40px', padding:'2px', fontSize:'11px', border:'1px solid #ccc', borderRadius:'4px'}} />
 <button onMouseDown={(e) => e.preventDefault()} onClick={handleResetFormat} style={{fontSize:'10px', padding:'4px 6px', border:'1px solid #ccc', borderRadius:'4px', cursor:'pointer', background:'#fff', fontWeight:'bold'}}>標準へ</button>
 </div>
 </div>
