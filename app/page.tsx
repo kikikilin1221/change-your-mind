@@ -473,16 +473,23 @@ setFiles(initial); localStorage.setItem('my-logic-files', JSON.stringify(initial
 }
 }, []);
 
+// 230行目付近を修正
+const [saveMessage, setSaveMessage] = useState<string | null>(null);
+
 const handleManualSave = useCallback(() => {
-setFiles(prev => {
-const currentFileData = prev[activeFileId]; if (!currentFileData) return prev;
-const updatedLevelData = { ...levelData, [currentLevel]: { nodes: safeCloneNodes(nodesRef.current), edges: safeCloneEdges(edgesRef.current), bgColor: levelData[currentLevel]?.bgColor, label: currentLabelRef.current } };
-const updatedFiles = { ...prev, [activeFileId]: { ...currentFileData, levelData: updatedLevelData, currentLevel, currentLabel: currentLabelRef.current } };
-localStorage.setItem('my-logic-files', JSON.stringify(updatedFiles));
-localStorage.setItem('my-logic-active-id', activeFileId);
-return updatedFiles;
-});
-alert('💾 ノートを正常に保存しました！');
+    setFiles(prev => {
+        const currentFileData = prev[activeFileId];
+        if (!currentFileData) return prev;
+        const updatedLevelData = { ...levelData, [currentLevel]: { nodes: safeCloneNodes(nodesRef.current), edges: safeCloneEdges(edgesRef.current), bgColor: levelData[currentLevel]?.bgColor, label: currentLabelRef.current } };
+        const updatedFiles = { ...prev, [activeFileId]: { ...currentFileData, levelData: updatedLevelData, currentLevel, currentLabel: currentLabelRef.current } };
+        localStorage.setItem('my-logic-files', JSON.stringify(updatedFiles));
+        localStorage.setItem('my-logic-active-id', activeFileId);
+        return updatedFiles;
+    });
+    
+    // アラートの代わりにメッセージを表示して2秒で消す
+    setSaveMessage('💾 ノートを保存しました');
+    setTimeout(() => setSaveMessage(null), 2000);
 }, [activeFileId, currentLevel, levelData]);
 
 const exportData = useCallback(() => {
@@ -1975,31 +1982,32 @@ el.innerHTML = currentVal;
 </div>
 
 <div style={{ padding: '15px', borderRadius: '12px', backgroundColor: '#f8f9fa', border: '1px solid #ddd', marginBottom: '15px' }}>
-<label style={{fontSize: '11px', fontWeight: 'bold', color: '#1d4ed8'}}>文字の部分装飾 (編集中のみ)</label>
-<p style={{fontSize: '10px', color: '#666', marginTop: '4px', marginBottom: '10px', lineHeight: '1.4'}}>
-※線を選択して<b>Tabキー</b>で編集モードに入り、<br/>
-<u>マウスで文字をなぞって選択してから</u>押してください。
-</p>
-<div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '10px' }}>
-<div style={{ display:'flex', gap:'5px', alignItems: 'center' }}>
-<button onMouseDown={(e) => e.preventDefault()} onClick={() => applyUnifiedFormat('bold')} style={{ cursor:'pointer', border:'1px solid #ccc', padding: '4px 8px', fontSize:'11px', borderRadius: '4px', background: '#fff' }}>太字</button>
+    <label style={{fontSize: '11px', fontWeight: 'bold', color: '#1d4ed8', marginBottom: '10px', display: 'block'}}>文字の部分装飾 (編集中のみ)</label>
+    
+    <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:'5px', marginBottom:'10px' }}>
+        <button onMouseDown={(e) => e.preventDefault()} onClick={() => applyUnifiedFormat('fontName', 'serif')} style={{cursor:'pointer', border:'1px solid #ccc', padding: '6px', fontSize:'11px', borderRadius: '4px', background: '#fff'}}>明朝</button>
+        <button onMouseDown={(e) => e.preventDefault()} onClick={() => applyUnifiedFormat('fontName', 'sans-serif')} style={{cursor:'pointer', border:'1px solid #ccc', padding: '6px', fontSize:'11px', borderRadius: '4px', background: '#fff'}}>ゴシック</button>
+        {/* 太字を800に強化 */}
+        <button onMouseDown={(e) => e.preventDefault()} onClick={() => applyUnifiedFormat('bold')} style={{ cursor:'pointer', border:'1px solid #ccc', padding: '6px', fontSize:'11px', borderRadius: '4px', background: '#fff', fontWeight: 800 }}>太字</button>
+        <button onMouseDown={(e) => e.preventDefault()} onClick={() => applyUnifiedFormat('strikeThrough')} style={{ cursor:'pointer', border:'1px solid #ccc', padding: '6px', fontSize:'11px', borderRadius: '4px', background: '#fff' }}>二重線</button>
+        {/* 下線機能を追加 */}
+        <button onMouseDown={(e) => e.preventDefault()} onClick={() => applyUnifiedFormat('underline')} style={{ cursor:'pointer', border:'1px solid #ccc', padding: '6px', fontSize:'11px', borderRadius: '4px', background: '#fff', textDecoration: 'underline' }}>下線</button>
+    </div>
 
-{['#000000', '#ef4444', '#eab308', '#10b981', '#3b82f6'].map(c => (
-  <button key={c} onMouseDown={(e) => e.preventDefault()} onClick={() => applyUnifiedFormat('foreColor', c)} style={{ width: '18px', height: '18px', backgroundColor: c, border: '1px solid #ddd', borderRadius: '3px', cursor: 'pointer' }} />
-))}
-<input type="color" onMouseDown={(e) => e.preventDefault()} onChange={(e) => applyUnifiedFormat('foreColor', e.target.value)} style={{width:'24px', height:'24px', cursor: 'pointer', border: 'none', padding: 0, marginLeft: '2px'}} />
-</div>
-<div style={{ display:'flex', gap:'5px' }}>
-<button onClick={() => updateEdgeDesign({ labelStyle: { ...selectedEdge.data?.labelStyle, textAlign: 'left' } })} style={{ cursor:'pointer', border:'1px solid #ccc', padding: '4px 8px', fontSize:'11px', borderRadius: '4px', background: '#fff' }}>左詰</button>
-<button onClick={() => updateEdgeDesign({ labelStyle: { ...selectedEdge.data?.labelStyle, textAlign: 'center' } })} style={{ cursor:'pointer', border:'1px solid #ccc', padding: '4px 8px', fontSize:'11px', borderRadius: '4px', background: '#fff' }}>中央</button>
-</div>
-</div>
+    <div style={{ display: 'flex', gap: '5px', marginBottom: '10px' }}>
+        {/* 黄色を濃い山吹色(#fbbf24)に変更 */}
+        {['#000000', '#ef4444', '#fbbf24', '#10b981', '#3b82f6'].map(c => (
+            <button key={c} onMouseDown={(e) => e.preventDefault()} onClick={() => applyUnifiedFormat('foreColor', c)} style={{ width:'24px', height:'24px', backgroundColor:c, border: '1px solid #ddd', borderRadius: '4px', cursor: 'pointer' }} />
+        ))}
+        <input type="color" onMouseDown={(e) => e.preventDefault()} onChange={(e) => applyUnifiedFormat('foreColor', e.target.value)} style={{width:'24px', height:'24px', cursor: 'pointer', border: 'none', padding: 0}} />
+    </div>
 
-<label style={{fontSize:'10px', fontWeight: 'bold'}}>線の文字サイズ (px)</label>
-<div style={{display:'flex', alignItems:'center', gap:'8px', marginTop: '5px'}}>
-<input type="range" min="10" max="50" value={Number(selectedEdge.data?.fontSize || 14)} onChange={(e) => handleFontSizeChange(Number(e.target.value), Number(selectedEdge.data?.fontSize || 14), 'edge')} style={{flex:1}} />
-<input type="number" min="10" max="50" value={Number(selectedEdge.data?.fontSize || 14)} onChange={(e) => handleFontSizeChange(Number(e.target.value), Number(selectedEdge.data?.fontSize || 14), 'edge')} style={{width:'40px', padding:'2px', fontSize:'11px', border:'1px solid #ccc', borderRadius:'4px'}} />
-</div>
+    <label style={{fontSize:'10px', fontWeight: 'bold'}}>文字サイズ (px)</label>
+    <div style={{display:'flex', alignItems:'center', gap:'8px'}}>
+        <input type="range" min="10" max="100" value={partialFontSize} onChange={(e) => handleFontSizeChange(Number(e.target.value), partialFontSize, 'node')} style={{flex:1}} />
+        <input type="number" min="10" max="100" value={partialFontSize} onChange={(e) => handleFontSizeChange(Number(e.target.value), partialFontSize, 'node')} style={{width:'40px', padding:'2px', fontSize:'11px', border:'1px solid #ccc', borderRadius:'4px'}} />
+        <button onMouseDown={(e) => e.preventDefault()} onClick={handleResetFormat} style={{fontSize:'10px', padding:'4px 6px', border:'1px solid #ccc', borderRadius:'4px', cursor:'pointer', background:'#fff', fontWeight:'bold'}}>標準</button>
+    </div>
 </div>
 
 <label style={{fontSize:'11px', fontWeight: 'bold'}}>文字入り線 (クイック)</label>
