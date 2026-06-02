@@ -238,9 +238,128 @@ const currentLabelRef = useRef<string>(currentLabel);
 const [past, setPast] = useState<{nodes: any[], edges: any[]}[]>([]);
 const [future, setFuture] = useState<{nodes: any[], edges: any[]}[]>([]);
 
+const [groupedElements, setGroupedElements] = useState<Record<string, string[]>>({});
+
+const pushSnapshot = useCallback(() => {
+    setPast(p => [...p.slice(-40), { nodes: safeCloneNodes(nodesRef.current), edges: safeCloneEdges(edgesRef.current) }]);
+    setFuture([]);
+}, []);
+
+const takeSnapshot = useCallback(() => {
+    setPast(p => [...p.slice(-40), { nodes: safeCloneNodes(nodesRef.current), edges: safeCloneEdges(edgesRef.current) }]);
+    setFuture([]);
+}, []);
+
+// ★ グループ化を実行する関数
+const handleGroupSelection = useCallback(() => {
+    const selNodes = nodes.filter(n => n.selected && n.type !== 'printZone' && n.id !== 'center-mark');
+    if (selNodes.length < 2) {
+        alert('グループ化するには2つ以上の要素を選択してください。');
+        return;
+    }
+    pushSnapshot();
+
+    // 選択された要素を囲む最小・最大の座標を計算（バウンディングボックス）
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    selNodes.forEach(n => {
+        const w = n.style?.width || n.width || 200;
+        const h = n.style?.height || n.height || 100;
+        if (n.position.x < minX) minX = n.position.x;
+        if (n.position.y < minY) minY = n.position.y;
+        if (n.position.x + w > maxX) maxX = n.position.x + w;
+        if (n.position.y + h > maxY) maxY = n.position.y + h;
+    });
+
+    const padding = 20;
+    const groupW = (maxX - minX) + (padding * 2);
+    const groupH = (maxY - minY) + (padding * 2);
+    const groupX = minX - padding;
+    const groupY = minY - padding;
+
+    const groupId = `group-${Date.now()}`;
+    const childIds = selNodes.map(n => n.id);
+
+    // 親グループノードの作成
+    const groupNode = {
+        id: groupId,
+        type: 'default',
+        position: { x: groupX, y: groupY },
+        style: {
+            width: groupW,
+            height: groupH,
+            backgroundColor: 'transparent',
+            border: '1px dashed #3b82f6',
+            borderRadius: '8px',
+            pointerEvents: 'auto'
+        },
+        data: { label: '', isGroupContainer: true, childIds: childIds },
+        zIndex: 0
+    };
+
+    // 子要素の位置を親ノードからの相対座標に変換し、parentIdを紐付け
+    setNodes(nds => {
+        const updated = nds.map(n => {
+            if (childIds.includes(n.id)) {
+                return {
+                    ...n,
+                    parentId: groupId,
+                    extent: 'parent', // 親の範囲内でのみ動くように制限
+                    position: {
+                        x: n.position.x - groupX,
+                        y: n.position.y - groupY
+                    },
+                    zIndex: (n.zIndex || 1) + 1
+                };
+            }
+            return n;
+        });
+        return [groupNode, ...updated];
+    });
+
+    setSaveMessage('🔒 グループ化しました');
+    setTimeout(() => setSaveMessage(null), 2000);
+}, [nodes, takeSnapshot]);
+
+// ★ グループ解除を実行する関数
+const handleUngroupSelection = useCallback(() => {
+    const activeGroup = nodes.find(n => n.selected && n.data?.isGroupContainer);
+    if (!activeGroup) {
+        alert('解除するグループ枠を選択してください。');
+        return;
+    }
+    takeSnapshot();
+
+    const groupX = activeGroup.position.x;
+    const groupY = activeGroup.position.y;
+    const childIds = activeGroup.data?.childIds || [];
+
+    setNodes(nds => {
+        // グループ枠自体を削除し、子要素の座標を絶対座標に戻す
+        return nds
+            .filter(n => n.id !== activeGroup.id)
+            .map(n => {
+                if (childIds.includes(n.id)) {
+                    const { parentId, extent, ...rest } = n;
+                    return {
+                        ...rest,
+                        position: {
+                            x: n.position.x + groupX,
+                            y: n.position.y + groupY
+                        }
+                    };
+                }
+                return n;
+            });
+    });
+
+    setSaveMessage('🔓 グループを解除しました');
+    setTimeout(() => setSaveMessage(null), 2000);
+}, [nodes, takeSnapshot]);
+
 const [saveMessage, setSaveMessage] = useState<string | null>(null);
 const [customColors, setCustomColors] = useState<string[]>([]);
 const [tempColor, setTempColor] = useState('#f59e0b');
+
 
 useEffect(() => {
     const saved = localStorage.getItem('my-logic-custom-colors');
@@ -279,11 +398,6 @@ const clearSelection = useCallback(() => {
 setNodes((nds: any[]) => nds.map((n: any) => ({...n, selected: false, data: { ...n.data, isEditing: false, editingCell: null, _tempContent: undefined }})));
 setEdges((eds: any[]) => eds.map((e: any) => ({...e, selected: false, data: { ...e.data, isEditing: false, _tempContent: undefined }})));
 setSelectedCells({});
-}, []);
-
-const takeSnapshot = useCallback(() => {
-setPast(p => [...p.slice(-40), { nodes: safeCloneNodes(nodesRef.current), edges: safeCloneEdges(edgesRef.current) }]);
-setFuture([]);
 }, []);
 
 const undo = useCallback(() => {
@@ -1298,6 +1412,38 @@ const onNodeResize = useCallback((id: string, params: any) => {
     const dirX = direction ? direction[0] : 0;
     const dirY = direction ? direction[1] : 0;
 
+    // 現在リサイズ中のノード情報を取得
+    const targetNode = nodesRef.current.find(n => n.id === id);
+
+    // ★ グループコンテナがリサイズされた場合、子要素のサイズと位置をスケール連動
+    if (targetNode?.data?.isGroupContainer) {
+        const prevW = targetNode.style?.width || targetNode.width || width;
+        const prevH = targetNode.style?.height || targetNode.height || height;
+        const scaleX = width / prevW;
+        const scaleY = height / prevH;
+        const childIds = targetNode.data?.childIds || [];
+
+        setNodes(nds => nds.map(n => {
+            if (childIds.includes(n.id)) {
+                const cW = n.style?.width || n.width || 200;
+                const cH = n.style?.height || n.height || 100;
+                return {
+                    ...n,
+                    position: {
+                        x: n.position.x * scaleX,
+                        y: n.position.y * scaleY
+                    },
+                    style: {
+                        ...n.style,
+                        width: Math.max(20, cW * scaleX),
+                        height: Math.max(20, cH * scaleY)
+                    }
+                };
+            }
+            return n;
+        }));
+    }
+
     nodesRef.current.forEach(t => {
         if (t.id === id || t.id === 'center-mark' || t.selected) return;
         const tW = Number(t.style?.width) || 200;
@@ -1565,7 +1711,7 @@ else if (el.dataset.editing !== 'true') { el.dataset.editing = 'true'; el.innerH
     minWidth={30} 
     minHeight={30} 
     keepAspectRatio={!!n.data?.keepRatio} 
-    isVisible={n.selected && !isTableAndCellEditing} 
+    isVisible={n.selected && (!isTableAndCellEditing || n.data?.isGroupContainer)} 
     lineStyle={{ border: n.data?.isCropping ? '2px dashed #ef4444' : '1px solid #3b82f6', zIndex: 100 }} 
     handleStyle={{ background: n.data?.isCropping ? '#ef4444' : '#3b82f6', zIndex: 100, borderRadius: '50%' }} 
     onResizeStart={(_, params) => { 
@@ -2097,6 +2243,9 @@ el.innerHTML = currentVal;
 <button onClick={redo} disabled={future.length === 0} style={{ ...actionBtnStyle, opacity: future.length === 0 ? 0.4 : 1, cursor: future.length === 0 ? 'default' : 'pointer' }}>↪️ 進む</button>
 <div style={{ width: '1px', height: '24px', backgroundColor: '#ddd', margin: '0 2px' }} />
 <button onClick={handleManualSave} style={{ ...primaryBtnStyle, backgroundColor: '#059669', boxShadow: '0 2px 4px rgba(5, 150, 105, 0.3)' }}>💾 保存</button>
+<button onClick={handleGroupSelection} style={{ ...actionBtnStyle, backgroundColor: '#3b82f6', color: '#fff', border: 'none' }}>🔒 グループ化</button>
+<button onClick={handleUngroupSelection} style={{ ...actionBtnStyle, backgroundColor: '#64748b', color: '#fff', border: 'none' }}>🔓 グループ解除</button>
+{/* ★ ここまで追加 */}
 <button onClick={() => jsonImportRef.current?.click()} style={actionBtnStyle}>📥 読込</button>
 <button onClick={exportData} style={actionBtnStyle}>📤 書出</button>
 <div style={{ width: '1px', height: '24px', backgroundColor: '#ddd', margin: '0 2px' }} />
