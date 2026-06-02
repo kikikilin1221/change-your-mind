@@ -1741,7 +1741,7 @@ style: { ...safeNodeStyle, border: 'none', backgroundColor: 'transparent', paddi
 }, [nodes, enterLevel, levelData, takeSnapshot, selectedCells, selectCellsBox]);
 
 const isRoot = historyLevel.length === 0;
-const actionBtnStyle = { padding: '6px 10px', borderRadius: '6px', border: '1px solid #ccc', backgroundColor: '#fff', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px', boxShadow: '0 2px 4px rgba(0,0,0,0.05)', fontWeight: 'bold', fontSize: '12px', transition: 'all 0.2s', whiteSpace: 'nowrap' };
+const actionBtnStyle = { padding: '5px 8px', borderRadius: '6px', border: '1px solid #ccc', backgroundColor: '#fff', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '3px', boxShadow: '0 2px 4px rgba(0,0,0,0.05)', fontWeight: 'bold', fontSize: '11px', transition: 'all 0.2s', whiteSpace: 'nowrap' };
 const primaryBtnStyle = { ...actionBtnStyle, backgroundColor: '#3b82f6', color: '#fff', border: 'none', boxShadow: '0 2px 4px rgba(59, 130, 246, 0.3)' };
 
 if (isExecutingPrint) {
@@ -2226,8 +2226,7 @@ el.innerHTML = currentVal;
 </div>
 
 {isBottomBarOpen ? (
-<div className="no-print" style={{ padding: '8px 10px', backgroundColor: 'rgba(255,255,255,0.95)', borderTop: '1px solid #eee', display: 'flex', flexWrap: 'nowrap', overflowX: 'auto', justifyContent: 'center', alignItems: 'center', gap: '6px', zIndex: 1001, boxShadow: '0 -4px 10px rgba(0,0,0,0.03)', backdropFilter: 'blur(4px)' }}>
-
+<div className="no-print" style={{ padding: '6px 8px', backgroundColor: 'rgba(255,255,255,0.95)', borderTop: '1px solid #eee', display: 'flex', flexWrap: 'nowrap', overflowX: 'auto', justifyContent: 'flex-start', alignItems: 'center', gap: '4px', zIndex: 1001, boxShadow: '0 -4px 10px rgba(0,0,0,0.03)', backdropFilter: 'blur(4px)', width: '100%', maxWidth: '100%', boxSizing: 'border-box' }}>
 {isPrintMode ? (
 <>
 <div style={{ fontWeight: 'bold', fontSize: '12px', color: '#b91c1c', padding: '0 10px' }}>🖨️ 印刷モード</div>
