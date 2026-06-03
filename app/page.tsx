@@ -467,38 +467,57 @@ const handlePaneClick = useCallback((e: React.MouseEvent) => {
             htmlNode.style.backgroundColor = 'transparent';
             document.body.style.backgroundColor = 'transparent';
             
-            const ws = document.getElementById('workspace-container');
+            const ws = document.getElementById('main-editor-wrapper');
             const origWsBg = ws ? ws.style.backgroundColor : '';
             if (ws) ws.style.backgroundColor = 'transparent';
             
             const bgNode = document.querySelector('.react-flow__background') as HTMLElement;
             if (bgNode) bgNode.style.display = 'none';
 
+            // ★ 動的インポート（Vercelエラー回避の安全設計）
             import('html2canvas').then(({ default: html2canvas }) => {
-                html2canvas(document.body, { x: screenX, y: screenY, width: screenW, height: screenH, backgroundColor: null, scale: 2 }).then(canvas => {
-                    if (ws) ws.classList.remove('hide-bg');
+                html2canvas(document.body, { 
+                    x: screenX, 
+                    y: screenY, 
+                    width: screenW, 
+                    height: screenH, 
+                    backgroundColor: null, // 絶対に透過させる
+                    scale: 2 // 高画質化
+                }).then(canvas => {
+                    // ★ 撮影が終わったら色をすべて元に戻す
+                    htmlNode.style.backgroundColor = originalHtmlBg;
+                    document.body.style.backgroundColor = originalBodyBg;
+                    if (ws) ws.style.backgroundColor = origWsBg;
                     if (bgNode) bgNode.style.display = 'block';
-                    
-                    // ★ 画像のピクセルデータを解析して「背景色」を完全に透明に削り落とす魔法
+
+                    // ★ ピクセルデータを解析して「背景色」を削り落とす魔法
                     const ctx = canvas.getContext('2d');
                     if (ctx) {
                         const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
                         const data = imgData.data;
                         const bgR = data[0], bgG = data[1], bgB = data[2]; // 左上を背景色とみなす
                         for (let i = 0; i < data.length; i += 4) {
-                            const r = data[i], g = data[i+1], b = data[i+2], a = data[i+3];
-                            // 背景色に近い色（誤差15以内）なら、透明度(Alpha)を0にする
-                            if (a > 0 && Math.abs(r - bgR) < 15 && Math.abs(g - bgG) < 15 && Math.abs(b - bgB) < 15) {
+                            // 背景色に近い色（誤差15以内）なら透明度を0にする
+                            if (data[i+3] > 0 && Math.abs(data[i] - bgR) < 15 && Math.abs(data[i+1] - bgG) < 15 && Math.abs(data[i+2] - bgB) < 15) {
                                 data[i+3] = 0;
                             }
                         }
                         ctx.putImageData(imgData, 0, 0);
                     }
+
                     const dataUrl = canvas.toDataURL('image/png');
                     const newStamps = [...customStamps, dataUrl];
                     setCustomStamps(newStamps);
                     localStorage.setItem('my-logic-stamps', JSON.stringify(newStamps));
                     setSaveMessage('図形を読み取りました！');
+                    setTimeout(() => setSaveMessage(null), 2000);
+                }).catch(err => {
+                    console.error(err);
+                    htmlNode.style.backgroundColor = originalHtmlBg;
+                    document.body.style.backgroundColor = originalBodyBg;
+                    if (ws) ws.style.backgroundColor = origWsBg;
+                    if (bgNode) bgNode.style.display = 'block';
+                    setSaveMessage('読み取りエラー');
                     setTimeout(() => setSaveMessage(null), 2000);
                 });
             });
