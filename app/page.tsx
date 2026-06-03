@@ -370,8 +370,15 @@ const [strokeColor, setStrokeColor] = useState('#000000');
 const [strokeWidth, setStrokeWidth] = useState(2);
 const [eraserWidth, setEraserWidth] = useState(15);
 const [penOpacity, setPenOpacity] = useState(1);
-const [drawBtnPos, setDrawBtnPos] = useState({ x: 0, y: 0 });
+const [drawBtnPos, setDrawBtnPos] = useState({ left: -1, top: -1 });
+useEffect(() => { setDrawBtnPos({ left: window.innerWidth - 100, top: window.innerHeight - 150 }); }, []);
 const drawBtnDragRef = useRef<{ startX: number, startY: number, initX: number, initY: number } | null>(null);
+
+const [customStamps, setCustomStamps] = useState<string[]>([]);
+useEffect(() => {
+    const savedStamps = localStorage.getItem('my-logic-stamps');
+    if (savedStamps) { try { setCustomStamps(JSON.parse(savedStamps)); } catch(e){} }
+}, []);
 
 const sketchRef = useRef<any>(null);
 // レイヤー管理ステート
@@ -382,7 +389,7 @@ const [activeLayerId, setActiveLayerId] = useState<string | null>(null);
 const [shapeStrokeColor, setShapeStrokeColor] = useState('#000000');
 const [shapeStrokeWidth, setShapeStrokeWidth] = useState(2);
 const [symbolFontSize, setSymbolFontSize] = useState(24);
-const [creationStep, setCreationStep] = useState<{ type: 'frame'|'ruler-v'|'ruler-h', startX?: number, startY?: number } | null>(null);
+const [creationStep, setCreationStep] = useState<{ type: 'frame'|'ruler-v'|'ruler-h'|'capture', startX?: number, startY?: number, rawX?: number, rawY?: number } | null>(null);
 
 // 論理記号の追加関数
 const addSymbolNode = useCallback((symbol: string) => {
@@ -416,58 +423,81 @@ const addSymbolNode = useCallback((symbol: string) => {
     setNodes((nds:any[]) => [...nds.map((n:any) => ({...n, selected: false})), newNode]);
 }, [takeSnapshot, shapeStrokeColor, symbolFontSize]);
 
-// 枠・定規作成のクリック処理 (1回目＝始点、2回目＝終点)
+// 枠・定規・読み取り作成のクリック処理 (1回目＝始点、2回目＝終点)
 const handlePaneClick = useCallback((e: React.MouseEvent) => {
     if (!creationStep) return;
     const projected = screenToFlowPosition({ x: e.clientX, y: e.clientY });
     
     if (creationStep.startX === undefined) {
-        setCreationStep({ ...creationStep, startX: projected.x, startY: projected.y });
+        setCreationStep({ ...creationStep, startX: projected.x, startY: projected.y, rawX: e.clientX, rawY: e.clientY });
         setSaveMessage('終点をクリックしてください');
     } else {
-        takeSnapshot();
-        const x1 = creationStep.startX;
-        const y1 = creationStep.startY!;
-        const x2 = projected.x;
-        const y2 = projected.y;
+        if (creationStep.type === 'capture') {
+            takeSnapshot();
+            const rawX = creationStep.rawX!;
+            const rawY = creationStep.rawY!;
+            const screenX = Math.min(rawX, e.clientX);
+            const screenY = Math.min(rawY, e.clientY);
+            const screenW = Math.max(10, Math.abs(e.clientX - rawX));
+            const screenH = Math.max(10, Math.abs(e.clientY - rawY));
 
-        const id = `node-${Date.now()}`;
-        const maxZ = Math.max(0, ...nodesRef.current.map((n:any) => Number(n.zIndex) || 0));
-        
-        let newNode: any;
-        
-        if (creationStep.type === 'frame') {
-            newNode = {
-                id, selected: true,
-                position: { x: Math.min(x1, x2), y: Math.min(y1, y2) },
-                data: { content: '', isShape: true, shapeType: 'rect', keepRatio: false, isEditing: false },
-                style: { width: Math.max(10, Math.abs(x2 - x1)), height: Math.max(10, Math.abs(y2 - y1)), backgroundColor: 'transparent', borderColor: shapeStrokeColor, borderWidth: shapeStrokeWidth, borderRadius: '0px' },
-                zIndex: maxZ + 1
-            };
-        } else if (creationStep.type === 'ruler-h') {
-            newNode = {
-                id, selected: true,
-                position: { x: Math.min(x1, x2), y: y1 - (shapeStrokeWidth/2) },
-                data: { content: '', isShape: true, shapeType: 'rect', keepRatio: false, isEditing: false },
-                style: { width: Math.max(10, Math.abs(x2 - x1)), height: shapeStrokeWidth, backgroundColor: shapeStrokeColor, borderColor: 'transparent', borderWidth: 0, borderRadius: '0px' },
-                zIndex: maxZ + 1
-            };
-        } else if (creationStep.type === 'ruler-v') {
-            newNode = {
-                id, selected: true,
-                position: { x: x1 - (shapeStrokeWidth/2), y: Math.min(y1, y2) },
-                data: { content: '', isShape: true, shapeType: 'rect', keepRatio: false, isEditing: false },
-                style: { width: shapeStrokeWidth, height: Math.max(10, Math.abs(y2 - y1)), backgroundColor: shapeStrokeColor, borderColor: 'transparent', borderWidth: 0, borderRadius: '0px' },
-                zIndex: maxZ + 1
-            };
+            setSaveMessage('読み取り中...');
+            import('html2canvas').then(({ default: html2canvas }) => {
+                html2canvas(document.body, { x: screenX, y: screenY, width: screenW, height: screenH, backgroundColor: null }).then(canvas => {
+                    const dataUrl = canvas.toDataURL('image/png');
+                    const newStamps = [...customStamps, dataUrl];
+                    setCustomStamps(newStamps);
+                    localStorage.setItem('my-logic-stamps', JSON.stringify(newStamps));
+                    setSaveMessage('図形を読み取りました！');
+                    setTimeout(() => setSaveMessage(null), 2000);
+                });
+            });
+            setCreationStep(null);
+        } else {
+            takeSnapshot();
+            const x1 = creationStep.startX;
+            const y1 = creationStep.startY!;
+            const x2 = projected.x;
+            const y2 = projected.y;
+
+            const id = `node-${Date.now()}`;
+            const maxZ = Math.max(0, ...nodesRef.current.map((n:any) => Number(n.zIndex) || 0));
+            
+            let newNode: any;
+            
+            if (creationStep.type === 'frame') {
+                newNode = {
+                    id, selected: true,
+                    position: { x: Math.min(x1, x2), y: Math.min(y1, y2) },
+                    data: { content: '', isShape: true, shapeType: 'rect', keepRatio: false, isEditing: false },
+                    style: { width: Math.max(10, Math.abs(x2 - x1)), height: Math.max(10, Math.abs(y2 - y1)), backgroundColor: 'transparent', borderColor: shapeStrokeColor, borderWidth: shapeStrokeWidth, borderRadius: '0px' },
+                    zIndex: maxZ + 1
+                };
+            } else if (creationStep.type === 'ruler-h') {
+                newNode = {
+                    id, selected: true,
+                    position: { x: Math.min(x1, x2), y: y1 - (shapeStrokeWidth/2) },
+                    data: { content: '', isShape: true, shapeType: 'rect', keepRatio: false, isEditing: false },
+                    style: { width: Math.max(10, Math.abs(x2 - x1)), height: shapeStrokeWidth, backgroundColor: shapeStrokeColor, borderColor: 'transparent', borderWidth: 0, borderRadius: '0px' },
+                    zIndex: maxZ + 1
+                };
+            } else if (creationStep.type === 'ruler-v') {
+                newNode = {
+                    id, selected: true,
+                    position: { x: x1 - (shapeStrokeWidth/2), y: Math.min(y1, y2) },
+                    data: { content: '', isShape: true, shapeType: 'rect', keepRatio: false, isEditing: false },
+                    style: { width: shapeStrokeWidth, height: Math.max(10, Math.abs(y2 - y1)), backgroundColor: shapeStrokeColor, borderColor: 'transparent', borderWidth: 0, borderRadius: '0px' },
+                    zIndex: maxZ + 1
+                };
+            }
+
+            setNodes((nds:any[]) => [...nds.map((n:any) => ({...n, selected: false})), newNode]);
+            setCreationStep(null);
+            setSaveMessage('図形を配置しました');
+            setTimeout(() => setSaveMessage(null), 1500);
         }
-
-        setNodes((nds:any[]) => [...nds.map((n:any) => ({...n, selected: false})), newNode]);
-        setCreationStep(null);
-        setSaveMessage('図形を配置しました');
-        setTimeout(() => setSaveMessage(null), 1500);
     }
-}, [creationStep, screenToFlowPosition, shapeStrokeColor, shapeStrokeWidth, takeSnapshot, setNodes]);
+}, [creationStep, screenToFlowPosition, shapeStrokeColor, shapeStrokeWidth, takeSnapshot, setNodes, customStamps]);
 
 // 描画モード開始時に初期レイヤーを生成
 useEffect(() => {
@@ -499,6 +529,26 @@ const addLayer = useCallback(() => {
     setActiveLayerId(newId);
     setPenStyle('pen');
 }, []);
+
+// レイヤー圧縮関数
+const compressLayers = useCallback(async () => {
+    const visibleLayers = layers.filter(l => l.visible);
+    if (visibleLayers.length < 2) return alert('圧縮するには2つ以上の表示レイヤーが必要です。');
+    takeSnapshot();
+    setSaveMessage('圧縮中...');
+    let allPaths: any[] = [];
+    for (let i = visibleLayers.length - 1; i >= 0; i--) {
+        const l = visibleLayers[i];
+        if (canvasRefs.current[l.id]) {
+            const paths = await canvasRefs.current[l.id].exportPaths();
+            allPaths = allPaths.concat(paths);
+        }
+    }
+    const newId = `layer-${Date.now()}`;
+    setLayers([{ id: newId, name: '圧縮済レイヤー', visible: true }]);
+    setActiveLayerId(newId);
+    setTimeout(() => { canvasRefs.current[newId]?.loadPaths(allPaths); setSaveMessage('圧縮完了'); setTimeout(() => setSaveMessage(null), 1500); }, 200);
+}, [layers, takeSnapshot]);
 
 // レイヤー順序入れ替え関数
 const moveLayer = useCallback((index: number, direction: -1 | 1) => {
@@ -1516,7 +1566,7 @@ if (drag) { const dx = (e.clientX - drag.startX) / zoom; const dy = (e.clientY -
 const imgDrag = imageCropDragRef.current;
 if (imgDrag) { const dx = (e.clientX - imgDrag.startX) / zoom; const dy = (e.clientY - imgDrag.startY) / zoom; setNodes((nds: any[]) => nds.map((n: any) => n.id === imgDrag.id ? { ...n, data: { ...(n.data || {}), imgPosX: imgDrag.initX + dx, imgPosY: imgDrag.initY + dy } } : n)); }
 const dDrag = drawBtnDragRef.current;
-if (dDrag) { setDrawBtnPos({ x: dDrag.initX + (e.clientX - dDrag.startX), y: dDrag.initY + (e.clientY - dDrag.startY) }); }
+if (dDrag) { setDrawBtnPos({ left: dDrag.initX + (e.clientX - dDrag.startX), top: dDrag.initY + (e.clientY - dDrag.startY) }); }
 };
 const onMouseUp = () => { setTimeout(() => { previewDragRef.current = null; }, 50); imageCropDragRef.current = null; tableActionRef.current = null; drawBtnDragRef.current = null; };
 window.addEventListener('mousemove', onMouseMove); window.addEventListener('mouseup', onMouseUp);
@@ -1843,7 +1893,7 @@ label: (
 id={`edit-${n.id}`} className={isEditingNode ? "nodrag html-content" : "html-content"} contentEditable={isEditingNode} suppressContentEditableWarning
 onMouseDown={(e) => { if (isEditingNode) e.stopPropagation(); }} onKeyDown={(e) => { if (isEditingNode) e.stopPropagation(); }}
 onInput={(e) => { n.data._tempContent = e.currentTarget.innerHTML; }} onBlur={(e) => { const finalHtml = n.data._tempContent ?? e.currentTarget.innerHTML; setNodes(nds => nds.map(node => node.id === n.id ? { ...node, data: { ...node.data, isEditing: false, content: finalHtml, _tempContent: undefined } } : node)); }}
-style={{ pointerEvents: 'auto', width: '100%', height: 'auto', outline: 'none', cursor: isEditingNode ? 'text' : 'grab', color: n.style?.color || '#000', fontFamily: n.style?.fontFamily || 'sans-serif', fontSize: n.style?.fontSize || '14px', fontWeight: n.style?.fontWeight || 'normal', textDecoration: n.style?.textDecoration || 'none', whiteSpace: 'pre-wrap', lineHeight: '1.2', textAlign: textAlignment, transform: `translate(${textOffX}px, ${textOffY}px)`, writingMode: wMode }}
+style={{ pointerEvents: 'auto', width: '100%', height: 'auto', outline: 'none', cursor: isEditingNode ? 'text' : 'grab', color: n.style?.color || '#000', fontFamily: n.style?.fontFamily || 'sans-serif', fontSize: n.style?.fontSize || '14px', fontWeight: n.style?.fontWeight || 'normal', textDecoration: n.style?.textDecoration || 'none', whiteSpace: 'pre-wrap', lineHeight: '1.2', textAlign: textAlignment, transform: `translate(${textOffX}px, ${textOffY}px) scaleX(${n.data?.flipH ? -1 : 1}) scaleY(${n.data?.flipV ? -1 : 1})`, writingMode: wMode }}
 ref={el => {
 if (!el) return;
 if (!isEditingNode) { const newHtml = renderHTMLWithMath(n.data?.content || ''); if (el.innerHTML !== newHtml) el.innerHTML = newHtml; el.dataset.editing = 'false'; } 
@@ -1876,13 +1926,13 @@ else if (el.dataset.editing !== 'true') { el.dataset.editing = 'true'; el.innerH
     handleStyle={{ background: n.data?.isCropping ? '#ef4444' : '#3b82f6', zIndex: 100, borderRadius: '50%' }} 
     onResizeStart={(_, params) => { 
         takeSnapshot(); 
-        if (n.data?.isImage && n.data?.isCropping) { 
+        if (n.data?.isCropping) {
             n.data._rsX = params.x; n.data._rsY = params.y; 
             n.data._rsCropOffX = n.data.cropOffsetX || 0; n.data._rsCropOffY = n.data.cropOffsetY || 0; 
         } 
     }} 
     onResize={(e, params) => { 
-    if (n.data?.isImage && n.data?.isCropping) { 
+    if (n.data?.isCropping) {
         const dx = params.x - n.data._rsX; const dy = params.y - n.data._rsY; 
         setNodes((nds: any[]) => nds.map((node: any) => node.id === n.id ? { ...node, data: { ...node.data, cropOffsetX: n.data._rsCropOffX - dx, cropOffsetY: n.data._rsCropOffY - dy } } : node)); 
     } else {
@@ -2075,6 +2125,7 @@ style={{ cursor: creationStep ? 'crosshair' : 'default' }}
     <button onClick={() => { setCreationStep({ type: 'frame', startX: undefined, startY: undefined }); setSaveMessage('始点をクリックしてください'); }} style={{ padding: '6px', fontSize: '10px', fontWeight: 'bold', borderRadius: '4px', cursor: 'pointer', border: creationStep?.type === 'frame' ? '2px solid #3b82f6' : '1px solid #ccc', background: creationStep?.type === 'frame' ? '#eff6ff' : '#fff' }}>□ 枠線</button>
     <button onClick={() => { setCreationStep({ type: 'ruler-h', startX: undefined, startY: undefined }); setSaveMessage('始点をクリックしてください'); }} style={{ padding: '6px', fontSize: '10px', fontWeight: 'bold', borderRadius: '4px', cursor: 'pointer', border: creationStep?.type === 'ruler-h' ? '2px solid #3b82f6' : '1px solid #ccc', background: creationStep?.type === 'ruler-h' ? '#eff6ff' : '#fff' }}>━ 横定規</button>
     <button onClick={() => { setCreationStep({ type: 'ruler-v', startX: undefined, startY: undefined }); setSaveMessage('始点をクリックしてください'); }} style={{ padding: '6px', fontSize: '10px', fontWeight: 'bold', borderRadius: '4px', cursor: 'pointer', border: creationStep?.type === 'ruler-v' ? '2px solid #3b82f6' : '1px solid #ccc', background: creationStep?.type === 'ruler-v' ? '#eff6ff' : '#fff' }}>┃ 縦定規</button>
+    <button onClick={() => { setCreationStep({ type: 'capture', startX: undefined, startY: undefined }); setSaveMessage('始点をクリックしてください'); }} style={{ padding: '6px', fontSize: '10px', fontWeight: 'bold', borderRadius: '4px', cursor: 'pointer', border: creationStep?.type === 'capture' ? '2px solid #10b981' : '1px solid #ccc', background: creationStep?.type === 'capture' ? '#ecfdf5' : '#fff', gridColumn: 'span 3' }}>📸 読み取り (2点選択)</button>
 </div>
 
 <label style={{fontSize: '10px', fontWeight: 'bold', display: 'block', marginBottom: '5px'}}>記号のサイズ ({symbolFontSize}px)</label>
@@ -2090,9 +2141,9 @@ style={{ cursor: creationStep ? 'crosshair' : 'default' }}
     </div>
 
     <div style={{ padding: '15px', borderRadius: '12px', backgroundColor: '#f0f9ff', border: '1px solid #bfdbfe' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
-            <label style={{fontSize: '11px', fontWeight: 'bold', color: '#1e40af'}}>📑 レイヤー構成</label>
-            <button onClick={addLayer} style={{ padding: '4px 8px', fontSize: '10px', background: '#3b82f6', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}>＋ 新規レイヤー</button>
+        <div style={{ display: 'flex', gap: '5px' }}>
+            <button onClick={compressLayers} style={{ padding: '4px 8px', fontSize: '10px', background: '#f59e0b', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}>🗜 圧縮</button>
+            <button onClick={addLayer} style={{ padding: '4px 8px', fontSize: '10px', background: '#3b82f6', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}>＋ 新規</button>
         </div>
         <p style={{fontSize: '9px', color: '#64748b', marginBottom: '10px'}}>※選択中のレイヤーにのみ描画・消去されます。</p>
         
@@ -2210,49 +2261,41 @@ style={{ cursor: creationStep ? 'crosshair' : 'default' }}
 )}
 
 {primaryNode.data?.isShape && (
-<div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '5px', marginBottom: '15px' }}>
-<button onClick={() => { takeSnapshot(); const size = Math.max(Number(primaryNode.style?.width) || 150, Number(primaryNode.style?.height) || 150); updateSelectedNodes({ shapeType: 'rect', keepRatio: true }, { borderRadius: '0px', width: size, height: size }); }} style={{ padding: '6px', fontSize: '12px', cursor: 'pointer', borderRadius: '4px', background: primaryNode.data?.shapeType === 'rect' && primaryNode.data?.keepRatio ? '#ddd' : '#fff', border: '1px solid #ccc' }}>■ 正方形</button>
-<button onClick={() => { takeSnapshot(); updateSelectedNodes({ shapeType: 'rect', keepRatio: false }, { borderRadius: '0px' }); }} style={{ padding: '6px', fontSize: '12px', cursor: 'pointer', borderRadius: '4px', background: primaryNode.data?.shapeType === 'rect' && !primaryNode.data?.keepRatio ? '#ddd' : '#fff', border: '1px solid #ccc' }}>▬ 長方形</button>
-<button onClick={() => { takeSnapshot(); const size = Math.max(Number(primaryNode.style?.width) || 150, Number(primaryNode.style?.height) || 150); updateSelectedNodes({ shapeType: 'circ', keepRatio: true }, { borderRadius: '50%', width: size, height: size }); }} style={{ padding: '6px', fontSize: '12px', cursor: 'pointer', borderRadius: '4px', background: primaryNode.data?.shapeType === 'circ' && primaryNode.data?.keepRatio ? '#ddd' : '#fff', border: '1px solid #ccc' }}>● 正円</button>
-<button onClick={() => { takeSnapshot(); updateSelectedNodes({ shapeType: 'circ', keepRatio: false }, { borderRadius: '50%' }); }} style={{ padding: '6px', fontSize: '12px', cursor: 'pointer', borderRadius: '4px', background: primaryNode.data?.shapeType === 'circ' && !primaryNode.data?.keepRatio ? '#ddd' : '#fff', border: '1px solid #ccc' }}>⬭ 楕円</button>
-</div>
-)}
+<div style={{ marginBottom: '15px' }}>
+    <button onClick={() => { takeSnapshot(); const w = Number(primaryNode.style?.width) || 150; const h = Number(primaryNode.style?.height) || 150; if (!primaryNode.data?.isCropping) updateSelectedNodes({ isCropping: true, cropBaseW: w, cropBaseH: h, cropOffsetX: 0, cropOffsetY: 0 }); else updateSelectedNodes({ isCropping: false }); }} style={{ width: '100%', padding: '6px', fontSize: '12px', background: primaryNode.data?.isCropping ? '#ef4444' : '#fff', color: primaryNode.data?.isCropping ? '#fff' : '#333', border: primaryNode.data?.isCropping ? 'none' : '1px solid #ccc', borderRadius: '4px', fontWeight: 'bold', cursor: 'pointer', transition: 'all 0.2s', marginBottom: '10px' }}>
+        {primaryNode.data?.isCropping ? '✅ トリミング完了' : '✂️ トリミング'}
+    </button>
+    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '5px', marginBottom: '10px' }}>
+        <button onClick={() => { takeSnapshot(); updateSelectedNodes((n:any) => ({ flipH: !n.flipH })); }} style={{ padding: '6px', fontSize: '12px', cursor: 'pointer', borderRadius: '4px', background: primaryNode.data?.flipH ? '#ddd' : '#fff', border: '1px solid #ccc' }}>↔ 左右反転</button>
+        <button onClick={() => { takeSnapshot(); updateSelectedNodes((n:any) => ({ flipV: !n.flipV })); }} style={{ padding: '6px', fontSize: '12px', cursor: 'pointer', borderRadius: '4px', background: primaryNode.data?.flipV ? '#ddd' : '#fff', border: '1px solid #ccc' }}>↕ 上下反転</button>
+    </div>
+    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '5px', marginBottom: '15px' }}>
+        <button onClick={() => { takeSnapshot(); const size = Math.max(Number(primaryNode.style?.width) || 150, Number(primaryNode.style?.height) || 150); updateSelectedNodes({ shapeType: 'rect', keepRatio: true }, { borderRadius: '0px', width: size, height: size }); }} style={{ padding: '6px', fontSize: '12px', cursor: 'pointer', borderRadius: '4px', background: primaryNode.data?.shapeType === 'rect' && primaryNode.data?.keepRatio ? '#ddd' : '#fff', border: '1px solid #ccc' }}>■ 正方形</button>
+        <button onClick={() => { takeSnapshot(); updateSelectedNodes({ shapeType: 'rect', keepRatio: false }, { borderRadius: '0px' }); }} style={{ padding: '6px', fontSize: '12px', cursor: 'pointer', borderRadius: '4px', background: primaryNode.data?.shapeType === 'rect' && !primaryNode.data?.keepRatio ? '#ddd' : '#fff', border: '1px solid #ccc' }}>▬ 長方形</button>
+        <button onClick={() => { takeSnapshot(); const size = Math.max(Number(primaryNode.style?.width) || 150, Number(primaryNode.style?.height) || 150); updateSelectedNodes({ shapeType: 'circ', keepRatio: true }, { borderRadius: '50%', width: size, height: size }); }} style={{ padding: '6px', fontSize: '12px', cursor: 'pointer', borderRadius: '4px', background: primaryNode.data?.shapeType === 'circ' && primaryNode.data?.keepRatio ? '#ddd' : '#fff', border: '1px solid #ccc' }}>● 正円</button>
+        <button onClick={() => { takeSnapshot(); updateSelectedNodes({ shapeType: 'circ', keepRatio: false }, { borderRadius: '50%' }); }} style={{ padding: '6px', fontSize: '12px', cursor: 'pointer', borderRadius: '4px', background: primaryNode.data?.shapeType === 'circ' && !primaryNode.data?.keepRatio ? '#ddd' : '#fff', border: '1px solid #ccc' }}>⬭ 楕円</button>
+    </div>
 
-{(!primaryNode.data?.isTable || isTableEditing) && (
-<div style={{ padding: '10px', background: '#eef2ff', borderRadius: '8px', marginBottom: '15px', border: '1px solid #c7d2fe' }}>
-<label style={{fontSize: '11px', fontWeight: 'bold', color: '#3730a3'}}>📝 テキストを安全に編集</label>
-<p style={{fontSize: '9px', color: '#666', margin: '2px 0 5px 0'}}>※ここで文字を選択して、下の装飾ボタンを直接使えます！</p>
-<div
-className="html-content"
-contentEditable={true}
-suppressContentEditableWarning
-onInput={(e) => {
-const val = e.currentTarget.innerHTML;
-if (isTableEditing) {
-const cellId = selectedCells[primaryNode.id][0];
-setNodes(nds => nds.map(n => n.id === primaryNode.id ? { ...n, data: { ...n.data, cells: { ...n.data.cells, [cellId]: { ...n.data.cells[cellId], content: val } } } } : n));
-} else {
-updateSelectedNodes({ content: val });
-}
-}}
-onBlur={(e) => {
-const val = e.currentTarget.innerHTML;
-if (isTableEditing) {
-const cellId = selectedCells[primaryNode.id][0];
-setNodes(nds => nds.map(n => n.id === primaryNode.id ? { ...n, data: { ...n.data, cells: { ...n.data.cells, [cellId]: { ...n.data.cells[cellId], content: val } } } } : n));
-} else {
-updateSelectedNodes({ content: val });
-}
-}}
-style={{ width: '100%', minHeight: '60px', padding: '8px', fontSize: '12px', border: '1px solid #a5b4fc', borderRadius: '4px', backgroundColor: '#fff', outline: 'none', overflowY: 'auto', cursor: 'text' }}
-ref={el => {
-if (!el) return;
-const currentVal = isTableEditing ? (primaryNode.data.cells[selectedCells[primaryNode.id][0]]?.content || '') : (primaryNode.data?.content || '');
-if (el.innerHTML !== currentVal && document.activeElement !== el) {
-el.innerHTML = currentVal;
-}
-}}
-/>
+    {customStamps.length > 0 && (
+        <div style={{ padding: '10px', background: '#f8fafc', border: '1px solid #cbd5e1', borderRadius: '8px' }}>
+            <label style={{fontSize: '10px', fontWeight: 'bold', color: '#334155', marginBottom: '5px', display: 'block'}}>準選抜図形 (読取済)</label>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '5px' }}>
+                {customStamps.map((stamp, i) => (
+                    <div key={i} style={{ position: 'relative' }}>
+                        <img src={stamp} style={{ height: '30px', border: '1px solid #ccc', borderRadius: '4px', cursor: 'pointer', backgroundColor: '#fff' }} 
+                            onClick={() => {
+                                takeSnapshot();
+                                const center = screenToFlowPosition({ x: window.innerWidth / 2, y: window.innerHeight / 2 });
+                                const maxZ = Math.max(0, ...nodesRef.current.map((n: any) => Number(n.zIndex) || 0));
+                                setNodes((nds:any[]) => [...nds.map((n:any) => ({...n, selected: false})), { id: `img-${Date.now()}`, position: { x: center.x - 100, y: center.y - 50 }, zIndex: maxZ + 1, selected: true, data: { isImage: true, imageUrl: stamp, imgPosX: 0, imgPosY: 0, imgZoom: 1, isCropping: false, cropBaseW: 200, cropBaseH: 100 }, style: { width: 200, height: 100, background: 'transparent', padding: 0, borderColor: 'transparent', borderWidth: 0 } }]);
+                            }}
+                        />
+                        <button onClick={() => { const ns = customStamps.filter((_, idx) => idx !== i); setCustomStamps(ns); localStorage.setItem('my-logic-stamps', JSON.stringify(ns)); }} style={{ position: 'absolute', top: -5, right: -5, background: 'red', color: 'white', borderRadius: '50%', width: '12px', height: '12px', fontSize: '8px', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>×</button>
+                    </div>
+                ))}
+            </div>
+        </div>
+    )}
 </div>
 )}
 
@@ -2572,9 +2615,10 @@ const newColor = e.target.value; setLevelData(prev => ({ ...prev, [currentLevel]
 )}
 
 {/* ★ フローティング描画ボタン（ドラッグ可能） */}
-<div className="no-print" style={{ position: 'fixed', left: `calc(window.innerWidth - 120px + ${drawBtnPos.x}px)`, top: `calc(window.innerHeight - 180px + ${drawBtnPos.y}px)`, zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+{drawBtnPos.left >= 0 && (
+<div className="no-print" style={{ position: 'fixed', left: `${drawBtnPos.left}px`, top: `${drawBtnPos.top}px`, zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
     <div 
-        onMouseDown={(e) => { e.preventDefault(); drawBtnDragRef.current = { startX: e.clientX, startY: e.clientY, initX: drawBtnPos.x, initY: drawBtnPos.y }; }}
+        onMouseDown={(e) => { e.preventDefault(); drawBtnDragRef.current = { startX: e.clientX, startY: e.clientY, initX: drawBtnPos.left, initY: drawBtnPos.top }; }}
         style={{ width: '70px', height: '70px', borderRadius: '50%', background: 'rgba(59, 130, 246, 0.2)', border: '2px dashed #3b82f6', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'move', backdropFilter: 'blur(2px)', boxShadow: '0 4px 10px rgba(0,0,0,0.1)' }}
         title="外枠をドラッグして移動"
     >
@@ -2588,6 +2632,7 @@ const newColor = e.target.value; setLevelData(prev => ({ ...prev, [currentLevel]
         </button>
     </div>
 </div>
+)}
 
 {saveMessage && (
     <div style={{ position: 'fixed', bottom: '80px', left: '50%', transform: 'translateX(-50%)', background: '#333', color: '#fff', padding: '10px 20px', borderRadius: '20px', zIndex: 9999, fontSize: '12px', fontWeight: 'bold', boxShadow: '0 4px 12px rgba(0,0,0,0.15)' }}>
