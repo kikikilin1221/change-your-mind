@@ -365,10 +365,13 @@ const [tempColor, setTempColor] = useState('#f59e0b');
 const canvasRefs = useRef<Record<string, any>>({});
 const [isDrawingMode, setIsDrawingMode] = useState(false);
 const [isDrawingMenuOpen, setIsDrawingMenuOpen] = useState(false);
-const [penStyle, setPenStyle] = useState<'pen' | 'marker' | 'eraser'>('pen');
+const [penStyle, setPenStyle] = useState<'pen' | 'marker' | 'eraser' | 'pencil' | 'brush' | 'thick'>('pen');
 const [strokeColor, setStrokeColor] = useState('#000000');
 const [strokeWidth, setStrokeWidth] = useState(2);
 const [eraserWidth, setEraserWidth] = useState(15);
+const [penOpacity, setPenOpacity] = useState(1);
+const [drawBtnPos, setDrawBtnPos] = useState({ x: 0, y: 0 });
+const drawBtnDragRef = useRef<{ startX: number, startY: number, initX: number, initY: number } | null>(null);
 
 const sketchRef = useRef<any>(null);
 // レイヤー管理ステート
@@ -474,11 +477,16 @@ useEffect(() => {
 }, [isDrawingMode, layers.length]);
 
 // ペン切り替え関数
-const changePenMode = useCallback((mode: 'pen' | 'marker' | 'eraser') => {
+const changePenMode = useCallback((mode: 'pen' | 'marker' | 'eraser' | 'pencil' | 'brush' | 'thick') => {
     setPenStyle(mode);
     if (activeLayerId && canvasRefs.current[activeLayerId]) {
         canvasRefs.current[activeLayerId].eraseMode(mode === 'eraser');
     }
+    if (mode === 'pen') { setStrokeWidth(2); setPenOpacity(1); }
+    if (mode === 'pencil') { setStrokeWidth(1); setPenOpacity(0.5); }
+    if (mode === 'brush') { setStrokeWidth(6); setPenOpacity(0.9); }
+    if (mode === 'thick') { setStrokeWidth(20); setPenOpacity(0.8); }
+    if (mode === 'eraser') { setEraserWidth(50); }
 }, [activeLayerId]);
 
 // レイヤー追加関数
@@ -1499,8 +1507,10 @@ const drag = previewDragRef.current;
 if (drag) { const dx = (e.clientX - drag.startX) / zoom; const dy = (e.clientY - drag.startY) / zoom; if (Math.abs(dx) > 3 || Math.abs(dy) > 3) drag.moved = true; setNodes((nds: any[]) => nds.map((n: any) => n.id === drag.id ? { ...n, data: { ...(n.data || {}), previewStyle: { ...(n.data?.previewStyle || {}), offsetX: drag.initX + dx, offsetY: drag.initY + dy } } } : n)); }
 const imgDrag = imageCropDragRef.current;
 if (imgDrag) { const dx = (e.clientX - imgDrag.startX) / zoom; const dy = (e.clientY - imgDrag.startY) / zoom; setNodes((nds: any[]) => nds.map((n: any) => n.id === imgDrag.id ? { ...n, data: { ...(n.data || {}), imgPosX: imgDrag.initX + dx, imgPosY: imgDrag.initY + dy } } : n)); }
+const dDrag = drawBtnDragRef.current;
+    if (dDrag) { setDrawBtnPos({ x: dDrag.initX + (dDrag.startX - e.clientX), y: dDrag.initY + (dDrag.startY - e.clientY) }); }
 };
-const onMouseUp = () => { setTimeout(() => { previewDragRef.current = null; }, 50); imageCropDragRef.current = null; tableActionRef.current = null; };
+const onMouseUp = () => { setTimeout(() => { previewDragRef.current = null; }, 50); imageCropDragRef.current = null; tableActionRef.current = null; drawBtnDragRef.current = null; };
 window.addEventListener('mousemove', onMouseMove); window.addEventListener('mouseup', onMouseUp);
 return () => { window.removeEventListener('mousemove', onMouseMove); window.removeEventListener('mouseup', onMouseUp); };
 }, [getZoom]);
@@ -1973,16 +1983,14 @@ style={{ cursor: creationStep ? 'crosshair' : 'default' }}
 {/* ★ 手書き描画レイヤー（透過マルチレイヤー） */}
 <div className="no-print" style={{ position: 'absolute', inset: 0, zIndex: 900, pointerEvents: 'none' }}>
     {[...layers].reverse().map((layer, reverseIndex) => {
-        // reverse()して描画順（z-index）を調整（配列の先頭が最前面）
         const zIndex = reverseIndex;
         const isActive = isDrawingMode && activeLayerId === layer.id;
-        
         return (
-            <div key={layer.id} style={{ position: 'absolute', inset: 0, zIndex, pointerEvents: isActive ? 'auto' : 'none', opacity: layer.visible ? 1 : 0 }}>
+            <div key={layer.id} style={{ position: 'absolute', inset: 0, zIndex, pointerEvents: (isActive && !creationStep) ? 'auto' : 'none', opacity: layer.visible ? 1 : 0 }}>
                 <ReactSketchCanvas
                     ref={el => { if (el) canvasRefs.current[layer.id] = el; }}
                     strokeWidth={penStyle === 'eraser' ? eraserWidth : strokeWidth}
-                    strokeColor={penStyle === 'marker' ? strokeColor + '60' : strokeColor} // マーカー時は半透明
+                    strokeColor={penStyle === 'eraser' ? '#000000' : (strokeColor.startsWith('#') ? `rgba(${parseInt(strokeColor.slice(1,3),16)}, ${parseInt(strokeColor.slice(3,5),16)}, ${parseInt(strokeColor.slice(5,7),16)}, ${penOpacity})` : strokeColor)}
                     canvasColor="transparent"
                     style={{ width: '100%', height: '100%', border: 'none' }}
                 />
@@ -2001,30 +2009,36 @@ style={{ cursor: creationStep ? 'crosshair' : 'default' }}
 
     <div style={{ padding: '15px', borderRadius: '12px', backgroundColor: '#f8f9fa', border: '1px solid #ddd', marginBottom: '15px' }}>
         <label style={{fontSize: '11px', fontWeight: 'bold', color: '#1d4ed8', marginBottom: '10px', display: 'block'}}>ペンの種類</label>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '5px', marginBottom: '15px' }}>
-            <button onClick={() => changePenMode('pen')} style={{ padding: '8px', fontSize: '11px', fontWeight: 'bold', borderRadius: '4px', cursor: 'pointer', border: penStyle === 'pen' ? '2px solid #3b82f6' : '1px solid #ccc', backgroundColor: penStyle === 'pen' ? '#eff6ff' : '#fff' }}>🖊️ ペン</button>
-            <button onClick={() => changePenMode('marker')} style={{ padding: '8px', fontSize: '11px', fontWeight: 'bold', borderRadius: '4px', cursor: 'pointer', border: penStyle === 'marker' ? '2px solid #eab308' : '1px solid #ccc', backgroundColor: penStyle === 'marker' ? '#fefce8' : '#fff' }}>🖍️ 蛍光</button>
-            <button onClick={() => changePenMode('eraser')} style={{ padding: '8px', fontSize: '11px', fontWeight: 'bold', borderRadius: '4px', cursor: 'pointer', border: penStyle === 'eraser' ? '2px solid #ef4444' : '1px solid #ccc', backgroundColor: penStyle === 'eraser' ? '#fef2f2' : '#fff' }}>🧽 消しゴム</button>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '5px', marginBottom: '15px' }}>
+            <button onClick={() => changePenMode('pen')} style={{ padding: '6px', fontSize: '11px', fontWeight: 'bold', borderRadius: '4px', cursor: 'pointer', border: penStyle === 'pen' ? '2px solid #3b82f6' : '1px solid #ccc', backgroundColor: penStyle === 'pen' ? '#eff6ff' : '#fff' }}>🖊️ ペン</button>
+            <button onClick={() => changePenMode('pencil')} style={{ padding: '6px', fontSize: '11px', fontWeight: 'bold', borderRadius: '4px', cursor: 'pointer', border: penStyle === 'pencil' ? '2px solid #3b82f6' : '1px solid #ccc', backgroundColor: penStyle === 'pencil' ? '#eff6ff' : '#fff' }}>✏️ 鉛筆</button>
+            <button onClick={() => changePenMode('brush')} style={{ padding: '6px', fontSize: '11px', fontWeight: 'bold', borderRadius: '4px', cursor: 'pointer', border: penStyle === 'brush' ? '2px solid #3b82f6' : '1px solid #ccc', backgroundColor: penStyle === 'brush' ? '#eff6ff' : '#fff' }}>🖌️ 筆ペン</button>
+            <button onClick={() => changePenMode('thick')} style={{ padding: '6px', fontSize: '11px', fontWeight: 'bold', borderRadius: '4px', cursor: 'pointer', border: penStyle === 'thick' ? '2px solid #3b82f6' : '1px solid #ccc', backgroundColor: penStyle === 'thick' ? '#eff6ff' : '#fff' }}>🖍️ 太ペン</button>
+            <button onClick={() => changePenMode('eraser')} style={{ gridColumn: 'span 2', padding: '6px', fontSize: '11px', fontWeight: 'bold', borderRadius: '4px', cursor: 'pointer', border: penStyle === 'eraser' ? '2px solid #ef4444' : '1px solid #ccc', backgroundColor: penStyle === 'eraser' ? '#fef2f2' : '#fff' }}>🧽 消しゴム</button>
         </div>
 
-        <label style={{fontSize: '11px', fontWeight: 'bold', display: 'block', marginBottom: '5px'}}>色設定</label>
-        <div style={{ display: 'flex', gap: '5px', marginBottom: '15px', alignItems: 'center' }}>
-            {['#000000', '#ef4444', '#3b82f6', '#f59e0b', '#10b981'].map(c => (
-                <button key={c} onClick={() => setStrokeColor(c)} style={{ width: '24px', height: '24px', backgroundColor: c, border: strokeColor === c ? '2px solid #000' : '1px solid #ddd', borderRadius: '4px', cursor: 'pointer', flexShrink: 0 }} />
+        <label style={{fontSize: '11px', fontWeight: 'bold', display: 'block', marginBottom: '5px'}}>色設定 (準選抜色)</label>
+        <div style={{ display: 'flex', gap: '5px', marginBottom: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
+            {customColors.map(c => (
+                <button key={'drawColor'+c} onClick={() => setStrokeColor(c)} onKeyDown={(e) => { if(e.key === 'Backspace' || e.key === 'Delete') { const nc = customColors.filter(col => col !== c); setCustomColors(nc); localStorage.setItem('my-logic-custom-colors', JSON.stringify(nc)); } }} title="選択してDeleteキーで削除" style={{ width: '24px', height: '24px', backgroundColor: c, border: strokeColor === c ? '2px solid #000' : '1px solid #ddd', borderRadius: '4px', cursor: 'pointer' }} />
             ))}
             <input type="color" value={strokeColor} onChange={(e) => setStrokeColor(e.target.value)} style={{width:'24px', height:'24px', cursor: 'pointer', border: 'none', padding: 0}} />
+            <button onClick={() => { if (!customColors.includes(strokeColor)) { const nc = [...customColors, strokeColor]; setCustomColors(nc); localStorage.setItem('my-logic-custom-colors', JSON.stringify(nc)); } }} style={{ fontSize: '10px', padding: '4px 8px', background: '#f8fafc', border: '1px solid #cbd5e1', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}>＋準選抜</button>
         </div>
 
-        <label style={{fontSize: '11px', fontWeight: 'bold', display: 'block', marginBottom: '5px'}}>太さ ({penStyle === 'eraser' ? eraserWidth : strokeWidth}px)</label>
+        <label style={{fontSize: '10px', fontWeight: 'bold', display: 'block', marginBottom: '5px'}}>透明度 ({Math.round(penOpacity * 100)}%)</label>
+        <input type="range" min="0.1" max="1" step="0.1" value={penOpacity} onChange={(e) => setPenOpacity(Number(e.target.value))} style={{width:'100%', marginBottom:'15px'}} />
+
+        <label style={{fontSize: '10px', fontWeight: 'bold', display: 'block', marginBottom: '5px'}}>太さ ({penStyle === 'eraser' ? eraserWidth : strokeWidth}px)</label>
         {penStyle !== 'eraser' ? (
-            <input type="range" min="0.5" max="10" step="0.5" value={strokeWidth} onChange={(e) => setStrokeWidth(Number(e.target.value))} style={{width:'100%', marginBottom:'15px'}} />
+            <input type="range" min="0.5" max="50" step="0.5" value={strokeWidth} onChange={(e) => setStrokeWidth(Number(e.target.value))} style={{width:'100%', marginBottom:'15px'}} />
         ) : (
-            <input type="range" min="5" max="200" value={eraserWidth} onChange={(e) => setEraserWidth(Number(e.target.value))} style={{width:'100%', marginBottom:'15px'}} />
+            <input type="range" min="5" max="300" step="5" value={eraserWidth} onChange={(e) => setEraserWidth(Number(e.target.value))} style={{width:'100%', marginBottom:'15px'}} />
         )}
 
         <div style={{ display: 'flex', gap: '5px' }}>
             <button onClick={() => activeLayerId && canvasRefs.current[activeLayerId]?.undo()} style={{ flex: 1, padding: '6px', fontSize: '11px', background: '#f1f5f9', border: '1px solid #cbd5e1', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}>↩️ 1つ戻る</button>
-            <button onClick={() => { if(confirm('現在のレイヤーを全消去しますか？')) activeLayerId && canvasRefs.current[activeLayerId]?.clearCanvas(); }} style={{ flex: 1, padding: '6px', fontSize: '11px', background: '#fffcfc', color: 'red', border: '1px solid red', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}>🗑️ レイヤー消去</button>
+            <button onClick={() => { if(confirm('現在のレイヤーを全消去しますか？')) activeLayerId && canvasRefs.current[activeLayerId]?.clearCanvas(); }} style={{ flex: 1, padding: '6px', fontSize: '11px', background: '#fffcfc', color: 'red', border: '1px solid red', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}>🗑️ 物理全消し</button>
         </div>
         {/* ★ 追加：図形・枠線・定規・論理記号ツール */}
 <hr style={{margin: '15px 0', border: 'none', borderTop: '1px solid #eee'}} />
@@ -2083,7 +2097,7 @@ style={{ cursor: creationStep ? 'crosshair' : 'default' }}
 </div>
 )}
 
-{selectedNodes.length > 0 && primaryNode && primaryNode.type !== 'printZone' && (
+{selectedNodes.length > 0 && primaryNode && primaryNode.type !== 'printZone' && !isDrawingMode && (
 <div className="no-print" onMouseDown={(e) => e.stopPropagation()} onClick={(e) => e.stopPropagation()} style={{ position:'absolute', right:0, top:0, bottom:0, width:'320px', borderLeft:'1px solid #ddd', padding:'15px', backgroundColor:'#fff', zIndex:1000, overflowY: 'auto', boxShadow: '-4px 0 10px rgba(0,0,0,0.05)' }}>
 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
 <h3 style={{fontSize:'14px', margin: 0}}>{selectedNodes.length > 1 ? `${selectedNodes.length}個の要素を一括編集` : primaryNode.data?.isTable ? '表の設定' : primaryNode.data?.isImage ? '画像編集' : primaryNode.data?.isShape ? '図形設定' : 'テキスト設定'}</h3>
@@ -2361,7 +2375,7 @@ setSelectedCells({});
 </div>
 )}
 
-{selectedEdge && (
+{selectedEdge && !isDrawingMode && (
 <div className="no-print" onMouseDown={(e) => e.stopPropagation()} onClick={(e) => e.stopPropagation()} style={{ position:'absolute', right: 0, top:0, bottom:0, width:'300px', borderLeft:'1px solid #ddd', padding:'20px', backgroundColor:'#fff', zIndex:1000, overflowY: 'auto', boxShadow: '-4px 0 10px rgba(0,0,0,0.05)' }}>
 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
 <h3 style={{fontSize:'14px', margin: 0}}>線のデザイン</h3>
@@ -2523,20 +2537,7 @@ el.innerHTML = currentVal;
 <button onClick={() => addNode('table')} style={{ ...primaryBtnStyle, backgroundColor: '#6366f1', boxShadow: '0 2px 4px rgba(99, 102, 241, 0.3)' }}>🧮 表</button>
 
 <div style={{ width: '1px', height: '24px', backgroundColor: '#ddd', margin: '0 2px' }} />
-<button onClick={() => { 
-    const nextMode = !isDrawingMode;
-    setIsDrawingMode(nextMode); 
-    setIsDrawingMenuOpen(nextMode); // ★追加：描画開始と同時にメニューを開く、終了時に閉じる
-    changePenMode('pen'); // ★修正：古いsketchRefを消し、新しいレイヤー対応のペン関数を使用
-}} style={{ ...primaryBtnStyle, backgroundColor: isDrawingMode ? '#ef4444' : '#8b5cf6', boxShadow: isDrawingMode ? 'none' : '0 2px 4px rgba(139, 92, 246, 0.3)' }}>
-    {isDrawingMode ? '❌ 描画終了' : '✏️ 描画する'}
-</button>
 
-{isDrawingMode && (
-    <button onClick={() => setIsDrawingMenuOpen(!isDrawingMenuOpen)} style={{ ...actionBtnStyle, backgroundColor: isDrawingMenuOpen ? '#e2e8f0' : '#fff', color: '#333', border: '1px solid #cbd5e1' }}>
-        🎨 メニュー
-    </button>
-)}
 
 <div style={{ width: '1px', height: '24px', backgroundColor: '#ddd', margin: '0 2px' }} />
 <div style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '11px', fontWeight: 'bold', color: '#555', backgroundColor: '#fff', padding: '4px 8px', borderRadius: '6px', border: '1px solid #ccc' }}>
@@ -2552,6 +2553,24 @@ const newColor = e.target.value; setLevelData(prev => ({ ...prev, [currentLevel]
 ) : (
 <button className="no-print" onClick={() => setIsBottomBarOpen(true)} style={{ position: 'absolute', bottom: 10, right: 10, zIndex: 100, padding: '4px 8px', fontSize: '10px', background: '#e2e8f0', border: '1px solid #cbd5e1', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold', color: '#475569', boxShadow: '0 -2px 4px rgba(0,0,0,0.1)' }}>▲ ツールバーを表示</button>
 )}
+
+{/* ★ フローティング描画ボタン（ドラッグ可能） */}
+<div className="no-print" style={{ position: 'fixed', right: `calc(40px - ${drawBtnPos.x}px)`, bottom: `calc(100px - ${drawBtnPos.y}px)`, zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+    <div 
+        onMouseDown={(e) => { e.preventDefault(); drawBtnDragRef.current = { startX: e.clientX, startY: e.clientY, initX: drawBtnPos.x, initY: drawBtnPos.y }; }}
+        style={{ width: '70px', height: '70px', borderRadius: '50%', background: 'rgba(59, 130, 246, 0.2)', border: '2px dashed #3b82f6', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'move', backdropFilter: 'blur(2px)', boxShadow: '0 4px 10px rgba(0,0,0,0.1)' }}
+        title="外枠をドラッグして移動"
+    >
+        <button 
+            onMouseDown={(e) => e.stopPropagation()} 
+            onClick={() => { const next = !isDrawingMode; setIsDrawingMode(next); setIsDrawingMenuOpen(next); if(next) changePenMode('pen'); }} 
+            style={{ width: '50px', height: '50px', borderRadius: '50%', backgroundColor: isDrawingMode ? '#ef4444' : '#8b5cf6', color: '#fff', border: 'none', boxShadow: '0 2px 8px rgba(0,0,0,0.3)', cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: 0 }}
+        >
+            <span style={{ fontSize: '18px', marginBottom: '2px' }}>{isDrawingMode ? '❌' : '✏️'}</span>
+            <span style={{ fontSize: '10px', fontWeight: 'bold' }}>{isDrawingMode ? '終了' : '描画'}</span>
+        </button>
+    </div>
+</div>
 
 {saveMessage && (
     <div style={{ position: 'fixed', bottom: '80px', left: '50%', transform: 'translateX(-50%)', background: '#333', color: '#fff', padding: '10px 20px', borderRadius: '20px', zIndex: 9999, fontSize: '12px', fontWeight: 'bold', boxShadow: '0 4px 12px rgba(0,0,0,0.15)' }}>
