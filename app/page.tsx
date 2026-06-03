@@ -192,7 +192,7 @@ const QUICK_TEXT_COLORS = ['#000000', '#ef4444', '#eab308', '#10b981', '#3b82f6'
 type TableActionType = { id: string; type: string; startX: number; startY: number; startR: number; startC: number; minC: number; maxC: number; minR: number; maxR: number; initWidths: number[]; initHeights: number[]; };
 
 function FlowEditor() {
-const { setViewport, getZoom } = useReactFlow();
+const { setViewport, getZoom, screenToFlowPosition } = useReactFlow();
 const fileInputRef = useRef<HTMLInputElement>(null);
 const jsonImportRef = useRef<HTMLInputElement>(null);
 
@@ -219,6 +219,7 @@ const [guides, setGuides] = useState<{ lineX?: number, lineY?: number }>({});
 const [sizeSource, setSizeSource] = useState<{width: number, height: number} | null>(null);
 const [alignSource, setAlignSource] = useState<{ id: string, x: number, y: number, width: number, height: number } | null>(null);
 const [partialFontSize, setPartialFontSize] = useState<number>(14);
+
 
 const [selectedCells, setSelectedCells] = useState<Record<string, string[]>>({});
 const [tableBorderWidth, setTableBorderWidth] = useState('1px');
@@ -373,6 +374,95 @@ const sketchRef = useRef<any>(null);
 // レイヤー管理ステート
 const [layers, setLayers] = useState<{id: string, name: string, visible: boolean}[]>([]);
 const [activeLayerId, setActiveLayerId] = useState<string | null>(null);
+
+// ★ 新機能用ステート（枠線・定規・論理記号）
+const [shapeStrokeColor, setShapeStrokeColor] = useState('#000000');
+const [shapeStrokeWidth, setShapeStrokeWidth] = useState(2);
+const [symbolFontSize, setSymbolFontSize] = useState(24);
+const [creationStep, setCreationStep] = useState<{ type: 'frame'|'ruler-v'|'ruler-h', startX?: number, startY?: number } | null>(null);
+
+// 論理記号の追加関数
+const addSymbolNode = useCallback((symbol: string) => {
+    takeSnapshot();
+    const id = `node-${Date.now()}`;
+    const maxZ = Math.max(0, ...nodesRef.current.map((n:any) => Number(n.zIndex) || 0));
+    
+    let targetX = 100;
+    let targetY = 100;
+    
+    if (symbol === '⇔') {
+        const eqNodes = nodesRef.current.filter((n:any) => n.data?.content === '⇔');
+        if (eqNodes.length > 0) {
+            const lastEq = eqNodes[eqNodes.length - 1];
+            targetX = lastEq.position.x;
+            const h = Number(lastEq.style?.height) || symbolFontSize * 1.5;
+            targetY = lastEq.position.y + h + 10; // ⇔の真下10pxに配置
+        }
+    }
+    
+    const newNode = {
+        id, selected: true,
+        position: { x: targetX, y: targetY },
+        data: { content: symbol, isEditing: false },
+        style: { backgroundColor: 'transparent', borderColor: 'transparent', borderWidth: 0, color: shapeStrokeColor, fontSize: `${symbolFontSize}px`, fontWeight: 'bold', width: symbolFontSize * 2, height: symbolFontSize * 1.5, hAlign: 'center', vAlign: 'center', display: 'flex', justifyContent: 'center', alignItems: 'center' },
+        zIndex: maxZ + 1
+    };
+    
+    setNodes((nds:any[]) => [...nds.map((n:any) => ({...n, selected: false})), newNode]);
+}, [takeSnapshot, shapeStrokeColor, symbolFontSize]);
+
+// 枠・定規作成のクリック処理 (1回目＝始点、2回目＝終点)
+const handlePaneClick = useCallback((e: React.MouseEvent) => {
+    if (!creationStep) return;
+    const projected = screenToFlowPosition({ x: e.clientX, y: e.clientY });
+    
+    if (creationStep.startX === undefined) {
+        setCreationStep({ ...creationStep, startX: projected.x, startY: projected.y });
+        setSaveMessage('終点をクリックしてください');
+    } else {
+        takeSnapshot();
+        const x1 = creationStep.startX;
+        const y1 = creationStep.startY!;
+        const x2 = projected.x;
+        const y2 = projected.y;
+
+        const id = `node-${Date.now()}`;
+        const maxZ = Math.max(0, ...nodesRef.current.map((n:any) => Number(n.zIndex) || 0));
+        
+        let newNode: any;
+        
+        if (creationStep.type === 'frame') {
+            newNode = {
+                id, selected: true,
+                position: { x: Math.min(x1, x2), y: Math.min(y1, y2) },
+                data: { content: '', isShape: true, shapeType: 'rect', keepRatio: false, isEditing: false },
+                style: { width: Math.max(10, Math.abs(x2 - x1)), height: Math.max(10, Math.abs(y2 - y1)), backgroundColor: 'transparent', borderColor: shapeStrokeColor, borderWidth: shapeStrokeWidth, borderRadius: '0px' },
+                zIndex: maxZ + 1
+            };
+        } else if (creationStep.type === 'ruler-h') {
+            newNode = {
+                id, selected: true,
+                position: { x: Math.min(x1, x2), y: y1 - (shapeStrokeWidth/2) },
+                data: { content: '', isShape: true, shapeType: 'rect', keepRatio: false, isEditing: false },
+                style: { width: Math.max(10, Math.abs(x2 - x1)), height: shapeStrokeWidth, backgroundColor: shapeStrokeColor, borderColor: 'transparent', borderWidth: 0, borderRadius: '0px' },
+                zIndex: maxZ + 1
+            };
+        } else if (creationStep.type === 'ruler-v') {
+            newNode = {
+                id, selected: true,
+                position: { x: x1 - (shapeStrokeWidth/2), y: Math.min(y1, y2) },
+                data: { content: '', isShape: true, shapeType: 'rect', keepRatio: false, isEditing: false },
+                style: { width: shapeStrokeWidth, height: Math.max(10, Math.abs(y2 - y1)), backgroundColor: shapeStrokeColor, borderColor: 'transparent', borderWidth: 0, borderRadius: '0px' },
+                zIndex: maxZ + 1
+            };
+        }
+
+        setNodes((nds:any[]) => [...nds.map((n:any) => ({...n, selected: false})), newNode]);
+        setCreationStep(null);
+        setSaveMessage('図形を配置しました');
+        setTimeout(() => setSaveMessage(null), 1500);
+    }
+}, [creationStep, screenToFlowPosition, shapeStrokeColor, shapeStrokeWidth, takeSnapshot, setNodes]);
 
 // 描画モード開始時に初期レイヤーを生成
 useEffect(() => {
@@ -1874,6 +1964,8 @@ onEdgesChange={u => setEdges((eds: any[]) => applyEdgeChanges(u, eds))}
 onConnect={p => { takeSnapshot(); setEdges((eds: any[]) => addEdge({...p, type:'default', label: '', style: {strokeWidth: 1}, data: { markerType: 'arrow'}}, eds)); }} 
 onNodeDragStart={() => takeSnapshot()} onNodeDoubleClick={(_, n) => { enterLevel(n.id, extractFirstLineText(n.data?.content)); }} 
 onNodeDrag={onNodeDrag} onNodeDragStop={onNodeDragStop} fitView
+onPaneClick={handlePaneClick}
+style={{ cursor: creationStep ? 'crosshair' : 'default' }}
 >
 <Background color="#f1f1f1" className="no-print" /><Controls className="no-print" /><SmartGuides guides={guides} />
 </ReactFlow>
@@ -1927,13 +2019,43 @@ onNodeDrag={onNodeDrag} onNodeDragStop={onNodeDragStop} fitView
         {penStyle !== 'eraser' ? (
             <input type="range" min="0.5" max="10" step="0.5" value={strokeWidth} onChange={(e) => setStrokeWidth(Number(e.target.value))} style={{width:'100%', marginBottom:'15px'}} />
         ) : (
-            <input type="range" min="5" max="50" value={eraserWidth} onChange={(e) => setEraserWidth(Number(e.target.value))} style={{width:'100%', marginBottom:'15px'}} />
+            <input type="range" min="5" max="200" value={eraserWidth} onChange={(e) => setEraserWidth(Number(e.target.value))} style={{width:'100%', marginBottom:'15px'}} />
         )}
 
         <div style={{ display: 'flex', gap: '5px' }}>
             <button onClick={() => activeLayerId && canvasRefs.current[activeLayerId]?.undo()} style={{ flex: 1, padding: '6px', fontSize: '11px', background: '#f1f5f9', border: '1px solid #cbd5e1', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}>↩️ 1つ戻る</button>
             <button onClick={() => { if(confirm('現在のレイヤーを全消去しますか？')) activeLayerId && canvasRefs.current[activeLayerId]?.clearCanvas(); }} style={{ flex: 1, padding: '6px', fontSize: '11px', background: '#fffcfc', color: 'red', border: '1px solid red', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}>🗑️ レイヤー消去</button>
         </div>
+        {/* ★ 追加：図形・枠線・定規・論理記号ツール */}
+<hr style={{margin: '15px 0', border: 'none', borderTop: '1px solid #eee'}} />
+<label style={{fontSize: '11px', fontWeight: 'bold', color: '#1d4ed8', marginBottom: '10px', display: 'block'}}>枠線・定規・記号 (図形配置)</label>
+
+<div style={{ display: 'flex', gap: '5px', marginBottom: '10px', alignItems: 'center' }}>
+    {['#000000', '#ef4444', '#3b82f6', '#f59e0b', '#10b981'].map(c => (
+        <button key={'shape'+c} onClick={() => setShapeStrokeColor(c)} style={{ width: '20px', height: '20px', backgroundColor: c, border: shapeStrokeColor === c ? '2px solid #000' : '1px solid #ddd', borderRadius: '4px', cursor: 'pointer', flexShrink: 0 }} />
+    ))}
+    <input type="color" value={shapeStrokeColor} onChange={(e) => setShapeStrokeColor(e.target.value)} style={{width:'20px', height:'20px', cursor: 'pointer', border: 'none', padding: 0}} />
+</div>
+
+<label style={{fontSize: '10px', fontWeight: 'bold', display: 'block', marginBottom: '5px'}}>枠・定規の太さ ({shapeStrokeWidth}px)</label>
+<input type="range" min="1" max="20" value={shapeStrokeWidth} onChange={(e) => setShapeStrokeWidth(Number(e.target.value))} style={{width:'100%', marginBottom:'10px'}} />
+
+<div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '5px', marginBottom: '15px' }}>
+    <button onClick={() => { setCreationStep({ type: 'frame', startX: undefined, startY: undefined }); setSaveMessage('始点をクリックしてください'); }} style={{ padding: '6px', fontSize: '10px', fontWeight: 'bold', borderRadius: '4px', cursor: 'pointer', border: creationStep?.type === 'frame' ? '2px solid #3b82f6' : '1px solid #ccc', background: creationStep?.type === 'frame' ? '#eff6ff' : '#fff' }}>□ 枠線</button>
+    <button onClick={() => { setCreationStep({ type: 'ruler-h', startX: undefined, startY: undefined }); setSaveMessage('始点をクリックしてください'); }} style={{ padding: '6px', fontSize: '10px', fontWeight: 'bold', borderRadius: '4px', cursor: 'pointer', border: creationStep?.type === 'ruler-h' ? '2px solid #3b82f6' : '1px solid #ccc', background: creationStep?.type === 'ruler-h' ? '#eff6ff' : '#fff' }}>━ 横定規</button>
+    <button onClick={() => { setCreationStep({ type: 'ruler-v', startX: undefined, startY: undefined }); setSaveMessage('始点をクリックしてください'); }} style={{ padding: '6px', fontSize: '10px', fontWeight: 'bold', borderRadius: '4px', cursor: 'pointer', border: creationStep?.type === 'ruler-v' ? '2px solid #3b82f6' : '1px solid #ccc', background: creationStep?.type === 'ruler-v' ? '#eff6ff' : '#fff' }}>┃ 縦定規</button>
+</div>
+
+<label style={{fontSize: '10px', fontWeight: 'bold', display: 'block', marginBottom: '5px'}}>記号のサイズ ({symbolFontSize}px)</label>
+<input type="range" min="12" max="100" value={symbolFontSize} onChange={(e) => setSymbolFontSize(Number(e.target.value))} style={{width:'100%', marginBottom:'10px'}} />
+
+<div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '4px' }}>
+    <button onClick={() => addSymbolNode('⇔')} style={{ padding: '4px', fontSize: '12px', cursor: 'pointer', borderRadius: '4px', border: '1px solid #ccc', background: '#fff' }}>⇔</button>
+    <button onClick={() => addSymbolNode('⇨')} style={{ padding: '4px', fontSize: '12px', cursor: 'pointer', borderRadius: '4px', border: '1px solid #ccc', background: '#fff' }}>⇨</button>
+    <button onClick={() => addSymbolNode('∧')} style={{ padding: '4px', fontSize: '12px', cursor: 'pointer', borderRadius: '4px', border: '1px solid #ccc', background: '#fff' }}>∧</button>
+    <button onClick={() => addSymbolNode('∨')} style={{ padding: '4px', fontSize: '12px', cursor: 'pointer', borderRadius: '4px', border: '1px solid #ccc', background: '#fff' }}>∨</button>
+    <button onClick={() => addSymbolNode('＋')} style={{ padding: '4px', fontSize: '12px', cursor: 'pointer', borderRadius: '4px', border: '1px solid #ccc', background: '#fff' }}>＋</button>
+</div>
     </div>
 
     <div style={{ padding: '15px', borderRadius: '12px', backgroundColor: '#f0f9ff', border: '1px solid #bfdbfe' }}>
