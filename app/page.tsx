@@ -7,7 +7,7 @@ import {
 import '@xyflow/react/dist/style.css';
 import katex from 'katex';
 import 'katex/dist/katex.min.css';
-
+import { ReactSketchCanvas, ReactSketchCanvasRef } from 'react-sketch-canvas';
 if (typeof window !== 'undefined') {
     const originalError = console.error;
     console.error = (...args) => {
@@ -359,6 +359,13 @@ const handleUngroupSelection = useCallback(() => {
 const [saveMessage, setSaveMessage] = useState<string | null>(null);
 const [customColors, setCustomColors] = useState<string[]>([]);
 const [tempColor, setTempColor] = useState('#f59e0b');
+// 🎨 描画（手書き）機能用ステートとRef
+const sketchRef = useRef<ReactSketchCanvasRef>(null);
+const [isDrawingMode, setIsDrawingMode] = useState(false);
+const [isEraser, setIsEraser] = useState(false);
+const [strokeColor, setStrokeColor] = useState('#000000');
+const [strokeWidth, setStrokeWidth] = useState(2);
+const [eraserWidth, setEraserWidth] = useState(15);
 
 
 useEffect(() => {
@@ -1826,6 +1833,45 @@ onNodeDrag={onNodeDrag} onNodeDragStop={onNodeDragStop} fitView
 <Background color="#f1f1f1" className="no-print" /><Controls className="no-print" /><SmartGuides guides={guides} />
 </ReactFlow>
 
+{/* ★ 手書き描画レイヤー（透過キャンバス） */}
+<div className="no-print" style={{ position: 'absolute', inset: 0, zIndex: 900, pointerEvents: isDrawingMode ? 'auto' : 'none' }}>
+    <ReactSketchCanvas
+        ref={sketchRef}
+        strokeWidth={isEraser ? eraserWidth : strokeWidth}
+        strokeColor={strokeColor}
+        eraserWidth={eraserWidth}
+        canvasColor="transparent"
+        style={{ width: '100%', height: '100%', border: 'none' }}
+    />
+</div>
+
+{/* ★ 描画中のみ表示されるフローティングメニュー */}
+{isDrawingMode && (
+    <div className="no-print" style={{ position: 'absolute', bottom: '60px', left: '50%', transform: 'translateX(-50%)', zIndex: 1000, display: 'flex', gap: '10px', background: 'rgba(255,255,255,0.95)', padding: '10px 20px', borderRadius: '30px', boxShadow: '0 4px 15px rgba(0,0,0,0.1)', border: '1px solid #e2e8f0', alignItems: 'center' }}>
+        <button onClick={() => { setIsEraser(false); sketchRef.current?.eraseMode(false); }} style={{ ...actionBtnStyle, backgroundColor: !isEraser ? '#bfdbfe' : '#fff', borderColor: !isEraser ? '#3b82f6' : '#ccc' }}>🖊️ ペン</button>
+        <button onClick={() => { setIsEraser(true); sketchRef.current?.eraseMode(true); }} style={{ ...actionBtnStyle, backgroundColor: isEraser ? '#fecaca' : '#fff', borderColor: isEraser ? '#ef4444' : '#ccc' }}>🧽 消しゴム</button>
+        
+        <div style={{ width: '1px', height: '20px', backgroundColor: '#cbd5e1' }} />
+        
+        <input type="color" value={strokeColor} onChange={(e) => setStrokeColor(e.target.value)} disabled={isEraser} style={{ width: '28px', height: '28px', cursor: 'pointer', border: 'none', padding: 0, borderRadius: '4px', opacity: isEraser ? 0.3 : 1 }} />
+        
+        <div style={{ display: 'flex', alignItems: 'center', gap: '5px', opacity: isEraser ? 0.3 : 1 }}>
+            <span style={{ fontSize: '10px', fontWeight: 'bold' }}>ペンの太さ</span>
+            <input type="range" min="1" max="20" value={strokeWidth} onChange={(e) => setStrokeWidth(Number(e.target.value))} disabled={isEraser} style={{ width: '60px' }} />
+        </div>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: '5px', opacity: !isEraser ? 0.3 : 1 }}>
+            <span style={{ fontSize: '10px', fontWeight: 'bold' }}>消しゴムサイズ</span>
+            <input type="range" min="5" max="50" value={eraserWidth} onChange={(e) => setEraserWidth(Number(e.target.value))} disabled={!isEraser} style={{ width: '60px' }} />
+        </div>
+
+        <div style={{ width: '1px', height: '20px', backgroundColor: '#cbd5e1' }} />
+        
+        <button onClick={() => sketchRef.current?.undo()} style={actionBtnStyle}>↩️ 1つ戻る</button>
+        <button onClick={() => { if(confirm('このレイヤーの描画をすべて消去しますか？')) sketchRef.current?.clearCanvas(); }} style={{ ...actionBtnStyle, color: 'red' }}>🗑️ 全消去</button>
+    </div>
+)}
+
 {selectedNodes.length > 0 && primaryNode && primaryNode.type !== 'printZone' && (
 <div className="no-print" onMouseDown={(e) => e.stopPropagation()} onClick={(e) => e.stopPropagation()} style={{ position:'absolute', right:0, top:0, bottom:0, width:'320px', borderLeft:'1px solid #ddd', padding:'15px', backgroundColor:'#fff', zIndex:1000, overflowY: 'auto', boxShadow: '-4px 0 10px rgba(0,0,0,0.05)' }}>
 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
@@ -2264,6 +2310,12 @@ el.innerHTML = currentVal;
 <button onClick={() => addNode('image')} style={{ ...primaryBtnStyle, backgroundColor: '#10b981', boxShadow: '0 2px 4px rgba(16, 185, 129, 0.3)' }}>📸 画像</button>
 <button onClick={() => addNode('shape')} style={{ ...primaryBtnStyle, backgroundColor: '#f59e0b', boxShadow: '0 2px 4px rgba(245, 158, 11, 0.3)' }}>🟦 図形</button>
 <button onClick={() => addNode('table')} style={{ ...primaryBtnStyle, backgroundColor: '#6366f1', boxShadow: '0 2px 4px rgba(99, 102, 241, 0.3)' }}>🧮 表</button>
+
+<div style={{ width: '1px', height: '24px', backgroundColor: '#ddd', margin: '0 2px' }} />
+<button onClick={() => { setIsDrawingMode(!isDrawingMode); setIsEraser(false); sketchRef.current?.eraseMode(false); }} style={{ ...primaryBtnStyle, backgroundColor: isDrawingMode ? '#ef4444' : '#8b5cf6', boxShadow: isDrawingMode ? 'none' : '0 2px 4px rgba(139, 92, 246, 0.3)' }}>
+    {isDrawingMode ? '❌ 描画終了' : '✏️ 描画する'}
+</button>
+
 <div style={{ width: '1px', height: '24px', backgroundColor: '#ddd', margin: '0 2px' }} />
 <div style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '11px', fontWeight: 'bold', color: '#555', backgroundColor: '#fff', padding: '4px 8px', borderRadius: '6px', border: '1px solid #ccc' }}>
 <span>🎨 背景</span>
