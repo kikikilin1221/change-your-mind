@@ -390,8 +390,10 @@ const addSymbolNode = useCallback((symbol: string) => {
     const id = `node-${Date.now()}`;
     const maxZ = Math.max(0, ...nodesRef.current.map((n:any) => Number(n.zIndex) || 0));
     
-    let targetX = 100;
-    let targetY = 100;
+    // ★ 現在の画面(ビューポート)の中央座標を取得
+    const center = screenToFlowPosition({ x: window.innerWidth / 2, y: window.innerHeight / 2 });
+    let targetX = center.x - (symbolFontSize / 2);
+    let targetY = center.y - (symbolFontSize / 2);
     
     if (symbol === '⇔') {
         const eqNodes = nodesRef.current.filter((n:any) => n.data?.content === '⇔');
@@ -483,10 +485,10 @@ const changePenMode = useCallback((mode: 'pen' | 'marker' | 'eraser' | 'pencil' 
         canvasRefs.current[activeLayerId].eraseMode(mode === 'eraser');
     }
     if (mode === 'pen') { setStrokeWidth(2); setPenOpacity(1); }
-    if (mode === 'pencil') { setStrokeWidth(1); setPenOpacity(0.5); }
-    if (mode === 'brush') { setStrokeWidth(6); setPenOpacity(0.9); }
-    if (mode === 'thick') { setStrokeWidth(20); setPenOpacity(0.8); }
-    if (mode === 'eraser') { setEraserWidth(50); }
+    if (mode === 'pencil') { setStrokeWidth(1); setPenOpacity(0.6); } // 少し薄く細く
+    if (mode === 'brush') { setStrokeWidth(8); setPenOpacity(0.9); }
+    if (mode === 'marker') { setStrokeWidth(16); setPenOpacity(0.4); } // 蛍光ペン復活
+    if (mode === 'thick') { setStrokeWidth(25); setPenOpacity(1); }
 }, [activeLayerId]);
 
 // レイヤー追加関数
@@ -1422,7 +1424,13 @@ const children = updatedNodes.filter(n => childIds.includes(n.id));
 if (children.length > 0) { const spacing = 240; const totalSpan = (children.length - 1) * spacing; const startPos = (parent.position.x + parentW/2) - totalSpan / 2; children.forEach((child, index) => { const childNode = updatedNodes.find(n => n.id === child.id); if (childNode) { const childW = Number(childNode.style?.width || 200); childNode.position = { x: startPos + index * spacing - (childW / 2), y: newY }; } }); }
 return updatedNodes;
 });
-} else { setNodes((nds: any[]) => { const maxZ = Math.max(0, ...nds.map((n: any) => Number(n.zIndex) || 0)); return [...nds.map((n: any) => ({...n, selected: false})), { id, selected: true, position: { x: 100, y: 100 }, data, style, zIndex: maxZ + 1 }]; }); }
+} else { 
+    const center = screenToFlowPosition({ x: window.innerWidth / 2, y: window.innerHeight / 2 });
+    setNodes((nds: any[]) => { 
+        const maxZ = Math.max(0, ...nds.map((n: any) => Number(n.zIndex) || 0)); 
+        return [...nds.map((n: any) => ({...n, selected: false})), { id, selected: true, position: { x: center.x - (style.width/2 || 100), y: center.y - (style.height/2 || 50) }, data, style, zIndex: maxZ + 1 }]; 
+    }); 
+}
 }, [takeSnapshot]);
 
 useEffect(() => {
@@ -1508,7 +1516,7 @@ if (drag) { const dx = (e.clientX - drag.startX) / zoom; const dy = (e.clientY -
 const imgDrag = imageCropDragRef.current;
 if (imgDrag) { const dx = (e.clientX - imgDrag.startX) / zoom; const dy = (e.clientY - imgDrag.startY) / zoom; setNodes((nds: any[]) => nds.map((n: any) => n.id === imgDrag.id ? { ...n, data: { ...(n.data || {}), imgPosX: imgDrag.initX + dx, imgPosY: imgDrag.initY + dy } } : n)); }
 const dDrag = drawBtnDragRef.current;
-    if (dDrag) { setDrawBtnPos({ x: dDrag.initX + (dDrag.startX - e.clientX), y: dDrag.initY + (dDrag.startY - e.clientY) }); }
+if (dDrag) { setDrawBtnPos({ x: dDrag.initX + (e.clientX - dDrag.startX), y: dDrag.initY + (e.clientY - dDrag.startY) }); }
 };
 const onMouseUp = () => { setTimeout(() => { previewDragRef.current = null; }, 50); imageCropDragRef.current = null; tableActionRef.current = null; drawBtnDragRef.current = null; };
 window.addEventListener('mousemove', onMouseMove); window.addEventListener('mouseup', onMouseUp);
@@ -1989,10 +1997,12 @@ style={{ cursor: creationStep ? 'crosshair' : 'default' }}
             <div key={layer.id} style={{ position: 'absolute', inset: 0, zIndex, pointerEvents: (isActive && !creationStep) ? 'auto' : 'none', opacity: layer.visible ? 1 : 0 }}>
                 <ReactSketchCanvas
                     ref={el => { if (el) canvasRefs.current[layer.id] = el; }}
-                    strokeWidth={penStyle === 'eraser' ? eraserWidth : strokeWidth}
+                    strokeWidth={strokeWidth}
+                    eraserWidth={eraserWidth}
                     strokeColor={penStyle === 'eraser' ? '#000000' : (strokeColor.startsWith('#') ? `rgba(${parseInt(strokeColor.slice(1,3),16)}, ${parseInt(strokeColor.slice(3,5),16)}, ${parseInt(strokeColor.slice(5,7),16)}, ${penOpacity})` : strokeColor)}
                     canvasColor="transparent"
                     style={{ width: '100%', height: '100%', border: 'none' }}
+                    withTimestamp={true}
                 />
             </div>
         );
@@ -2009,21 +2019,28 @@ style={{ cursor: creationStep ? 'crosshair' : 'default' }}
 
     <div style={{ padding: '15px', borderRadius: '12px', backgroundColor: '#f8f9fa', border: '1px solid #ddd', marginBottom: '15px' }}>
         <label style={{fontSize: '11px', fontWeight: 'bold', color: '#1d4ed8', marginBottom: '10px', display: 'block'}}>ペンの種類</label>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '5px', marginBottom: '15px' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '5px', marginBottom: '15px' }}>
             <button onClick={() => changePenMode('pen')} style={{ padding: '6px', fontSize: '11px', fontWeight: 'bold', borderRadius: '4px', cursor: 'pointer', border: penStyle === 'pen' ? '2px solid #3b82f6' : '1px solid #ccc', backgroundColor: penStyle === 'pen' ? '#eff6ff' : '#fff' }}>🖊️ ペン</button>
             <button onClick={() => changePenMode('pencil')} style={{ padding: '6px', fontSize: '11px', fontWeight: 'bold', borderRadius: '4px', cursor: 'pointer', border: penStyle === 'pencil' ? '2px solid #3b82f6' : '1px solid #ccc', backgroundColor: penStyle === 'pencil' ? '#eff6ff' : '#fff' }}>✏️ 鉛筆</button>
             <button onClick={() => changePenMode('brush')} style={{ padding: '6px', fontSize: '11px', fontWeight: 'bold', borderRadius: '4px', cursor: 'pointer', border: penStyle === 'brush' ? '2px solid #3b82f6' : '1px solid #ccc', backgroundColor: penStyle === 'brush' ? '#eff6ff' : '#fff' }}>🖌️ 筆ペン</button>
+            <button onClick={() => changePenMode('marker')} style={{ padding: '6px', fontSize: '11px', fontWeight: 'bold', borderRadius: '4px', cursor: 'pointer', border: penStyle === 'marker' ? '2px solid #eab308' : '1px solid #ccc', backgroundColor: penStyle === 'marker' ? '#fefce8' : '#fff' }}>🖍️ 蛍光</button>
             <button onClick={() => changePenMode('thick')} style={{ padding: '6px', fontSize: '11px', fontWeight: 'bold', borderRadius: '4px', cursor: 'pointer', border: penStyle === 'thick' ? '2px solid #3b82f6' : '1px solid #ccc', backgroundColor: penStyle === 'thick' ? '#eff6ff' : '#fff' }}>🖍️ 太ペン</button>
-            <button onClick={() => changePenMode('eraser')} style={{ gridColumn: 'span 2', padding: '6px', fontSize: '11px', fontWeight: 'bold', borderRadius: '4px', cursor: 'pointer', border: penStyle === 'eraser' ? '2px solid #ef4444' : '1px solid #ccc', backgroundColor: penStyle === 'eraser' ? '#fef2f2' : '#fff' }}>🧽 消しゴム</button>
+            <button onClick={() => changePenMode('eraser')} style={{ padding: '6px', fontSize: '11px', fontWeight: 'bold', borderRadius: '4px', cursor: 'pointer', border: penStyle === 'eraser' ? '2px solid #ef4444' : '1px solid #ccc', backgroundColor: penStyle === 'eraser' ? '#fef2f2' : '#fff' }}>🧽 消しゴム</button>
         </div>
 
-        <label style={{fontSize: '11px', fontWeight: 'bold', display: 'block', marginBottom: '5px'}}>色設定 (準選抜色)</label>
+        <label style={{fontSize: '11px', fontWeight: 'bold', display: 'block', marginBottom: '5px'}}>色設定</label>
         <div style={{ display: 'flex', gap: '5px', marginBottom: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
+            {/* ★ デフォルト5色（固定） */}
+            {['#000000', '#ef4444', '#3b82f6', '#f59e0b', '#10b981'].map(c => (
+                <button key={'defColor'+c} onClick={() => setStrokeColor(c)} style={{ width: '24px', height: '24px', backgroundColor: c, border: strokeColor === c ? '2px solid #000' : '1px solid #ddd', borderRadius: '4px', cursor: 'pointer', flexShrink: 0 }} />
+            ))}
+            <div style={{width: '1px', height: '24px', backgroundColor: '#cbd5e1', margin: '0 2px'}} />
+            {/* ★ カスタム色（準選抜） */}
             {customColors.map(c => (
                 <button key={'drawColor'+c} onClick={() => setStrokeColor(c)} onKeyDown={(e) => { if(e.key === 'Backspace' || e.key === 'Delete') { const nc = customColors.filter(col => col !== c); setCustomColors(nc); localStorage.setItem('my-logic-custom-colors', JSON.stringify(nc)); } }} title="選択してDeleteキーで削除" style={{ width: '24px', height: '24px', backgroundColor: c, border: strokeColor === c ? '2px solid #000' : '1px solid #ddd', borderRadius: '4px', cursor: 'pointer' }} />
             ))}
             <input type="color" value={strokeColor} onChange={(e) => setStrokeColor(e.target.value)} style={{width:'24px', height:'24px', cursor: 'pointer', border: 'none', padding: 0}} />
-            <button onClick={() => { if (!customColors.includes(strokeColor)) { const nc = [...customColors, strokeColor]; setCustomColors(nc); localStorage.setItem('my-logic-custom-colors', JSON.stringify(nc)); } }} style={{ fontSize: '10px', padding: '4px 8px', background: '#f8fafc', border: '1px solid #cbd5e1', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}>＋準選抜</button>
+            <button onClick={() => { if (!customColors.includes(strokeColor) && !['#000000', '#ef4444', '#3b82f6', '#f59e0b', '#10b981'].includes(strokeColor)) { const nc = [...customColors, strokeColor]; setCustomColors(nc); localStorage.setItem('my-logic-custom-colors', JSON.stringify(nc)); } }} style={{ fontSize: '10px', padding: '4px 8px', background: '#f8fafc', border: '1px solid #cbd5e1', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}>＋準選抜</button>
         </div>
 
         <label style={{fontSize: '10px', fontWeight: 'bold', display: 'block', marginBottom: '5px'}}>透明度 ({Math.round(penOpacity * 100)}%)</label>
@@ -2555,7 +2572,7 @@ const newColor = e.target.value; setLevelData(prev => ({ ...prev, [currentLevel]
 )}
 
 {/* ★ フローティング描画ボタン（ドラッグ可能） */}
-<div className="no-print" style={{ position: 'fixed', right: `calc(40px - ${drawBtnPos.x}px)`, bottom: `calc(100px - ${drawBtnPos.y}px)`, zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+<div className="no-print" style={{ position: 'fixed', left: `calc(window.innerWidth - 120px + ${drawBtnPos.x}px)`, top: `calc(window.innerHeight - 180px + ${drawBtnPos.y}px)`, zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
     <div 
         onMouseDown={(e) => { e.preventDefault(); drawBtnDragRef.current = { startX: e.clientX, startY: e.clientY, initX: drawBtnPos.x, initY: drawBtnPos.y }; }}
         style={{ width: '70px', height: '70px', borderRadius: '50%', background: 'rgba(59, 130, 246, 0.2)', border: '2px dashed #3b82f6', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'move', backdropFilter: 'blur(2px)', boxShadow: '0 4px 10px rgba(0,0,0,0.1)' }}
