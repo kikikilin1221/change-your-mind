@@ -395,6 +395,17 @@ const [shapeStrokeColor, setShapeStrokeColor] = useState('#000000');
 const [shapeStrokeWidth, setShapeStrokeWidth] = useState(2);
 const [symbolFontSize, setSymbolFontSize] = useState(24);
 const [creationStep, setCreationStep] = useState<{ type: 'frame'|'ruler-v'|'ruler-h'|'capture', startX?: number, startY?: number, rawX?: number, rawY?: number } | null>(null);
+const [isShapeMenuOpen, setIsShapeMenuOpen] = useState(false);
+const [isShiftPressed, setIsShiftPressed] = useState(false);
+
+// ★ Shiftキーの長押しを監視する処理
+useEffect(() => {
+    const down = (e: KeyboardEvent) => { if (e.key === 'Shift') setIsShiftPressed(true); };
+    const up = (e: KeyboardEvent) => { if (e.key === 'Shift') setIsShiftPressed(false); };
+    window.addEventListener('keydown', down);
+    window.addEventListener('keyup', up);
+    return () => { window.removeEventListener('keydown', down); window.removeEventListener('keyup', up); };
+}, []);
 
 // 論理記号の追加関数
 const addSymbolNode = useCallback((symbol: string) => {
@@ -464,20 +475,25 @@ const handlePaneClick = useCallback((e: React.MouseEvent) => {
             if (bgNode) bgNode.style.display = 'none';
 
             import('html2canvas').then(({ default: html2canvas }) => {
-                html2canvas(document.body, { 
-                    x: screenX, 
-                    y: screenY, 
-                    width: screenW, 
-                    height: screenH, 
-                    backgroundColor: null, // 絶対に透過させる
-                    scale: 2 // 画質を良くする
-                }).then(canvas => {
-                    // ★ 撮影が終わったら色をすべて元に戻す
-                    htmlNode.style.backgroundColor = originalHtmlBg;
-                    document.body.style.backgroundColor = originalBodyBg;
-                    if (ws) ws.style.backgroundColor = origWsBg;
+                html2canvas(document.body, { x: screenX, y: screenY, width: screenW, height: screenH, backgroundColor: null, scale: 2 }).then(canvas => {
+                    if (ws) ws.classList.remove('hide-bg');
                     if (bgNode) bgNode.style.display = 'block';
                     
+                    // ★ 画像のピクセルデータを解析して「背景色」を完全に透明に削り落とす魔法
+                    const ctx = canvas.getContext('2d');
+                    if (ctx) {
+                        const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+                        const data = imgData.data;
+                        const bgR = data[0], bgG = data[1], bgB = data[2]; // 左上を背景色とみなす
+                        for (let i = 0; i < data.length; i += 4) {
+                            const r = data[i], g = data[i+1], b = data[i+2], a = data[i+3];
+                            // 背景色に近い色（誤差15以内）なら、透明度(Alpha)を0にする
+                            if (a > 0 && Math.abs(r - bgR) < 15 && Math.abs(g - bgG) < 15 && Math.abs(b - bgB) < 15) {
+                                data[i+3] = 0;
+                            }
+                        }
+                        ctx.putImageData(imgData, 0, 0);
+                    }
                     const dataUrl = canvas.toDataURL('image/png');
                     const newStamps = [...customStamps, dataUrl];
                     setCustomStamps(newStamps);
@@ -1479,14 +1495,21 @@ const rootData = levelData['root'] || { nodes: [], edges: [] }; setCurrentLabel(
 setNodes((rootData.nodes || []).map((n:any) => ({...n, selected: false}))); setEdges((rootData.edges || []).map((e:any) => ({...e, selected: false}))); setPast([]); setFuture([]);
 };
 
-const addNode = useCallback((type: 'text' | 'image' | 'shape' | 'table') => {
+const addNode = useCallback((type: 'text' | 'image' | 'shape' | 'table', shapeDetail?: 'rect'|'square'|'circle'|'ellipse') => {
 takeSnapshot(); const id = `node-${Date.now()}`; const selNodes = nodesRef.current.filter(n => n.selected); const parent = selNodes.length === 1 ? selNodes[0] : null;
 
 let data: any = { content: '項目', previewVisible: false, previewStyle: { opacity: 0.7, offsetX: 0, offsetY: -150, width: 180, height: 120 }, textOffsetX: 0, textOffsetY: 0, isEditing: false, tableTitle: '' };
 let style: any = { backgroundColor: '#ffffff', color: '#000000', borderRadius: '12px', fontSize: '14px', fontFamily: 'sans-serif', width: 200, height: 100, hAlign: 'left', vAlign: 'top', writingMode: 'horizontal-tb', padding: '4px', borderColor: '#000000', borderWidth: 0.5 };
 
 if (type === 'image') { fileInputRef.current?.click(); return; }
-if (type === 'shape') { data = { content: '', isShape: true, shapeType: 'rect', keepRatio: false, textOffsetX: 0, textOffsetY: 0, isEditing: false }; style = { ...style, backgroundColor: '#eee', borderRadius: '4px', borderColor: '#000000', borderWidth: 0.5 }; }
+if (type === 'shape') { 
+    let w = 200, h = 100, radius = '0px', keepR = false, sType = 'rect';
+    if (shapeDetail === 'square') { w = 150; h = 150; keepR = true; }
+    if (shapeDetail === 'circle') { w = 150; h = 150; radius = '50%'; keepR = true; sType = 'circ'; }
+    if (shapeDetail === 'ellipse') { w = 200; h = 100; radius = '50%'; sType = 'circ'; }
+    data = { content: '', isShape: true, shapeType: sType, keepRatio: keepR, textOffsetX: 0, textOffsetY: 0, isEditing: false }; 
+    style = { ...style, width: w, height: h, backgroundColor: '#eee', borderRadius: radius, borderColor: '#000000', borderWidth: 0.5 }; 
+}
 if (type === 'table') {
 data = { 
 isTable: true, rows: 2, cols: 2, textOffsetX: 0, textOffsetY: 0, editingCell: null, tableTitle: '',
@@ -2001,7 +2024,7 @@ else if (el.dataset.editing !== 'true') { el.dataset.editing = 'true'; el.innerH
 <NodeResizer 
     minWidth={30} 
     minHeight={30} 
-    keepAspectRatio={!!n.data?.keepRatio} 
+    keepAspectRatio={!!n.data?.keepRatio || isShiftPressed}
     isVisible={n.selected && (!isTableAndCellEditing || n.data?.isGroupContainer)} 
     lineStyle={{ border: n.data?.isCropping ? '2px dashed #ef4444' : '1px solid #3b82f6', zIndex: 100 }} 
     handleStyle={{ background: n.data?.isCropping ? '#ef4444' : '#3b82f6', zIndex: 100, borderRadius: '50%' }} 
@@ -2712,13 +2735,24 @@ el.innerHTML = currentVal;
 <div style={{ width: '1px', height: '24px', backgroundColor: '#ddd', margin: '0 2px' }} />
 <button onClick={() => addNode('text')} style={primaryBtnStyle}>📝 テキスト</button>
 <button onClick={() => addNode('image')} style={{ ...primaryBtnStyle, backgroundColor: '#10b981', boxShadow: '0 2px 4px rgba(16, 185, 129, 0.3)' }}>📸 画像</button>
-<button onClick={() => addNode('shape')} style={{ ...primaryBtnStyle, backgroundColor: '#f59e0b', boxShadow: '0 2px 4px rgba(245, 158, 11, 0.3)' }}>🟦 図形</button>
+
+{/* ★ 図形ポップアップメニュー */}
+<div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+    <button onClick={() => setIsShapeMenuOpen(!isShapeMenuOpen)} style={{ ...primaryBtnStyle, backgroundColor: '#f59e0b', boxShadow: '0 2px 4px rgba(245, 158, 11, 0.3)' }}>🟦 図形</button>
+    {isShapeMenuOpen && (
+        <div className="no-print" style={{ position: 'absolute', bottom: '110%', left: '50%', transform: 'translateX(-50%)', backgroundColor: '#fff', border: '1px solid #ccc', borderRadius: '8px', padding: '8px', display: 'flex', gap: '8px', boxShadow: '0 4px 12px rgba(0,0,0,0.15)', zIndex: 10000 }}>
+            <button onClick={() => { addNode('shape', 'rect'); setIsShapeMenuOpen(false); }} style={{ padding: '6px 12px', fontSize: '12px', cursor: 'pointer', borderRadius: '4px', background: '#fff', border: '1px solid #ccc', whiteSpace: 'nowrap' }}>▬ 長方形</button>
+            <button onClick={() => { addNode('shape', 'square'); setIsShapeMenuOpen(false); }} style={{ padding: '6px 12px', fontSize: '12px', cursor: 'pointer', borderRadius: '4px', background: '#fff', border: '1px solid #ccc', whiteSpace: 'nowrap' }}>■ 正方形</button>
+            <button onClick={() => { addNode('shape', 'ellipse'); setIsShapeMenuOpen(false); }} style={{ padding: '6px 12px', fontSize: '12px', cursor: 'pointer', borderRadius: '4px', background: '#fff', border: '1px solid #ccc', whiteSpace: 'nowrap' }}>⬭ 楕円</button>
+            <button onClick={() => { addNode('shape', 'circle'); setIsShapeMenuOpen(false); }} style={{ padding: '6px 12px', fontSize: '12px', cursor: 'pointer', borderRadius: '4px', background: '#fff', border: '1px solid #ccc', whiteSpace: 'nowrap' }}>● 正円</button>
+        </div>
+    )}
+</div>
+
 <button onClick={() => addNode('table')} style={{ ...primaryBtnStyle, backgroundColor: '#6366f1', boxShadow: '0 2px 4px rgba(99, 102, 241, 0.3)' }}>🧮 表</button>
 
 <div style={{ width: '1px', height: '24px', backgroundColor: '#ddd', margin: '0 2px' }} />
 
-
-<div style={{ width: '1px', height: '24px', backgroundColor: '#ddd', margin: '0 2px' }} />
 <div style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '11px', fontWeight: 'bold', color: '#555', backgroundColor: '#fff', padding: '4px 8px', borderRadius: '6px', border: '1px solid #ccc' }}>
 <span>🎨 背景</span>
 <input type="color" value={levelData[currentLevel]?.bgColor || '#ffffff'} onChange={(e) => {
@@ -2733,21 +2767,23 @@ const newColor = e.target.value; setLevelData(prev => ({ ...prev, [currentLevel]
 <button className="no-print" onClick={() => setIsBottomBarOpen(true)} style={{ position: 'absolute', bottom: 10, right: 10, zIndex: 100, padding: '4px 8px', fontSize: '10px', background: '#e2e8f0', border: '1px solid #cbd5e1', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold', color: '#475569', boxShadow: '0 -2px 4px rgba(0,0,0,0.1)' }}>▲ ツールバーを表示</button>
 )}
 
-{/* ★ フローティング描画ボタン（ドラッグ可能） */}
+{/* ★ 大幅に拡大＆押しやすくなったフローティング描画ボタン */}
 {drawBtnPos.left >= 0 && (
 <div className="no-print" style={{ position: 'fixed', left: `${drawBtnPos.left}px`, top: `${drawBtnPos.top}px`, zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
     <div 
         onMouseDown={(e) => { e.preventDefault(); drawBtnDragRef.current = { startX: e.clientX, startY: e.clientY, initX: drawBtnPos.left, initY: drawBtnPos.top }; }}
-        style={{ width: '70px', height: '70px', borderRadius: '50%', background: 'rgba(59, 130, 246, 0.2)', border: '2px dashed #3b82f6', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'move', backdropFilter: 'blur(2px)', boxShadow: '0 4px 10px rgba(0,0,0,0.1)' }}
+        style={{ width: '90px', height: '90px', borderRadius: '50%', background: 'rgba(59, 130, 246, 0.15)', border: '2px dashed #3b82f6', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'move', backdropFilter: 'blur(3px)', boxShadow: '0 6px 16px rgba(0,0,0,0.15)' }}
         title="外枠をドラッグして移動"
     >
         <button 
             onMouseDown={(e) => e.stopPropagation()} 
             onClick={() => { const next = !isDrawingMode; setIsDrawingMode(next); setIsDrawingMenuOpen(next); if(next) changePenMode('pen'); }} 
-            style={{ width: '50px', height: '50px', borderRadius: '50%', backgroundColor: isDrawingMode ? '#ef4444' : '#8b5cf6', color: '#fff', border: 'none', boxShadow: '0 2px 8px rgba(0,0,0,0.3)', cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: 0 }}
+            style={{ width: '70px', height: '70px', borderRadius: '50%', backgroundColor: isDrawingMode ? '#ef4444' : '#8b5cf6', color: '#fff', border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.3)', cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: 0, transition: 'transform 0.1s' }}
+            onMouseEnter={(e) => e.currentTarget.style.transform = 'scale(1.05)'}
+            onMouseLeave={(e) => e.currentTarget.style.transform = 'scale(1)'}
         >
-            <span style={{ fontSize: '18px', marginBottom: '2px' }}>{isDrawingMode ? '❌' : '✏️'}</span>
-            <span style={{ fontSize: '10px', fontWeight: 'bold' }}>{isDrawingMode ? '終了' : '描画'}</span>
+            <span style={{ fontSize: '26px', marginBottom: '2px' }}>{isDrawingMode ? '❌' : '✏️'}</span>
+            <span style={{ fontSize: '11px', fontWeight: 'bold' }}>{isDrawingMode ? '描画終了' : '描画する'}</span>
         </button>
     </div>
 </div>
@@ -2762,5 +2798,3 @@ const newColor = e.target.value; setLevelData(prev => ({ ...prev, [currentLevel]
 </div>
 );
 }
-
-export default function App() { return (<ReactFlowProvider><FlowEditor /></ReactFlowProvider>); }
