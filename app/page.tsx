@@ -1887,7 +1887,7 @@ label: (
 
 {n.data?.isImage ? (
 <div className={n.data?.isCropping ? "nodrag" : ""} onMouseDown={(e) => { if (n.data?.isCropping) { e.stopPropagation(); takeSnapshot(); imageCropDragRef.current = { id: n.id, startX: e.clientX, startY: e.clientY, initX: Number(n.data?.imgPosX || 0), initY: Number(n.data?.imgPosY || 0) }; } }} style={{ width: '100%', height: '100%', overflow: 'hidden', position: 'relative', borderRadius: n.style?.borderRadius || 0, cursor: n.data?.isCropping ? 'move' : 'default' }}>
-<img src={n.data.imageUrl as string} style={{ position: 'absolute', width: n.data?.isCropping ? `${baseW}px` : '100%', height: n.data?.isCropping ? `${baseH}px` : '100%', maxWidth: 'none', maxHeight: 'none', left: n.data?.isCropping ? `${offX}px` : 0, top: n.data?.isCropping ? `${offY}px` : 0, transform: `translate(${n.data.imgPosX || 0}px, ${n.data.imgPosY || 0}px) scale(${n.data.imgZoom || 1})`, transformOrigin: 'center center', pointerEvents: 'none' }} alt="img" />
+<img src={n.data.imageUrl as string} style={{ position: 'absolute', width: `${baseW}px`, height: `${baseH}px`, maxWidth: 'none', maxHeight: 'none', left: `${offX}px`, top: `${offY}px`, transform: `translate(${n.data.imgPosX || 0}px, ${n.data.imgPosY || 0}px) scale(${n.data.imgZoom || 1}) scaleX(${n.data?.flipH ? -1 : 1}) scaleY(${n.data?.flipV ? -1 : 1})`, transformOrigin: 'center center', pointerEvents: 'none' }} alt="img" />
 <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', display: 'flex', flexDirection: 'column', alignItems: ai, justifyContent: jc, padding: '4px' }}>
 <div 
 id={`edit-${n.id}`} className={isEditingNode ? "nodrag html-content" : "html-content"} contentEditable={isEditingNode} suppressContentEditableWarning
@@ -2009,7 +2009,21 @@ return (
 ) : ( <button className="no-print" onClick={() => setIsTopBarOpen(true)} style={{ position: 'absolute', top: 10, right: 10, zIndex: 100, padding: '4px 8px', fontSize: '10px', background: '#e2e8f0', border: '1px solid #cbd5e1', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold', color: '#475569', boxShadow: '0 2px 4px rgba(0,0,0,0.1)' }}>▼ 階層メニューを表示</button> )}
 
 <div style={{ flexGrow: 1, position: 'relative' }}>
-<ReactFlow 
+{/* ★ 鉛筆・筆のアナログ質感を出すための魔法のフィルター */}
+<svg style={{ position: 'absolute', width: 0, height: 0, pointerEvents: 'none' }}>
+    <defs>
+        <filter id="pencil-texture">
+            <feTurbulence type="fractalNoise" baseFrequency="1.5" numOctaves="3" result="noise" />
+            <feColorMatrix type="matrix" values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 2 -0.5" in="noise" result="coloredNoise" />
+            <feComposite operator="in" in="SourceGraphic" in2="coloredNoise" result="composite" />
+        </filter>
+        <filter id="brush-texture">
+            <feGaussianBlur in="SourceGraphic" stdDeviation="0.8" result="blur" />
+            <feColorMatrix in="blur" mode="matrix" values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 25 -7" result="contrast" />
+        </filter>
+    </defs>
+</svg>
+<ReactFlow
     connectionMode={ConnectionMode.Loose} 
     nodes={flowNodes} 
     edges={edges} 
@@ -2051,7 +2065,9 @@ style={{ cursor: creationStep ? 'crosshair' : 'default' }}
                     eraserWidth={eraserWidth}
                     strokeColor={penStyle === 'eraser' ? '#000000' : (strokeColor.startsWith('#') ? `rgba(${parseInt(strokeColor.slice(1,3),16)}, ${parseInt(strokeColor.slice(3,5),16)}, ${parseInt(strokeColor.slice(5,7),16)}, ${penOpacity})` : strokeColor)}
                     canvasColor="transparent"
-                    style={{ width: '100%', height: '100%', border: 'none' }}
+                    // ★ 選択中のレイヤーにのみフィルターと点線（ザラザラ感）を適用
+                    style={{ width: '100%', height: '100%', border: 'none', filter: (isActive && penStyle === 'pencil') ? 'url(#pencil-texture)' : (isActive && penStyle === 'brush') ? 'url(#brush-texture)' : 'none' }}
+                    strokeDashArray={penStyle === 'pencil' ? '1, 4' : '0, 0'}
                     withTimestamp={true}
                 />
             </div>
