@@ -25,8 +25,6 @@ if (typeof window !== 'undefined') {
 const GLOBAL_CSS = `
 .canvas-pencil path { stroke-dasharray: 1 4 !important; stroke-linecap: round !important; filter: url(#pencil-texture) !important; opacity: 0.8; }
  .canvas-brush path { filter: url(#brush-texture) !important; }
- .hide-bg { background: transparent !important; }
- .hide-bg * { background-color: transparent !important; }
  .html-content p { margin: 0; }
  .html-content strike { text-decoration: line-through double !important; }
  .html-content * { line-height: 1.2 !important; vertical-align: baseline !important; }
@@ -447,16 +445,16 @@ const handlePaneClick = useCallback((e: React.MouseEvent) => {
 
             setSaveMessage('読み取り中...');
             
-            // ★ 一瞬だけ背景とグリッドを完全に透明にする
-            const ws = document.getElementById('workspace-container');
+            // ★ 安全に背景とグリッドを完全に透明にする
             const bgNode = document.querySelector('.react-flow__background') as HTMLElement;
-            if (ws) ws.classList.add('hide-bg');
+            const originalBodyBg = document.body.style.backgroundColor;
+            document.body.style.backgroundColor = 'transparent';
             if (bgNode) bgNode.style.display = 'none';
 
             import('html2canvas').then(({ default: html2canvas }) => {
                 html2canvas(document.body, { x: screenX, y: screenY, width: screenW, height: screenH, backgroundColor: null }).then(canvas => {
                     // ★ 撮影が終わったら背景を元に戻す
-                    if (ws) ws.classList.remove('hide-bg');
+                    document.body.style.backgroundColor = originalBodyBg;
                     if (bgNode) bgNode.style.display = 'block';
                     
                     const dataUrl = canvas.toDataURL('image/png');
@@ -2318,7 +2316,7 @@ style={{ cursor: creationStep ? 'crosshair' : 'default' }}
 
 {primaryNode.data?.isImage && selectedNodes.length === 1 && (
 <div style={{ marginBottom: '20px', padding: '10px', border: '1px solid #eee', borderRadius: '8px' }}>
-<button onClick={() => { takeSnapshot(); const w = Number(primaryNode.style?.width) || 300; const h = Number(primaryNode.style?.height) || 200; if (!primaryNode.data?.isCropping) updateSelectedNodes({ isCropping: true, cropBaseW: w, cropBaseH: h, cropOffsetX: 0, cropOffsetY: 0 }); else updateSelectedNodes({ isCropping: false }); }} style={{ width: '100%', padding: '8px', fontSize: '12px', background: primaryNode.data?.isCropping ? '#ef4444' : '#fff', color: primaryNode.data?.isCropping ? '#fff' : '#333', border: primaryNode.data?.isCropping ? 'none' : '1px solid #ccc', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', transition: 'all 0.2s', marginBottom: '15px' }}>
+<button onClick={() => { takeSnapshot(); const w = Number(primaryNode.style?.width) || 300; const h = Number(primaryNode.style?.height) || 200; if (!primaryNode.data?.isCropping) updateSelectedNodes((n:any) => ({ isCropping: true, cropBaseW: n.cropBaseW ?? w, cropBaseH: n.cropBaseH ?? h, cropOffsetX: n.cropOffsetX ?? 0, cropOffsetY: n.cropOffsetY ?? 0 })); else updateSelectedNodes({ isCropping: false }); }} style={{ width: '100%', padding: '8px', fontSize: '12px', background: primaryNode.data?.isCropping ? '#ef4444' : '#fff', color: primaryNode.data?.isCropping ? '#fff' : '#333', border: primaryNode.data?.isCropping ? 'none' : '1px solid #ccc', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', transition: 'all 0.2s', marginBottom: '15px' }}>
 {primaryNode.data?.isCropping ? '✅ トリミング完了' : '✂️ トリミング'}
 </button>
 {primaryNode.data?.isCropping ? ( <div style={{ padding: '10px', backgroundColor: '#fef2f2', borderRadius: '6px', marginBottom: '10px', border: '1px dashed #fca5a5' }}><p style={{fontSize: '10px', color: '#b91c1c', margin: 0}}><strong>トリミングモード中</strong><br/>・画像の周囲の<span style={{color:'red'}}>赤い枠</span>を動かして切り取れます。<br/>・画像を直接ドラッグして位置を調整できます。</p></div> ) : (
@@ -2336,7 +2334,7 @@ style={{ cursor: creationStep ? 'crosshair' : 'default' }}
 {primaryNode.data?.isShape && (
 <div style={{ marginBottom: '15px' }}>
     <div style={{ marginBottom: '20px', padding: '10px', border: '1px solid #eee', borderRadius: '8px' }}>
-        <button onClick={() => { takeSnapshot(); const w = Number(primaryNode.style?.width) || 150; const h = Number(primaryNode.style?.height) || 150; if (!primaryNode.data?.isCropping) updateSelectedNodes({ isCropping: true, cropBaseW: w, cropBaseH: h, cropOffsetX: 0, cropOffsetY: 0 }); else updateSelectedNodes({ isCropping: false }); }} style={{ width: '100%', padding: '8px', fontSize: '12px', background: primaryNode.data?.isCropping ? '#ef4444' : '#fff', color: primaryNode.data?.isCropping ? '#fff' : '#333', border: primaryNode.data?.isCropping ? 'none' : '1px solid #ccc', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', transition: 'all 0.2s', marginBottom: '15px' }}>
+        <button onClick={() => { takeSnapshot(); const w = Number(primaryNode.style?.width) || 150; const h = Number(primaryNode.style?.height) || 150; if (!primaryNode.data?.isCropping) updateSelectedNodes((n:any) => ({ isCropping: true, cropBaseW: n.cropBaseW ?? w, cropBaseH: n.cropBaseH ?? h, cropOffsetX: n.cropOffsetX ?? 0, cropOffsetY: n.cropOffsetY ?? 0 })); else updateSelectedNodes({ isCropping: false }); }} style={{ width: '100%', padding: '8px', fontSize: '12px', background: primaryNode.data?.isCropping ? '#ef4444' : '#fff', color: primaryNode.data?.isCropping ? '#fff' : '#333', border: primaryNode.data?.isCropping ? 'none' : '1px solid #ccc', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', transition: 'all 0.2s', marginBottom: '15px' }}>
             {primaryNode.data?.isCropping ? '✅ トリミング完了' : '✂️ トリミング'}
         </button>
         {primaryNode.data?.isCropping ? ( <div style={{ padding: '10px', backgroundColor: '#fef2f2', borderRadius: '6px', marginBottom: '10px', border: '1px dashed #fca5a5' }}><p style={{fontSize: '10px', color: '#b91c1c', margin: 0}}><strong>トリミングモード中</strong><br/>・図形の周囲の<span style={{color:'red'}}>赤い枠</span>を動かして切り取れます。<br/>・図形の中身を直接ドラッグして位置を調整できます。</p></div> ) : (
@@ -2349,9 +2347,6 @@ style={{ cursor: creationStep ? 'crosshair' : 'default' }}
         <label style={{fontSize: '10px', fontWeight: 'bold'}}>ズーム倍率</label>
         <input type="range" min="0.5" max="3" step="0.1" value={Number(primaryNode.data?.imgZoom || 1)} onChange={(e) => updateSelectedNodes({ imgZoom: parseFloat(e.target.value) })} style={{width:'100%'}} />
     </div>
-    <button onClick={() => { takeSnapshot(); const w = Number(primaryNode.style?.width) || 150; const h = Number(primaryNode.style?.height) || 150; if (!primaryNode.data?.isCropping) updateSelectedNodes({ isCropping: true, cropBaseW: w, cropBaseH: h, cropOffsetX: 0, cropOffsetY: 0 }); else updateSelectedNodes({ isCropping: false }); }} style={{ width: '100%', padding: '6px', fontSize: '12px', background: primaryNode.data?.isCropping ? '#ef4444' : '#fff', color: primaryNode.data?.isCropping ? '#fff' : '#333', border: primaryNode.data?.isCropping ? 'none' : '1px solid #ccc', borderRadius: '4px', fontWeight: 'bold', cursor: 'pointer', transition: 'all 0.2s', marginBottom: '10px' }}>
-        {primaryNode.data?.isCropping ? '✅ トリミング完了' : '✂️ トリミング'}
-    </button>
     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '5px', marginBottom: '10px' }}>
         <button onClick={() => { takeSnapshot(); updateSelectedNodes((n:any) => ({ flipH: !n.flipH })); }} style={{ padding: '6px', fontSize: '12px', cursor: 'pointer', borderRadius: '4px', background: primaryNode.data?.flipH ? '#ddd' : '#fff', border: '1px solid #ccc' }}>↔ 左右反転</button>
         <button onClick={() => { takeSnapshot(); updateSelectedNodes((n:any) => ({ flipV: !n.flipV })); }} style={{ padding: '6px', fontSize: '12px', cursor: 'pointer', borderRadius: '4px', background: primaryNode.data?.flipV ? '#ddd' : '#fff', border: '1px solid #ccc' }}>↕ 上下反転</button>
@@ -2385,51 +2380,6 @@ style={{ cursor: creationStep ? 'crosshair' : 'default' }}
     )}
 </div>
 )}
-
-<div style={{ padding: '15px', borderRadius: '12px', backgroundColor: '#f8f9fa', border: '1px solid #ddd', marginBottom: '15px' }}>
-<label style={{fontSize: '11px', fontWeight: 'bold', color: '#1d4ed8'}}>文字の部分装飾 (編集中のみ)</label>
-<p style={{fontSize: '10px', color: '#666', marginTop: '4px', marginBottom: '10px', lineHeight: '1.4'}}>
-※図形を選択して<b>Tabキー</b>で編集モードに入り、<br/>
-<u>マウスで文字をなぞって選択してから</u>押してください。
-</p>
-
-<div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:'5px', marginBottom:'5px' }}>
-<button onMouseDown={(e) => e.preventDefault()} onClick={() => applyUnifiedFormat('fontName', 'serif')} style={{cursor:'pointer', border:'1px solid #ccc', padding: '6px', fontSize:'11px', borderRadius: '4px', background: '#fff'}}>明朝</button>
-<button onMouseDown={(e) => e.preventDefault()} onClick={() => applyUnifiedFormat('fontName', 'sans-serif')} style={{cursor:'pointer', border:'1px solid #ccc', padding: '6px', fontSize:'11px', borderRadius: '4px', background: '#fff'}}>ゴシック</button>
-<button onMouseDown={(e) => e.preventDefault()} onClick={() => applyUnifiedFormat('bold')} style={{ cursor:'pointer', border:'1px solid #ccc', padding: '6px', fontSize:'11px', borderRadius: '4px', background: '#fff', fontWeight: 900 }}>太字</button>
-<button onMouseDown={(e) => e.preventDefault()} onClick={() => applyUnifiedFormat('strikeThrough')} style={{ cursor:'pointer', border:'1px solid #ccc', padding: '6px', fontSize:'11px', borderRadius: '4px', background: '#fff' }}>二重線</button>
-<button onMouseDown={(e) => e.preventDefault()} onClick={() => applyUnifiedFormat('underline')} style={{ cursor:'pointer', border:'1px solid #ccc', padding: '6px', fontSize:'11px', borderRadius: '4px', background: '#fff', textDecoration: 'underline' }}>下線</button>
-</div>
-
-<div style={{ display: 'flex', gap: '5px', marginTop: '5px', marginBottom: '5px', alignItems: 'center' }}>
-{QUICK_TEXT_COLORS.map(c => <button key={c} onMouseDown={(e) => e.preventDefault()} onClick={() => applyUnifiedFormat('foreColor', c)} style={{ width:'24px', height:'24px', backgroundColor:c, border: '1px solid #ddd', borderRadius: '4px', cursor: 'pointer', flexShrink: 0 }} />)}
-<input type="color" value={tempColor} onChange={(e) => { setTempColor(e.target.value); applyUnifiedFormat('foreColor', e.target.value); }} style={{width:'24px', height:'24px', cursor: 'pointer', border: 'none', padding: 0}} />
-<button onClick={addCustomColor} style={{ fontSize: '10px', padding: '4px 6px', background: '#f8fafc', border: '1px solid #cbd5e1', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}>準選抜に追加</button>
-</div>
-
-{customColors.length > 0 && (
-<div style={{ display: 'flex', flexWrap: 'wrap', gap: '5px', marginBottom: '15px', alignItems: 'center' }}>
-    {customColors.map(c => (
-        <button 
-            key={c} 
-            onMouseDown={(e) => { const sel = window.getSelection(); const activeEl = document.activeElement as HTMLElement; if (activeEl && activeEl.getAttribute('contentEditable') === 'true' && sel && !sel.isCollapsed) e.preventDefault(); }} 
-            onClick={() => applyUnifiedFormat('foreColor', c)} 
-            onKeyDown={(e) => { if(e.key === 'Backspace' || e.key === 'Delete') { const newColors = customColors.filter(col => col !== c); setCustomColors(newColors); localStorage.setItem('my-logic-custom-colors', JSON.stringify(newColors)); } }} 
-            title="文字非選択時にクリックしてDeleteで削除" 
-            style={{ width: '24px', height: '24px', backgroundColor: c, border: '1px solid #ddd', borderRadius: '4px', cursor: 'pointer' }} 
-        />
-    ))}
-    <div style={{fontSize: '9px', color: '#999'}}>※不要な色は選択してDeleteキーで削除</div>
-</div>
-)}
-
-<label style={{fontSize:'10px', fontWeight: 'bold'}}>文字サイズ (px)</label>
-<div style={{display:'flex', alignItems:'center', gap:'8px', marginBottom: '15px'}}>
-<input type="range" min="10" max="100" value={partialFontSize} onChange={(e) => handleFontSizeChange(Number(e.target.value), partialFontSize, 'node')} style={{flex:1}} />
-<input type="number" min="10" max="100" value={partialFontSize} onChange={(e) => handleFontSizeChange(Number(e.target.value), partialFontSize, 'node')} style={{width:'40px', padding:'2px', fontSize:'11px', border:'1px solid #ccc', borderRadius:'4px'}} />
-<button onMouseDown={(e) => e.preventDefault()} onClick={handleResetFormat} style={{fontSize:'10px', padding:'4px 6px', border:'1px solid #ccc', borderRadius:'4px', cursor:'pointer', background:'#fff', fontWeight:'bold'}}>標準へ</button>
-</div>
-</div>
 
 {!primaryNode.data?.isShape && !primaryNode.data?.isImage && !primaryNode.data?.isTable && (
 <div style={{ padding: '10px', background: '#f8f9fa', borderRadius: '8px', marginBottom: '15px', border: '1px solid #ddd' }}>
