@@ -2401,8 +2401,13 @@ el.innerHTML = currentVal;
 <button onClick={() => addNode('table')} style={{ ...primaryBtnStyle, backgroundColor: '#6366f1', boxShadow: '0 2px 4px rgba(99, 102, 241, 0.3)' }}>🧮 表</button>
 
 <div style={{ width: '1px', height: '24px', backgroundColor: '#ddd', margin: '0 2px' }} />
-<button onClick={() => { setIsDrawingMode(!isDrawingMode); setPenStyle('pen'); sketchRef.current?.eraseMode(false); }} style={{ ...primaryBtnStyle, backgroundColor: isDrawingMode ? '#ef4444' : '#8b5cf6', boxShadow: isDrawingMode ? 'none' : '0 2px 4px rgba(139, 92, 246, 0.3)' }}>
-    {isDrawingMode ? '❌ 描画終了' : '✏️ 描画する'}
+<button onClick={() => { 
+    const nextMode = !isDrawingMode;
+    setIsDrawingMode(nextMode); 
+    setIsDrawingMenuOpen(nextMode); // ★追加：描画開始と同時にメニューを開く、終了時に閉じる
+    changePenMode('pen'); // ★修正：古いsketchRefを消し、新しいレイヤー対応のペン関数を使用
+}} style={{ ...primaryBtnStyle, backgroundColor: isDrawingMode ? '#ef4444' : '#8b5cf6', boxShadow: isDrawingMode ? 'none' : '0 2px 4px rgba(139, 92, 246, 0.3)' }}>
+    {isDrawingMode ? '❌ 描画終了' : '✏️ 描画する'}
 </button>
 
 {isDrawingMode && (
