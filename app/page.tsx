@@ -196,7 +196,8 @@ const QUICK_TEXT_COLORS = ['#000000', '#ef4444', '#eab308', '#10b981', '#3b82f6'
 type TableActionType = { id: string; type: string; startX: number; startY: number; startR: number; startC: number; minC: number; maxC: number; minR: number; maxR: number; initWidths: number[]; initHeights: number[]; };
 
 function FlowEditor() {
-const { setViewport, getZoom, screenToFlowPosition } = useReactFlow();
+const { setViewport, getZoom, screenToFlowPosition, getViewport } = useReactFlow();
+const transform = useStore(s => s.transform); // ★追加：画面のズーム・パン位置をリアルタイム取得
 const fileInputRef = useRef<HTMLInputElement>(null);
 const jsonImportRef = useRef<HTMLInputElement>(null);
 
@@ -447,16 +448,19 @@ const handlePaneClick = useCallback((e: React.MouseEvent) => {
 
             setSaveMessage('読み取り中...');
             
-            // ★ 一瞬だけ背景とグリッドを完全に透明にする
-            const ws = document.getElementById('workspace-container');
+            // ★ 強制的にすべての背景色を無効化して透明にする
+            const ws = document.getElementById('main-editor-wrapper');
             const bgNode = document.querySelector('.react-flow__background') as HTMLElement;
-            if (ws) ws.classList.add('hide-bg');
+            const origBg = ws?.style.backgroundColor || '';
+            const origVar = ws?.style.getPropertyValue('--bg-color') || '';
+            if (ws) { ws.style.backgroundColor = 'transparent'; ws.style.setProperty('--bg-color', 'transparent'); }
             if (bgNode) bgNode.style.display = 'none';
 
             import('html2canvas').then(({ default: html2canvas }) => {
-                html2canvas(document.body, { x: screenX, y: screenY, width: screenW, height: screenH, backgroundColor: null }).then(canvas => {
-                    // ★ 撮影が終わったら背景を元に戻す
-                    if (ws) ws.classList.remove('hide-bg');
+                // 背景色指定を null にして完全透過 PNG を生成
+                html2canvas(document.body, { x: screenX, y: screenY, width: screenW, height: screenH, backgroundColor: null, scale: 2 }).then(canvas => {
+                    // ★ 撮影が終わったら背景色を元に戻す
+                    if (ws) { ws.style.backgroundColor = origBg; ws.style.setProperty('--bg-color', origVar); }
                     if (bgNode) bgNode.style.display = 'block';
                     
                     const dataUrl = canvas.toDataURL('image/png');
@@ -1502,6 +1506,17 @@ useEffect(() => {
 const handleKeyDown = (e: KeyboardEvent) => {
 const activeEl = document.activeElement as HTMLElement; const isContentEditing = activeEl?.tagName === 'INPUT' || activeEl?.tagName === 'TEXTAREA' || activeEl?.isContentEditable;
 if (isContentEditing && e.key !== 'Tab') { return; }
+// ★ 追加：矢印キーでの画面移動（パン操作）
+if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key) && !isContentEditing) {
+    e.preventDefault();
+    const { x, y, zoom } = getViewport();
+    const panSpeed = 40; // 移動速度
+    if (e.key === 'ArrowUp') setViewport({ x, y: y + panSpeed, zoom });
+    if (e.key === 'ArrowDown') setViewport({ x, y: y - panSpeed, zoom });
+    if (e.key === 'ArrowLeft') setViewport({ x: x + panSpeed, y, zoom });
+    if (e.key === 'ArrowRight') setViewport({ x: x - panSpeed, y, zoom });
+    return;
+}
 
 if (e.key === 'Tab') {
 const isNodeEditing = nodesRef.current.some(n => n.data?.isEditing || n.data?.editingCell); const isEdgeEditing = edgesRef.current.some(edge => edge.data?.isEditing);
@@ -2107,13 +2122,15 @@ style={{ cursor: creationStep ? 'crosshair' : 'default' }}
 <Background color="#f1f1f1" className="no-print" /><Controls className="no-print" /><SmartGuides guides={guides} />
 </ReactFlow>
 
-{/* ★ 手書き描画レイヤー（透過マルチレイヤー） */}
-<div className="no-print" style={{ position: 'absolute', inset: 0, zIndex: 900, pointerEvents: 'none' }}>
-    {[...layers].reverse().map((layer, reverseIndex) => {
-        const zIndex = reverseIndex;
-        const isActive = isDrawingMode && activeLayerId === layer.id;
-        return (
-            <div key={layer.id} className={isActive ? `canvas-${penStyle}` : ''} style={{ position: 'absolute', inset: 0, zIndex, pointerEvents: (isActive && !creationStep) ? 'auto' : 'none', opacity: layer.visible ? 1 : 0 }}>
+{/* ★ 手書き描画レイヤー（空間連動型マルチレイヤー） */}
+<div className="no-print" style={{ position: 'absolute', inset: 0, zIndex: 900, pointerEvents: 'none', overflow: 'hidden' }}>
+    {/* ★ ここでReact Flowのズームとパンに手書きレイヤーを同期させる */}
+    <div style={{ position: 'absolute', left: -5000, top: -5000, width: 10000, height: 10000, transform: `translate(${transform[0]}px, ${transform[1]}px) scale(${transform[2]})`, transformOrigin: '5000px 5000px' }}>
+        {[...layers].reverse().map((layer, reverseIndex) => {
+            const zIndex = reverseIndex;
+            const isActive = isDrawingMode && activeLayerId === layer.id;
+            return (
+                <div key={layer.id} className={isActive ? `canvas-${penStyle}` : ''} style={{ position: 'absolute', inset: 0, zIndex, pointerEvents: (isActive && !creationStep) ? 'auto' : 'none', opacity: layer.visible ? 1 : 0 }}>
                 <ReactSketchCanvas
                     ref={el => { if (el) canvasRefs.current[layer.id] = el; }}
                     strokeWidth={strokeWidth}
@@ -2129,6 +2146,7 @@ style={{ cursor: creationStep ? 'crosshair' : 'default' }}
             </div>
         );
     })}
+    </div> {/* ← ★これを追加して同期用ラッパーを閉じる */}
 </div>
 
 {/* ★ 描画編集メニュー（右側パネル） */}
