@@ -2820,3 +2820,4 @@ const newColor = e.target.value; setLevelData(prev => ({ ...prev, [currentLevel]
 </div>
 );
 }
+export default function App() { return (<ReactFlowProvider><FlowEditor /></ReactFlowProvider>); }
