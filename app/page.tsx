@@ -448,19 +448,34 @@ const handlePaneClick = useCallback((e: React.MouseEvent) => {
 
             setSaveMessage('読み取り中...');
             
-            // ★ 強制的にすべての背景色を無効化して透明にする
-            const ws = document.getElementById('main-editor-wrapper');
+            // ★ ブラウザの根底からすべてを強制的に透明にする
+            const htmlNode = document.documentElement;
+            const originalHtmlBg = htmlNode.style.backgroundColor;
+            const originalBodyBg = document.body.style.backgroundColor;
+            
+            htmlNode.style.backgroundColor = 'transparent';
+            document.body.style.backgroundColor = 'transparent';
+            
+            const ws = document.getElementById('workspace-container');
+            const origWsBg = ws ? ws.style.backgroundColor : '';
+            if (ws) ws.style.backgroundColor = 'transparent';
+            
             const bgNode = document.querySelector('.react-flow__background') as HTMLElement;
-            const origBg = ws?.style.backgroundColor || '';
-            const origVar = ws?.style.getPropertyValue('--bg-color') || '';
-            if (ws) { ws.style.backgroundColor = 'transparent'; ws.style.setProperty('--bg-color', 'transparent'); }
             if (bgNode) bgNode.style.display = 'none';
 
             import('html2canvas').then(({ default: html2canvas }) => {
-                // 背景色指定を null にして完全透過 PNG を生成
-                html2canvas(document.body, { x: screenX, y: screenY, width: screenW, height: screenH, backgroundColor: null, scale: 2 }).then(canvas => {
-                    // ★ 撮影が終わったら背景色を元に戻す
-                    if (ws) { ws.style.backgroundColor = origBg; ws.style.setProperty('--bg-color', origVar); }
+                html2canvas(document.body, { 
+                    x: screenX, 
+                    y: screenY, 
+                    width: screenW, 
+                    height: screenH, 
+                    backgroundColor: null, // 絶対に透過させる
+                    scale: 2 // 画質を良くする
+                }).then(canvas => {
+                    // ★ 撮影が終わったら色をすべて元に戻す
+                    htmlNode.style.backgroundColor = originalHtmlBg;
+                    document.body.style.backgroundColor = originalBodyBg;
+                    if (ws) ws.style.backgroundColor = origWsBg;
                     if (bgNode) bgNode.style.display = 'block';
                     
                     const dataUrl = canvas.toDataURL('image/png');
