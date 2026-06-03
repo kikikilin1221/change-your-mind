@@ -23,6 +23,10 @@ if (typeof window !== 'undefined') {
 }
 
 const GLOBAL_CSS = `
+.canvas-pencil path { stroke-dasharray: 1 4 !important; stroke-linecap: round !important; filter: url(#pencil-texture) !important; opacity: 0.8; }
+ .canvas-brush path { filter: url(#brush-texture) !important; }
+ .hide-bg { background: transparent !important; }
+ .hide-bg * { background-color: transparent !important; }
  .html-content p { margin: 0; }
  .html-content strike { text-decoration: line-through double !important; }
  .html-content * { line-height: 1.2 !important; vertical-align: baseline !important; }
@@ -442,8 +446,19 @@ const handlePaneClick = useCallback((e: React.MouseEvent) => {
             const screenH = Math.max(10, Math.abs(e.clientY - rawY));
 
             setSaveMessage('読み取り中...');
+            
+            // ★ 一瞬だけ背景とグリッドを完全に透明にする
+            const ws = document.getElementById('workspace-container');
+            const bgNode = document.querySelector('.react-flow__background') as HTMLElement;
+            if (ws) ws.classList.add('hide-bg');
+            if (bgNode) bgNode.style.display = 'none';
+
             import('html2canvas').then(({ default: html2canvas }) => {
                 html2canvas(document.body, { x: screenX, y: screenY, width: screenW, height: screenH, backgroundColor: null }).then(canvas => {
+                    // ★ 撮影が終わったら背景を元に戻す
+                    if (ws) ws.classList.remove('hide-bg');
+                    if (bgNode) bgNode.style.display = 'block';
+                    
                     const dataUrl = canvas.toDataURL('image/png');
                     const newStamps = [...customStamps, dataUrl];
                     setCustomStamps(newStamps);
@@ -1678,7 +1693,30 @@ const onNodeResize = useCallback((id: string, params: any) => {
 
     params.x = x; params.y = y; params.width = Math.max(width, 30); params.height = Math.max(height, 30);
     setGuides({ lineX, lineY });
-    setNodes(nds => nds.map(n => n.id === id ? { ...n, position: { x, y }, style: { ...n.style, width, height } } : n));
+    
+    setNodes(nds => nds.map(n => {
+        if (n.id === id) {
+            let newData = { ...n.data };
+            // ★ 画像トリミング後のリサイズ時、中身も比率に合わせて追従拡大させる
+            if ((n.data?.isImage || n.data?.isShape) && !n.data?.isCropping) {
+                const prevW = Number(n.style?.width) || 300;
+                const prevH = Number(n.style?.height) || 200;
+                const scaleX = params.width / prevW;
+                const scaleY = params.height / prevH;
+                newData = {
+                    ...newData,
+                    cropBaseW: (n.data.cropBaseW || prevW) * scaleX,
+                    cropBaseH: (n.data.cropBaseH || prevH) * scaleY,
+                    cropOffsetX: (n.data.cropOffsetX || 0) * scaleX,
+                    cropOffsetY: (n.data.cropOffsetY || 0) * scaleY,
+                    imgPosX: (n.data.imgPosX || 0) * scaleX,
+                    imgPosY: (n.data.imgPosY || 0) * scaleY,
+                };
+            }
+            return { ...n, position: { x, y }, style: { ...n.style, width: params.width, height: params.height }, data: newData };
+        }
+        return n;
+    }));
 }, [setNodes, setGuides]);
 
 
@@ -1862,12 +1900,18 @@ const { hAlign: _nh, vAlign: _nv, writingMode: _nw, borderWidth: _bw, border: _b
 
 const isTableAndCellEditing = n.data?.isTable && (selectedCells[n.id]?.length || 0) > 0;
 
+// ★ 図形のトリミング状態を判定し、外側の枠を「クリップ窓」にする
+const isCroppedShape = n.data?.isShape && (n.data?.isCropping || n.data?.cropBaseW !== undefined);
+const outerBorder = isCroppedShape ? 'none' : resolvedBorder;
+const outerBg = isCroppedShape ? 'transparent' : (n.style?.backgroundColor || '#fff');
+const outerOverflow = isCroppedShape ? 'hidden' : 'visible';
+
 return {
-...n, draggable: n.data?.isImage && n.data?.isCropping ? false : true,
+...n, draggable: (n.data?.isImage || n.data?.isShape) && n.data?.isCropping ? false : true,
 data: {
 ...n.data,
 label: (
-<div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', alignItems: ai, justifyContent: jc, position: 'relative', border: resolvedBorder, borderRadius: n.style?.borderRadius || '12px', backgroundColor: n.style?.backgroundColor || '#fff', opacity: n.style?.opacity || 1, padding: n.style?.padding || '4px' }}>
+<div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', alignItems: ai, justifyContent: jc, position: 'relative', border: outerBorder, borderRadius: n.style?.borderRadius || '12px', backgroundColor: outerBg, opacity: n.style?.opacity || 1, padding: n.style?.padding || '4px', overflow: outerOverflow }}>
 
 {n.id !== 'center-mark' && (
 <>
@@ -1884,6 +1928,13 @@ label: (
 )}
 
 {previewElement}
+
+{/* ★ 図形トリミング時のみ出現する、中身の「動かせる図形実体」 */}
+{isCroppedShape && (
+    <div className={n.data?.isCropping ? "nodrag" : ""} onMouseDown={(e) => { if (n.data?.isCropping) { e.stopPropagation(); takeSnapshot(); imageCropDragRef.current = { id: n.id, startX: e.clientX, startY: e.clientY, initX: Number(n.data?.imgPosX || 0), initY: Number(n.data?.imgPosY || 0) }; } }} style={{ position: 'absolute', inset: 0, cursor: n.data?.isCropping ? 'move' : 'default', zIndex: -1 }}>
+        <div style={{ position: 'absolute', width: `${baseW}px`, height: `${baseH}px`, left: `${offX}px`, top: `${offY}px`, transform: `translate(${n.data.imgPosX || 0}px, ${n.data.imgPosY || 0}px) scale(${n.data.imgZoom || 1}) scaleX(${n.data?.flipH ? -1 : 1}) scaleY(${n.data?.flipV ? -1 : 1})`, transformOrigin: 'center center', border: resolvedBorder, borderRadius: n.style?.borderRadius || '12px', backgroundColor: n.style?.backgroundColor || '#fff', pointerEvents: 'none' }} />
+    </div>
+)}
 
 {n.data?.isImage ? (
 <div className={n.data?.isCropping ? "nodrag" : ""} onMouseDown={(e) => { if (n.data?.isCropping) { e.stopPropagation(); takeSnapshot(); imageCropDragRef.current = { id: n.id, startX: e.clientX, startY: e.clientY, initX: Number(n.data?.imgPosX || 0), initY: Number(n.data?.imgPosY || 0) }; } }} style={{ width: '100%', height: '100%', overflow: 'hidden', position: 'relative', borderRadius: n.style?.borderRadius || 0, cursor: n.data?.isCropping ? 'move' : 'default' }}>
@@ -2008,22 +2059,27 @@ return (
 </div>
 ) : ( <button className="no-print" onClick={() => setIsTopBarOpen(true)} style={{ position: 'absolute', top: 10, right: 10, zIndex: 100, padding: '4px 8px', fontSize: '10px', background: '#e2e8f0', border: '1px solid #cbd5e1', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold', color: '#475569', boxShadow: '0 2px 4px rgba(0,0,0,0.1)' }}>▼ 階層メニューを表示</button> )}
 
-<div style={{ flexGrow: 1, position: 'relative' }}>
-{/* ★ 鉛筆・筆のアナログ質感を出すための魔法のフィルター */}
+{/* ★ 読み取り透過用のID付与 */}
+<div id="workspace-container" style={{ flexGrow: 1, position: 'relative' }}>
+{/* ★ 超リアルな鉛筆・筆の質感フィルター */}
 <svg style={{ position: 'absolute', width: 0, height: 0, pointerEvents: 'none' }}>
     <defs>
-        <filter id="pencil-texture">
-            <feTurbulence type="fractalNoise" baseFrequency="1.5" numOctaves="3" result="noise" />
-            <feColorMatrix type="matrix" values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 2 -0.5" in="noise" result="coloredNoise" />
-            <feComposite operator="in" in="SourceGraphic" in2="coloredNoise" result="composite" />
+        <filter id="pencil-texture" x="-20%" y="-20%" width="140%" height="140%">
+            <feTurbulence type="fractalNoise" baseFrequency="1.2" numOctaves="3" result="noise" />
+            <feDisplacementMap in="SourceGraphic" in2="noise" scale="2" xChannelSelector="R" yChannelSelector="G" result="disp" />
+            <feColorMatrix type="matrix" values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 2 -0.2" in="noise" result="coloredNoise" />
+            <feComposite operator="in" in="coloredNoise" in2="disp" result="composite" />
+            <feBlend mode="multiply" in="composite" in2="SourceGraphic" />
         </filter>
-        <filter id="brush-texture">
-            <feGaussianBlur in="SourceGraphic" stdDeviation="0.8" result="blur" />
-            <feColorMatrix in="blur" mode="matrix" values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 25 -7" result="contrast" />
+        <filter id="brush-texture" x="-20%" y="-20%" width="140%" height="140%">
+            <feGaussianBlur in="SourceGraphic" stdDeviation="1.2" result="blur" />
+            <feColorMatrix in="blur" mode="matrix" values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 18 -6" result="goo" />
+            <feComposite in="SourceGraphic" in2="goo" operator="atop" />
         </filter>
     </defs>
 </svg>
 <ReactFlow
+
     connectionMode={ConnectionMode.Loose} 
     nodes={flowNodes} 
     edges={edges} 
@@ -2058,7 +2114,7 @@ style={{ cursor: creationStep ? 'crosshair' : 'default' }}
         const zIndex = reverseIndex;
         const isActive = isDrawingMode && activeLayerId === layer.id;
         return (
-            <div key={layer.id} style={{ position: 'absolute', inset: 0, zIndex, pointerEvents: (isActive && !creationStep) ? 'auto' : 'none', opacity: layer.visible ? 1 : 0 }}>
+            <div key={layer.id} className={isActive ? `canvas-${penStyle}` : ''} style={{ position: 'absolute', inset: 0, zIndex, pointerEvents: (isActive && !creationStep) ? 'auto' : 'none', opacity: layer.visible ? 1 : 0 }}>
                 <ReactSketchCanvas
                     ref={el => { if (el) canvasRefs.current[layer.id] = el; }}
                     strokeWidth={strokeWidth}
@@ -2067,7 +2123,8 @@ style={{ cursor: creationStep ? 'crosshair' : 'default' }}
                     canvasColor="transparent"
                     // ★ 選択中のレイヤーにのみフィルターと点線（ザラザラ感）を適用
                     style={{ width: '100%', height: '100%', border: 'none', filter: (isActive && penStyle === 'pencil') ? 'url(#pencil-texture)' : (isActive && penStyle === 'brush') ? 'url(#brush-texture)' : 'none' }}
-                    strokeDashArray={penStyle === 'pencil' ? '1, 4' : '0, 0'}
+                    // strokeDashArray prop removed because it's not supported by ReactSketchCanvas props
+                    // For pencil style, dashed effect is applied via CSS filter/texture above
                     withTimestamp={true}
                 />
             </div>
@@ -2278,6 +2335,20 @@ style={{ cursor: creationStep ? 'crosshair' : 'default' }}
 
 {primaryNode.data?.isShape && (
 <div style={{ marginBottom: '15px' }}>
+    <div style={{ marginBottom: '20px', padding: '10px', border: '1px solid #eee', borderRadius: '8px' }}>
+        <button onClick={() => { takeSnapshot(); const w = Number(primaryNode.style?.width) || 150; const h = Number(primaryNode.style?.height) || 150; if (!primaryNode.data?.isCropping) updateSelectedNodes({ isCropping: true, cropBaseW: w, cropBaseH: h, cropOffsetX: 0, cropOffsetY: 0 }); else updateSelectedNodes({ isCropping: false }); }} style={{ width: '100%', padding: '8px', fontSize: '12px', background: primaryNode.data?.isCropping ? '#ef4444' : '#fff', color: primaryNode.data?.isCropping ? '#fff' : '#333', border: primaryNode.data?.isCropping ? 'none' : '1px solid #ccc', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', transition: 'all 0.2s', marginBottom: '15px' }}>
+            {primaryNode.data?.isCropping ? '✅ トリミング完了' : '✂️ トリミング'}
+        </button>
+        {primaryNode.data?.isCropping ? ( <div style={{ padding: '10px', backgroundColor: '#fef2f2', borderRadius: '6px', marginBottom: '10px', border: '1px dashed #fca5a5' }}><p style={{fontSize: '10px', color: '#b91c1c', margin: 0}}><strong>トリミングモード中</strong><br/>・図形の周囲の<span style={{color:'red'}}>赤い枠</span>を動かして切り取れます。<br/>・図形の中身を直接ドラッグして位置を調整できます。</p></div> ) : (
+        <>
+            <label style={{fontSize: '10px', fontWeight: 'bold'}}>微調整 (X / Y位置)</label>
+            <input type="range" min="-600" max="600" value={Number(primaryNode.data?.imgPosX || 0)} onChange={(e) => updateSelectedNodes({ imgPosX: parseInt(e.target.value) })} style={{width:'100%', marginBottom: '5px'}} />
+            <input type="range" min="-600" max="600" value={Number(primaryNode.data?.imgPosY || 0)} onChange={(e) => updateSelectedNodes({ imgPosY: parseInt(e.target.value) })} style={{width:'100%', marginBottom: '10px'}} />
+        </>
+        )}
+        <label style={{fontSize: '10px', fontWeight: 'bold'}}>ズーム倍率</label>
+        <input type="range" min="0.5" max="3" step="0.1" value={Number(primaryNode.data?.imgZoom || 1)} onChange={(e) => updateSelectedNodes({ imgZoom: parseFloat(e.target.value) })} style={{width:'100%'}} />
+    </div>
     <button onClick={() => { takeSnapshot(); const w = Number(primaryNode.style?.width) || 150; const h = Number(primaryNode.style?.height) || 150; if (!primaryNode.data?.isCropping) updateSelectedNodes({ isCropping: true, cropBaseW: w, cropBaseH: h, cropOffsetX: 0, cropOffsetY: 0 }); else updateSelectedNodes({ isCropping: false }); }} style={{ width: '100%', padding: '6px', fontSize: '12px', background: primaryNode.data?.isCropping ? '#ef4444' : '#fff', color: primaryNode.data?.isCropping ? '#fff' : '#333', border: primaryNode.data?.isCropping ? 'none' : '1px solid #ccc', borderRadius: '4px', fontWeight: 'bold', cursor: 'pointer', transition: 'all 0.2s', marginBottom: '10px' }}>
         {primaryNode.data?.isCropping ? '✅ トリミング完了' : '✂️ トリミング'}
     </button>
