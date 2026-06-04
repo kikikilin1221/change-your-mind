@@ -235,7 +235,7 @@ const previewDragRef = useRef<{ id: string, startX: number, startY: number, init
 const imageCropDragRef = useRef<{ id: string, startX: number, startY: number, initX: number, initY: number } | null>(null);
 const tableActionRef = useRef<TableActionType | null>(null);
 const copiedTableCellsRef = useRef<any>(null); 
-
+const lastActionRef = useRef<{ type: string, args: any[] } | null>(null); // ★ 追加：F4キーでの反復機能用
 const nodesRef = useRef<any[]>([]);
 const edgesRef = useRef<any[]>([]);
 const copiedNodesRef = useRef<any[]>([]);
@@ -1016,6 +1016,7 @@ const updated = { ...files }; delete updated[id]; setFiles(updated); if (id === 
 };
 
 const updateSelectedNodes = useCallback((newData: any, newStyle: any = {}) => {
+lastActionRef.current = { type: 'updateNodes', args: [newData, newStyle] }; // ★ F4用に記録
 setNodes((nds: any[]) => nds.map((n: any) => n.selected ? { ...n, data: { ...(n.data || {}), ...(typeof newData === 'function' ? newData(n.data) : newData) }, style: { ...(n.style || {}), ...newStyle } } : n));
 }, []);
 
@@ -1074,6 +1075,7 @@ const applyUnifiedFormat = (type: string, value: any = '') => {
     const activeEl = document.activeElement as HTMLElement;
     if (!activeEl || activeEl.getAttribute('contentEditable') !== 'true') return;
     takeSnapshot();
+    lastActionRef.current = { type: 'format', args: [type, value] }; // ★ F4用に記録
     if (type === 'fontSize') {
         document.execCommand('fontSize', false, '7');
         const fonts = activeEl.querySelectorAll('font[size="7"], span');
@@ -1551,6 +1553,7 @@ setNodes((rootData.nodes || []).map((n:any) => ({...n, selected: false}))); setE
 };
 
 const addNode = useCallback((type: 'text' | 'image' | 'shape' | 'table', shapeDetail?: 'rect'|'square'|'circle'|'ellipse') => {
+lastActionRef.current = { type: 'addNode', args: [type, shapeDetail] }; // ★ F4用に記録
 takeSnapshot(); const id = `node-${Date.now()}`; const selNodes = nodesRef.current.filter(n => n.selected); const parent = selNodes.length === 1 ? selNodes[0] : null;
 
 let data: any = { content: '項目', previewVisible: false, previewStyle: { opacity: 0.7, offsetX: 0, offsetY: -150, width: 180, height: 120 }, textOffsetX: 0, textOffsetY: 0, isEditing: false, tableTitle: '' };
@@ -1599,9 +1602,25 @@ useEffect(() => {
 const handleKeyDown = (e: KeyboardEvent) => {
 const activeEl = document.activeElement as HTMLElement; const isContentEditing = activeEl?.tagName === 'INPUT' || activeEl?.tagName === 'TEXTAREA' || activeEl?.isContentEditable;
 if (isContentEditing && e.key !== 'Tab') { return; }
+
+// ★ 追加：F4キーで直前の動作を反復
+if (e.key === 'F4') {
+    e.preventDefault();
+    const action = lastActionRef.current;
+    if (action) {
+        if (action.type === 'addNode') addNode(action.args[0], action.args[1]);
+        else if (action.type === 'format') applyUnifiedFormat(action.args[0], action.args[1]);
+        else if (action.type === 'updateNodes') updateSelectedNodes(action.args[0], action.args[1]);
+    }
+    return;
+}
+
 // ★ 追加：矢印キーでの画面移動（パン操作）
 if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key) && !isContentEditing) {
-    e.preventDefault();
+    // 選択中の要素がある場合は、移動操作をReactFlow（図形の微細な移動）に譲るためキャンセル
+    if (selectedNodes.length > 0) return; 
+    
+    e.preventDefault();
     const { x, y, zoom } = getViewport();
     const panSpeed = 40; // 移動速度
     if (e.key === 'ArrowUp') setViewport({ x, y: y + panSpeed, zoom });
@@ -2501,6 +2520,27 @@ style={{ cursor: creationStep ? 'crosshair' : 'default' }}
             </div>
         </div>
     )}
+</div>
+)}
+
+{!primaryNode.data?.isImage && !primaryNode.data?.isTable && (
+<div style={{ padding: '10px', background: '#eef2ff', borderRadius: '8px', marginBottom: '15px', border: '1px solid #c7d2fe' }}>
+<label style={{fontSize: '11px', fontWeight: 'bold', color: '#3730a3'}}>📝 テキストを安全に編集</label>
+<div
+className="html-content"
+contentEditable={true}
+suppressContentEditableWarning
+onInput={(e) => updateSelectedNodes({ content: e.currentTarget.innerHTML })}
+onBlur={(e) => updateSelectedNodes({ content: e.currentTarget.innerHTML })}
+style={{ width: '100%', minHeight: '40px', padding: '8px', fontSize: '12px', border: '1px solid #a5b4fc', borderRadius: '4px', backgroundColor: '#fff', outline: 'none', overflowY: 'auto', cursor: 'text', marginTop: '5px' }}
+ref={el => {
+if (!el) return;
+const currentVal = primaryNode.data?.content || '';
+if (el.innerHTML !== currentVal && document.activeElement !== el) {
+el.innerHTML = currentVal;
+}
+}}
+/>
 </div>
 )}
 
