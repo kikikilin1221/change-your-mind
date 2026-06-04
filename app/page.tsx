@@ -455,6 +455,7 @@ const addSymbolNode = useCallback((symbol: string) => {
 
 // 枠・定規・読み取り作成のクリック処理 (1回目＝始点、2回目＝終点)
 const handlePaneClick = useCallback((e: React.MouseEvent) => {
+    setAlignSource(null); // ★ 追加：背景クリックで「揃える基準」をリセット
     if (!creationStep) return;
     const projected = screenToFlowPosition({ x: e.clientX, y: e.clientY });
     
@@ -893,35 +894,35 @@ const handleApplyAlign = useCallback((direction: 'left' | 'right' | 'top' | 'bot
 }, [alignSource, takeSnapshot, setNodes]);
 
 // ★ 追加：2つの図形を最短距離でピタッと接合する機能
-const handleSnapNodes = useCallback(() => {
-    if (selectedNodes.length !== 2) return;
+const handleSnapToAlignSource = useCallback(() => {
+    if (!alignSource || !primaryNode) return;
     takeSnapshot();
-    const [n1, n2] = selectedNodes;
-    const w1 = n1.measured?.width || Number(n1.style?.width) || 200;
-    const h1 = n1.measured?.height || Number(n1.style?.height) || 100;
-    const w2 = n2.measured?.width || Number(n2.style?.width) || 200;
-    const h2 = n2.measured?.height || Number(n2.style?.height) || 100;
-
-    const c1x = n1.position.x + w1 / 2;
-    const c1y = n1.position.y + h1 / 2;
-    const c2x = n2.position.x + w2 / 2;
-    const c2y = n2.position.y + h2 / 2;
-
-    const dx = Math.abs(c1x - c2x);
-    const dy = Math.abs(c1y - c2y);
+    const n1 = alignSource;
+    const w1 = n1.width;
+    const h1 = n1.height;
+    const c1x = n1.x + w1 / 2;
+    const c1y = n1.y + h1 / 2;
 
     setNodes(nds => nds.map(n => {
-        if (n.id !== n2.id) return n;
+        if (!n.selected || n.id === alignSource.id) return n;
+        const w2 = n.measured?.width || Number(n.style?.width) || 200;
+        const h2 = n.measured?.height || Number(n.style?.height) || 100;
+        const c2x = n.position.x + w2 / 2;
+        const c2y = n.position.y + h2 / 2;
+
+        const dx = Math.abs(c1x - c2x);
+        const dy = Math.abs(c1y - c2y);
+
         let newX = n.position.x;
         let newY = n.position.y;
         if (dx > dy) {
-            newX = c1x < c2x ? n1.position.x + w1 : n1.position.x - w2; // 横に接する
+            newX = c1x < c2x ? n1.x + w1 : n1.x - w2; // 横に接する
         } else {
-            newY = c1y < c2y ? n1.position.y + h1 : n1.position.y - h2; // 縦に接する
+            newY = c1y < c2y ? n1.y + h1 : n1.y - h2; // 縦に接する
         }
         return { ...n, position: { x: newX, y: newY } };
     }));
-}, [selectedNodes, takeSnapshot, setNodes]);
+}, [alignSource, primaryNode, takeSnapshot, setNodes]);
 
 useEffect(() => {
 if (primaryNode && !primaryNode.data?.isTable) {
@@ -1632,9 +1633,8 @@ return updatedNodes;
 useEffect(() => {
 const handleKeyDown = (e: KeyboardEvent) => {
 const activeEl = document.activeElement as HTMLElement; const isContentEditing = activeEl?.tagName === 'INPUT' || activeEl?.tagName === 'TEXTAREA' || activeEl?.isContentEditable;
-if (isContentEditing && e.key !== 'Tab') { return; }
 
-// ★ 修正：Mac対策！ F4 または Cmd+E (Ctrl+E) で直前の動作を反復
+// ★ 修正：テキスト編集中でも Cmd+E (F4) を最優先でキャッチして装飾を反復！
 if (e.key === 'F4' || ((e.ctrlKey || e.metaKey) && e.key === 'e')) {
     e.preventDefault();
     const action = lastActionRef.current;
@@ -1646,11 +1646,12 @@ if (e.key === 'F4' || ((e.ctrlKey || e.metaKey) && e.key === 'e')) {
     return;
 }
 
+if (isContentEditing && e.key !== 'Tab') { return; }
+
 // ★ 修正：矢印キーのバグを解消（図形移動と画面パンを完全に分離）
 if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key) && !isContentEditing) {
     e.preventDefault();
     if (selectedNodes.length > 0) {
-        // 図形の直接移動（ReactFlowのバグを回避して自力で座標を動かす）
         const moveSpeed = e.shiftKey ? 15 : 2;
         let dx = 0, dy = 0;
         if (e.key === 'ArrowUp') dy = -moveSpeed;
@@ -1659,7 +1660,6 @@ if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key) && !isCo
         if (e.key === 'ArrowRight') dx = moveSpeed;
         setNodes((nds: any[]) => nds.map((n: any) => n.selected ? { ...n, position: { x: n.position.x + dx, y: n.position.y + dy } } : n));
     } else {
-        // 画面のパン移動
         const { x, y, zoom } = getViewport();
         const panSpeed = 40;
         if (e.key === 'ArrowUp') setViewport({ x, y: y + panSpeed, zoom });
@@ -2136,6 +2136,7 @@ else if (el.dataset.editing !== 'true') { el.dataset.editing = 'true'; el.innerH
 
 {n.id !== 'center-mark' && !n.data?.isTransparentHelper ? (
 <NodeResizer 
+    key={isShiftPressed ? 'keep-ratio' : 'free-ratio'}
     minWidth={30} 
     minHeight={30} 
     keepAspectRatio={isShiftPressed} 
@@ -2422,18 +2423,58 @@ style={{ cursor: creationStep ? 'crosshair' : 'default' }}
 <button onClick={clearSelection} style={{ border: 'none', background: 'none', fontSize: '18px', cursor: 'pointer', padding: '0 5px' }}>×</button>
 </div>
 
-{/* ★ 追加：接合ボタン */}
-{selectedNodes.length === 2 && (
-<div style={{ padding: '10px', background: '#f5f3ff', borderRadius: '8px', marginBottom: '15px', border: '1px solid #ddd6fe' }}>
-    <label style={{fontSize: '11px', fontWeight: 'bold', color: '#4338ca', marginBottom: '8px', display: 'block'}}>🧲 最短距離で接合する</label>
-    <p style={{fontSize: '9px', color: '#4f46e5', margin: '0 0 5px 0', lineHeight: 1.2}}>2つの図形を一番近い辺でピッタリくっつけます。</p>
-    <button onClick={handleSnapNodes} style={{ width: '100%', padding: '8px', fontSize: '11px', background: '#4f46e5', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold', boxShadow: '0 2px 4px rgba(79, 70, 229, 0.3)' }}>
-        ピタッと接合する
-    </button>
-</div>
-)}
 
-{/* ★ 修正：すべての要素で使える安全なテキスト編集枠 */}
+<div style={{ padding: '10px', background: '#f0fdf4', borderRadius: '8px', marginBottom: '15px', border: '1px solid #bbf7d0' }}>
+    <label style={{fontSize: '11px', fontWeight: 'bold', color: '#166534', marginBottom: '8px', display: 'block'}}>📏 サイズコピー（書式）</label>
+    {!sizeSource ? (
+        <button onClick={handleCopySize} style={{ width: '100%', padding: '8px', fontSize: '11px', background: '#fff', color: '#166534', border: '1px solid #bbf7d0', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}>
+            現在のサイズをコピー
+        </button>
+    ) : (
+        <div style={{ display: 'flex', gap: '5px' }}>
+            <button onClick={handleApplySize} style={{ flex: 1, padding: '8px', fontSize: '11px', background: '#10b981', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}>
+                適用する ({Math.round(sizeSource.width)}×{Math.round(sizeSource.height)})
+            </button>
+            <button onClick={() => setSizeSource(null)} style={{ padding: '8px', fontSize: '11px', background: '#f1f5f9', color: '#64748b', border: '1px solid #cbd5e1', borderRadius: '4px', cursor: 'pointer' }}>解除</button>
+        </div>
+    )}
+</div>
+
+<div style={{ padding: '10px', background: '#fff7ed', borderRadius: '8px', marginBottom: '15px', border: '1px solid #fed7aa' }}>
+    <label style={{fontSize: '11px', fontWeight: 'bold', color: '#c2410c', marginBottom: '8px', display: 'block'}}>📐 辺を揃える ＆ 🧲 接合</label>
+    {!alignSource ? (
+        <button onClick={handleSetAlignSource} style={{ width: '100%', padding: '8px', fontSize: '11px', background: '#fff', color: '#c2410c', border: '1px solid #fed7aa', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}>
+            基準にする図形を登録
+        </button>
+    ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
+            <p style={{fontSize: '9px', color: '#ea580c', margin: '0 0 5px 0', lineHeight: 1.2}}>
+                合わせたい図形を選択し、<br/>揃える方向をクリックしてください。
+            </p>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '5px' }}>
+                <button onClick={() => handleApplyAlign('top')} style={{ padding: '6px', fontSize: '11px', background: '#fdba74', color: '#78350f', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}>上辺に合わせる</button>
+                <button onClick={() => handleApplyAlign('bottom')} style={{ padding: '6px', fontSize: '11px', background: '#fdba74', color: '#78350f', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}>下辺に合わせる</button>
+                <button onClick={() => handleApplyAlign('left')} style={{ padding: '6px', fontSize: '11px', background: '#fdba74', color: '#78350f', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}>左辺に合わせる</button>
+                <button onClick={() => handleApplyAlign('right')} style={{ padding: '6px', fontSize: '11px', background: '#fdba74', color: '#78350f', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}>右辺に合わせる</button>
+            </div>
+            {selectedNodes.length === 1 && selectedNodes[0].id !== alignSource.id && (
+                <button onClick={handleSnapToAlignSource} style={{ marginTop: '5px', padding: '8px', fontSize: '11px', background: '#4f46e5', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold', boxShadow: '0 2px 4px rgba(79, 70, 229, 0.3)' }}>
+                    🧲 ピタッとくっつける (接合)
+                </button>
+            )}
+            <button onClick={() => setAlignSource(null)} style={{ marginTop: '5px', padding: '6px', fontSize: '10px', background: '#f1f5f9', color: '#64748b', border: '1px solid #cbd5e1', borderRadius: '4px', cursor: 'pointer' }}>
+                整列モードを解除
+            </button>
+        </div>
+    )}
+</div>
+
+<div style={{ display:'flex', gap:'5px', marginBottom:'15px' }}>
+<button onClick={() => { takeSnapshot(); setNodes((nds: any[]) => { const maxZ = Math.max(0, ...nds.map((n: any) => Number(n.zIndex) || 0)); return nds.map((n: any) => n.selected ? {...n, zIndex: maxZ + 1} : n); })}} style={{flex:1, padding:'6px', fontSize:'11px', fontWeight: 'bold', background: '#f0f0f0', border: '1px solid #ccc', cursor: 'pointer', borderRadius: '4px'}}>↑ 最前面へ</button>
+<button onClick={() => { takeSnapshot(); setNodes((nds: any[]) => { const minZ = Math.min(0, ...nds.map((n: any) => Number(n.zIndex) || 0)); return nds.map((n: any) => n.selected ? {...n, zIndex: minZ - 1} : n); })}} style={{flex:1, padding:'6px', fontSize:'11px', fontWeight: 'bold', background: '#f0f0f0', border: '1px solid #ccc', cursor: 'pointer', borderRadius: '4px'}}>↓ 最背面へ</button>
+</div>
+
+{/* ★ 統一された安全なテキスト編集枠 */}
 {selectedNodes.length === 1 && !primaryNode.data?.isImage && !primaryNode.data?.isTable && (
 <div style={{ padding: '10px', background: '#eef2ff', borderRadius: '8px', marginBottom: '15px', border: '1px solid #c7d2fe' }}>
     <label style={{fontSize: '11px', fontWeight: 'bold', color: '#3730a3'}}>📝 テキストを安全に編集</label>
@@ -2452,53 +2493,6 @@ style={{ cursor: creationStep ? 'crosshair' : 'default' }}
     />
 </div>
 )}
-
-<div style={{ padding: '10px', background: '#f0fdf4', borderRadius: '8px', marginBottom: '15px', border: '1px solid #bbf7d0' }}>
-    <label style={{fontSize: '11px', fontWeight: 'bold', color: '#166534', marginBottom: '8px', display: 'block'}}>📏 サイズコピー（書式）</label>
-    {!sizeSource ? (
-        <button onClick={handleCopySize} style={{ width: '100%', padding: '8px', fontSize: '11px', background: '#fff', color: '#166534', border: '1px solid #bbf7d0', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}>
-            現在のサイズをコピー
-        </button>
-    ) : (
-        <div style={{ display: 'flex', gap: '5px' }}>
-            <button onClick={handleApplySize} style={{ flex: 1, padding: '8px', fontSize: '11px', background: '#10b981', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}>
-                適用する ({Math.round(sizeSource.width)}×{Math.round(sizeSource.height)})
-            </button>
-            <button onClick={() => setSizeSource(null)} style={{ padding: '8px', fontSize: '11px', background: '#f1f5f9', color: '#64748b', border: '1px solid #cbd5e1', borderRadius: '4px', cursor: 'pointer' }}>
-                解除
-            </button>
-        </div>
-    )}
-</div>
-
-<div style={{ padding: '10px', background: '#fff7ed', borderRadius: '8px', marginBottom: '15px', border: '1px solid #fed7aa' }}>
-    <label style={{fontSize: '11px', fontWeight: 'bold', color: '#c2410c', marginBottom: '8px', display: 'block'}}>📐 辺を揃える（整列）</label>
-    {!alignSource ? (
-        <button onClick={handleSetAlignSource} style={{ width: '100%', padding: '8px', fontSize: '11px', background: '#fff', color: '#c2410c', border: '1px solid #fed7aa', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}>
-            基準にする図形を登録
-        </button>
-    ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
-            <p style={{fontSize: '9px', color: '#ea580c', margin: '0 0 5px 0', lineHeight: 1.2}}>
-                合わせたい図形を選択し、<br/>揃える方向をクリックしてください。
-            </p>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '5px' }}>
-                <button onClick={() => handleApplyAlign('top')} style={{ padding: '6px', fontSize: '11px', background: '#fdba74', color: '#78350f', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}>上辺に合わせる</button>
-                <button onClick={() => handleApplyAlign('bottom')} style={{ padding: '6px', fontSize: '11px', background: '#fdba74', color: '#78350f', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}>下辺に合わせる</button>
-                <button onClick={() => handleApplyAlign('left')} style={{ padding: '6px', fontSize: '11px', background: '#fdba74', color: '#78350f', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}>左辺に合わせる</button>
-                <button onClick={() => handleApplyAlign('right')} style={{ padding: '6px', fontSize: '11px', background: '#fdba74', color: '#78350f', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}>右辺に合わせる</button>
-            </div>
-            <button onClick={() => setAlignSource(null)} style={{ marginTop: '5px', padding: '6px', fontSize: '10px', background: '#f1f5f9', color: '#64748b', border: '1px solid #cbd5e1', borderRadius: '4px', cursor: 'pointer' }}>
-                整列モードを解除
-            </button>
-        </div>
-    )}
-</div>
-
-<div style={{ display:'flex', gap:'5px', marginBottom:'15px' }}>
-<button onClick={() => { takeSnapshot(); setNodes((nds: any[]) => { const maxZ = Math.max(0, ...nds.map((n: any) => Number(n.zIndex) || 0)); return nds.map((n: any) => n.selected ? {...n, zIndex: maxZ + 1} : n); })}} style={{flex:1, padding:'6px', fontSize:'11px', fontWeight: 'bold', background: '#f0f0f0', border: '1px solid #ccc', cursor: 'pointer', borderRadius: '4px'}}>↑ 最前面へ</button>
-<button onClick={() => { takeSnapshot(); setNodes((nds: any[]) => { const minZ = Math.min(0, ...nds.map((n: any) => Number(n.zIndex) || 0)); return nds.map((n: any) => n.selected ? {...n, zIndex: minZ - 1} : n); })}} style={{flex:1, padding:'6px', fontSize:'11px', fontWeight: 'bold', background: '#f0f0f0', border: '1px solid #ccc', cursor: 'pointer', borderRadius: '4px'}}>↓ 最背面へ</button>
-</div>
 
 {primaryNode.data?.isTable && (
 <div style={{ padding: '10px', background: '#f8f9fa', borderRadius: '8px', marginBottom: '15px', border: '1px solid #ddd' }}>
@@ -2557,69 +2551,17 @@ style={{ cursor: creationStep ? 'crosshair' : 'default' }}
         <label style={{fontSize: '10px', fontWeight: 'bold'}}>ズーム倍率</label>
         <input type="range" min="0.5" max="3" step="0.1" value={Number(primaryNode.data?.imgZoom || 1)} onChange={(e) => updateSelectedNodes({ imgZoom: parseFloat(e.target.value) })} style={{width:'100%'}} />
     </div>
-    <button onClick={() => { takeSnapshot(); const w = Number(primaryNode.style?.width) || 150; const h = Number(primaryNode.style?.height) || 150; if (!primaryNode.data?.isCropping) updateSelectedNodes({ isCropping: true, cropBaseW: w, cropBaseH: h, cropOffsetX: 0, cropOffsetY: 0 }); else updateSelectedNodes({ isCropping: false }); }} style={{ width: '100%', padding: '6px', fontSize: '12px', background: primaryNode.data?.isCropping ? '#ef4444' : '#fff', color: primaryNode.data?.isCropping ? '#fff' : '#333', border: primaryNode.data?.isCropping ? 'none' : '1px solid #ccc', borderRadius: '4px', fontWeight: 'bold', cursor: 'pointer', transition: 'all 0.2s', marginBottom: '10px' }}>
-        {primaryNode.data?.isCropping ? '✅ トリミング完了' : '✂️ トリミング'}
-    </button>
     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '5px', marginBottom: '10px' }}>
         <button onClick={() => { takeSnapshot(); updateSelectedNodes((n:any) => ({ flipH: !n.flipH })); }} style={{ padding: '6px', fontSize: '12px', cursor: 'pointer', borderRadius: '4px', background: primaryNode.data?.flipH ? '#ddd' : '#fff', border: '1px solid #ccc' }}>↔ 左右反転</button>
         <button onClick={() => { takeSnapshot(); updateSelectedNodes((n:any) => ({ flipV: !n.flipV })); }} style={{ padding: '6px', fontSize: '12px', cursor: 'pointer', borderRadius: '4px', background: primaryNode.data?.flipV ? '#ddd' : '#fff', border: '1px solid #ccc' }}>↕ 上下反転</button>
     </div>
-    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '5px', marginBottom: '15px' }}>
-        <button onClick={() => { takeSnapshot(); const size = Math.max(Number(primaryNode.style?.width) || 150, Number(primaryNode.style?.height) || 150); updateSelectedNodes({ shapeType: 'rect', keepRatio: true }, { borderRadius: '0px', width: size, height: size }); }} style={{ padding: '6px', fontSize: '12px', cursor: 'pointer', borderRadius: '4px', background: primaryNode.data?.shapeType === 'rect' && primaryNode.data?.keepRatio ? '#ddd' : '#fff', border: '1px solid #ccc' }}>■ 正方形</button>
-        <button onClick={() => { takeSnapshot(); updateSelectedNodes({ shapeType: 'rect', keepRatio: false }, { borderRadius: '0px' }); }} style={{ padding: '6px', fontSize: '12px', cursor: 'pointer', borderRadius: '4px', background: primaryNode.data?.shapeType === 'rect' && !primaryNode.data?.keepRatio ? '#ddd' : '#fff', border: '1px solid #ccc' }}>▬ 長方形</button>
-        <button onClick={() => { takeSnapshot(); const size = Math.max(Number(primaryNode.style?.width) || 150, Number(primaryNode.style?.height) || 150); updateSelectedNodes({ shapeType: 'circ', keepRatio: true }, { borderRadius: '50%', width: size, height: size }); }} style={{ padding: '6px', fontSize: '12px', cursor: 'pointer', borderRadius: '4px', background: primaryNode.data?.shapeType === 'circ' && primaryNode.data?.keepRatio ? '#ddd' : '#fff', border: '1px solid #ccc' }}>● 正円</button>
-        <button onClick={() => { takeSnapshot(); updateSelectedNodes({ shapeType: 'circ', keepRatio: false }, { borderRadius: '50%' }); }} style={{ padding: '6px', fontSize: '12px', cursor: 'pointer', borderRadius: '4px', background: primaryNode.data?.shapeType === 'circ' && !primaryNode.data?.keepRatio ? '#ddd' : '#fff', border: '1px solid #ccc' }}>⬭ 楕円</button>
-    </div>
-
-    {customStamps.length > 0 && (
-        <div style={{ padding: '10px', background: '#f8fafc', border: '1px solid #cbd5e1', borderRadius: '8px' }}>
-            <label style={{fontSize: '10px', fontWeight: 'bold', color: '#334155', marginBottom: '5px', display: 'block'}}>準選抜図形 (読取済)</label>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '5px' }}>
-                {customStamps.map((stamp, i) => (
-                    <div key={i} style={{ position: 'relative' }}>
-                        <img src={stamp} style={{ height: '30px', border: '1px solid #ccc', borderRadius: '4px', cursor: 'pointer', backgroundColor: '#fff' }} 
-                            onClick={() => {
-                                takeSnapshot();
-                                const center = screenToFlowPosition({ x: window.innerWidth / 2, y: window.innerHeight / 2 });
-                                const maxZ = Math.max(0, ...nodesRef.current.map((n: any) => Number(n.zIndex) || 0));
-                                setNodes((nds:any[]) => [...nds.map((n:any) => ({...n, selected: false})), { id: `img-${Date.now()}`, position: { x: center.x - 100, y: center.y - 50 }, zIndex: maxZ + 1, selected: true, data: { isImage: true, imageUrl: stamp, imgPosX: 0, imgPosY: 0, imgZoom: 1, isCropping: false, cropBaseW: 200, cropBaseH: 100 }, style: { width: 200, height: 100, background: 'transparent', padding: 0, borderColor: 'transparent', borderWidth: 0 } }]);
-                            }}
-                        />
-                        <button onClick={() => { const ns = customStamps.filter((_, idx) => idx !== i); setCustomStamps(ns); localStorage.setItem('my-logic-stamps', JSON.stringify(ns)); }} style={{ position: 'absolute', top: -5, right: -5, background: 'red', color: 'white', borderRadius: '50%', width: '12px', height: '12px', fontSize: '8px', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>×</button>
-                    </div>
-                ))}
-            </div>
-        </div>
-    )}
-</div>
-)}
-
-{!primaryNode.data?.isImage && !primaryNode.data?.isTable && (
-<div style={{ padding: '10px', background: '#eef2ff', borderRadius: '8px', marginBottom: '15px', border: '1px solid #c7d2fe' }}>
-<label style={{fontSize: '11px', fontWeight: 'bold', color: '#3730a3'}}>📝 テキストを安全に編集</label>
-<div
-className="html-content"
-contentEditable={true}
-suppressContentEditableWarning
-onInput={(e) => updateSelectedNodes({ content: e.currentTarget.innerHTML })}
-onBlur={(e) => updateSelectedNodes({ content: e.currentTarget.innerHTML })}
-style={{ width: '100%', minHeight: '40px', padding: '8px', fontSize: '12px', border: '1px solid #a5b4fc', borderRadius: '4px', backgroundColor: '#fff', outline: 'none', overflowY: 'auto', cursor: 'text', marginTop: '5px' }}
-ref={el => {
-if (!el) return;
-const currentVal = primaryNode.data?.content || '';
-if (el.innerHTML !== currentVal && document.activeElement !== el) {
-el.innerHTML = currentVal;
-}
-}}
-/>
 </div>
 )}
 
 <div style={{ padding: '15px', borderRadius: '12px', backgroundColor: '#f8f9fa', border: '1px solid #ddd', marginBottom: '15px' }}>
-<label style={{fontSize: '11px', fontWeight: 'bold', color: '#1d4ed8'}}>文字の部分装飾 (編集中のみ)</label>
+<label style={{fontSize: '11px', fontWeight: 'bold', color: '#1d4ed8'}}>文字の部分装飾 (Cmd+Eで反復)</label>
 <p style={{fontSize: '10px', color: '#666', marginTop: '4px', marginBottom: '10px', lineHeight: '1.4'}}>
-※図形を選択して<b>Tabキー</b>で編集モードに入り、<br/>
-<u>マウスで文字をなぞって選択してから</u>押してください。
+※文字を選択して押してください。<br/>直前の装飾は「Cmd+E」で繰り返せます。
 </p>
 
 <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:'5px', marginBottom:'5px' }}>
@@ -2638,17 +2580,17 @@ el.innerHTML = currentVal;
 
 {customColors.length > 0 && (
 <div style={{ display: 'flex', flexWrap: 'wrap', gap: '5px', marginBottom: '15px', alignItems: 'center' }}>
-    {customColors.map(c => (
-        <button 
-            key={c} 
-            onMouseDown={(e) => { const sel = window.getSelection(); const activeEl = document.activeElement as HTMLElement; if (activeEl && activeEl.getAttribute('contentEditable') === 'true' && sel && !sel.isCollapsed) e.preventDefault(); }} 
-            onClick={() => applyUnifiedFormat('foreColor', c)} 
-            onKeyDown={(e) => { if(e.key === 'Backspace' || e.key === 'Delete') { const newColors = customColors.filter(col => col !== c); setCustomColors(newColors); localStorage.setItem('my-logic-custom-colors', JSON.stringify(newColors)); } }} 
-            title="文字非選択時にクリックしてDeleteで削除" 
-            style={{ width: '24px', height: '24px', backgroundColor: c, border: '1px solid #ddd', borderRadius: '4px', cursor: 'pointer' }} 
-        />
-    ))}
-    <div style={{fontSize: '9px', color: '#999'}}>※不要な色は選択してDeleteキーで削除</div>
+    {customColors.map(c => (
+        <button 
+            key={c} 
+            onMouseDown={(e) => { const sel = window.getSelection(); const activeEl = document.activeElement as HTMLElement; if (activeEl && activeEl.getAttribute('contentEditable') === 'true' && sel && !sel.isCollapsed) e.preventDefault(); }} 
+            onClick={() => applyUnifiedFormat('foreColor', c)} 
+            onKeyDown={(e) => { if(e.key === 'Backspace' || e.key === 'Delete') { const newColors = customColors.filter(col => col !== c); setCustomColors(newColors); localStorage.setItem('my-logic-custom-colors', JSON.stringify(newColors)); } }} 
+            title="文字非選択時にクリックしてDeleteで削除" 
+            style={{ width: '24px', height: '24px', backgroundColor: c, border: '1px solid #ddd', borderRadius: '4px', cursor: 'pointer' }} 
+        />
+    ))}
+    <div style={{fontSize: '9px', color: '#999'}}>※不要な色は選択してDeleteキーで削除</div>
 </div>
 )}
 
@@ -2740,10 +2682,10 @@ el.innerHTML = currentVal;
 )}
 <div style={{ display: 'flex', gap: '5px', marginTop: '15px' }}>
 <button onClick={handleDuplicate} style={{ flex:1, color: '#333', fontSize:'12px', border: '1px solid #ccc', padding: '8px', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold', background: '#f8f9fa' }}>📄 複製</button>
-<button onClick={() => { 
-takeSnapshot(); 
+<button onClick={() => { 
+takeSnapshot(); 
 const selIds = nodesRef.current.filter((n: any) => n.selected).map((n: any) => n.id);
-setNodes((nds: any[]) => nds.filter((n: any) => !n.selected)); 
+setNodes((nds: any[]) => nds.filter((n: any) => !n.selected)); 
 setEdges((eds: any[]) => eds.filter((e: any) => !e.selected && !selIds.includes(e.source) && !selIds.includes(e.target)));
 setSelectedCells({});
 }} style={{ flex:1, color: 'red', fontSize:'12px', border: '1px solid red', padding: '8px', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold', background: '#fffcfc' }}>🗑️ 削除</button>
@@ -2815,7 +2757,7 @@ el.innerHTML = currentVal;
 <button onMouseDown={(e) => e.preventDefault()} onClick={() => applyUnifiedFormat('bold')} style={{ cursor:'pointer', border:'1px solid #ccc', padding: '4px 8px', fontSize:'11px', borderRadius: '4px', background: '#fff' }}>太字</button>
 
 {['#000000', '#ef4444', '#eab308', '#10b981', '#3b82f6'].map(c => (
-  <button key={c} onMouseDown={(e) => e.preventDefault()} onClick={() => applyUnifiedFormat('foreColor', c)} style={{ width: '18px', height: '18px', backgroundColor: c, border: '1px solid #ddd', borderRadius: '3px', cursor: 'pointer' }} />
+  <button key={c} onMouseDown={(e) => e.preventDefault()} onClick={() => applyUnifiedFormat('foreColor', c)} style={{ width: '18px', height: '18px', backgroundColor: c, border: '1px solid #ddd', borderRadius: '3px', cursor: 'pointer' }} />
 ))}
 <input type="color" onMouseDown={(e) => e.preventDefault()} onChange={(e) => applyUnifiedFormat('foreColor', e.target.value)} style={{width:'24px', height:'24px', cursor: 'pointer', border: 'none', padding: 0, marginLeft: '2px'}} />
 </div>
@@ -2846,10 +2788,10 @@ el.innerHTML = currentVal;
 
 <label style={{fontSize:'11px', fontWeight: 'bold'}}>線の色</label>
 <div style={{ display: 'flex', gap: '5px', marginTop: '5px', marginBottom: '20px', alignItems: 'center' }}>
-  {['#000000', '#ef4444', '#eab308', '#10b981', '#3b82f6'].map(c => (
-    <button key={c} onClick={() => updateEdgeDesign({ color: c })} style={{ width: '24px', height: '24px', backgroundColor: c, border: '1px solid #ddd', borderRadius: '4px', cursor: 'pointer' }} />
-  ))}
-  <input type="color" value={selectedEdge.data?.color || '#333333'} onChange={(e) => updateEdgeDesign({ color: e.target.value })} style={{flex: 1, height: '24px', border: 'none', cursor: 'pointer', padding: 0}} />
+  {['#000000', '#ef4444', '#eab308', '#10b981', '#3b82f6'].map(c => (
+    <button key={c} onClick={() => updateEdgeDesign({ color: c })} style={{ width: '24px', height: '24px', backgroundColor: c, border: '1px solid #ddd', borderRadius: '4px', cursor: 'pointer' }} />
+  ))}
+  <input type="color" value={selectedEdge.data?.color || '#333333'} onChange={(e) => updateEdgeDesign({ color: e.target.value })} style={{flex: 1, height: '24px', border: 'none', cursor: 'pointer', padding: 0}} />
 </div>
 
 <label style={{fontSize:'11px', fontWeight: 'bold'}}>種類 (8種)</label>
@@ -2933,65 +2875,66 @@ const newColor = e.target.value; setLevelData(prev => ({ ...prev, [currentLevel]
 {/* ★ 大幅に拡大＆押しやすくなったフローティング描画ボタン */}
 {drawBtnPos.left >= 0 && (
 <div className="no-print" style={{ position: 'fixed', left: `${drawBtnPos.left}px`, top: `${drawBtnPos.top}px`, zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-    <div 
-        onMouseDown={(e) => { e.preventDefault(); drawBtnDragRef.current = { startX: e.clientX, startY: e.clientY, initX: drawBtnPos.left, initY: drawBtnPos.top }; }}
-        style={{ width: '90px', height: '90px', borderRadius: '50%', background: 'rgba(59, 130, 246, 0.15)', border: '2px dashed #3b82f6', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'move', backdropFilter: 'blur(3px)', boxShadow: '0 6px 16px rgba(0,0,0,0.15)' }}
-        title="外枠をドラッグして移動"
-    >
-        <button 
-            onMouseDown={(e) => e.stopPropagation()} 
-            onClick={() => { const next = !isDrawingMode; setIsDrawingMode(next); setIsDrawingMenuOpen(next); if(next) changePenMode('pen'); }} 
-            style={{ width: '70px', height: '70px', borderRadius: '50%', backgroundColor: isDrawingMode ? '#ef4444' : '#8b5cf6', color: '#fff', border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.3)', cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: 0, transition: 'transform 0.1s' }}
-            onMouseEnter={(e) => e.currentTarget.style.transform = 'scale(1.05)'}
-            onMouseLeave={(e) => e.currentTarget.style.transform = 'scale(1)'}
-        >
-            <span style={{ fontSize: '26px', marginBottom: '2px' }}>{isDrawingMode ? '❌' : '✏️'}</span>
-            <span style={{ fontSize: '11px', fontWeight: 'bold' }}>{isDrawingMode ? '描画終了' : '描画する'}</span>
-        </button>
-    </div>
+    <div 
+        onMouseDown={(e) => { e.preventDefault(); drawBtnDragRef.current = { startX: e.clientX, startY: e.clientY, initX: drawBtnPos.left, initY: drawBtnPos.top }; }}
+        style={{ width: '100px', height: '100px', borderRadius: '50%', background: 'rgba(59, 130, 246, 0.15)', border: '2px dashed #3b82f6', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'move', backdropFilter: 'blur(3px)', boxShadow: '0 6px 16px rgba(0,0,0,0.15)' }}
+        title="外枠をドラッグして移動"
+    >
+        <button 
+            onMouseDown={(e) => e.stopPropagation()} 
+            onClick={() => { const next = !isDrawingMode; setIsDrawingMode(next); setIsDrawingMenuOpen(next); if(next) changePenMode('pen'); }} 
+            style={{ width: '80px', height: '80px', borderRadius: '50%', backgroundColor: isDrawingMode ? '#ef4444' : '#8b5cf6', color: '#fff', border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.3)', cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: 0, transition: 'transform 0.1s' }}
+            onMouseEnter={(e) => e.currentTarget.style.transform = 'scale(1.05)'}
+            onMouseLeave={(e) => e.currentTarget.style.transform = 'scale(1)'}
+        >
+            <span style={{ fontSize: '32px', marginBottom: '2px' }}>{isDrawingMode ? '❌' : '✏️'}</span>
+            <span style={{ fontSize: '12px', fontWeight: 'bold' }}>{isDrawingMode ? '描画終了' : '描画する'}</span>
+        </button>
+    </div>
 </div>
 )}
 
 {/* ★ 独立させた図形メニューポップアップ */}
 {isShapeMenuOpen && (
 <div className="no-print" style={{ position: 'fixed', bottom: '80px', left: '50%', transform: 'translateX(-50%)', backgroundColor: '#fff', border: '2px solid #3b82f6', borderRadius: '12px', padding: '12px', display: 'flex', flexDirection: 'column', gap: '10px', boxShadow: '0 10px 25px rgba(0,0,0,0.2)', zIndex: 999999 }}>
-    <div style={{ display: 'flex', gap: '8px' }}>
-        <button onClick={() => { addNode('shape', 'rect'); setIsShapeMenuOpen(false); setIsStampMenuOpen(false); }} style={{ padding: '8px 16px', fontSize: '14px', fontWeight: 'bold', cursor: 'pointer', borderRadius: '6px', background: '#eff6ff', color: '#1d4ed8', border: '1px solid #bfdbfe', whiteSpace: 'nowrap' }}>▬ 長方形</button>
-        <button onClick={() => { addNode('shape', 'square'); setIsShapeMenuOpen(false); setIsStampMenuOpen(false); }} style={{ padding: '8px 16px', fontSize: '14px', fontWeight: 'bold', cursor: 'pointer', borderRadius: '6px', background: '#eff6ff', color: '#1d4ed8', border: '1px solid #bfdbfe', whiteSpace: 'nowrap' }}>■ 正方形</button>
-        <button onClick={() => { addNode('shape', 'ellipse'); setIsShapeMenuOpen(false); setIsStampMenuOpen(false); }} style={{ padding: '8px 16px', fontSize: '14px', fontWeight: 'bold', cursor: 'pointer', borderRadius: '6px', background: '#eff6ff', color: '#1d4ed8', border: '1px solid #bfdbfe', whiteSpace: 'nowrap' }}>⬭ 楕円</button>
-        <button onClick={() => { addNode('shape', 'circle'); setIsShapeMenuOpen(false); setIsStampMenuOpen(false); }} style={{ padding: '8px 16px', fontSize: '14px', fontWeight: 'bold', cursor: 'pointer', borderRadius: '6px', background: '#eff6ff', color: '#1d4ed8', border: '1px solid #bfdbfe', whiteSpace: 'nowrap' }}>● 正円</button>
-        <button onClick={() => setIsStampMenuOpen(!isStampMenuOpen)} style={{ padding: '8px 12px', fontSize: '14px', fontWeight: 'bold', cursor: 'pointer', borderRadius: '6px', background: isStampMenuOpen ? '#dcfce7' : '#f8fafc', color: isStampMenuOpen ? '#166534' : '#475569', border: '1px solid #cbd5e1', whiteSpace: 'nowrap' }}>🖼️ 準選抜</button>
-        <button onClick={() => { setIsShapeMenuOpen(false); setIsStampMenuOpen(false); }} style={{ padding: '8px 12px', fontSize: '14px', fontWeight: 'bold', cursor: 'pointer', borderRadius: '6px', background: '#fee2e2', color: '#b91c1c', border: '1px solid #fecaca', whiteSpace: 'nowrap' }}>閉じる</button>
-    </div>
-    
-    {isStampMenuOpen && customStamps.length > 0 && (
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', padding: '10px', backgroundColor: '#f1f5f9', borderRadius: '8px', border: '1px solid #cbd5e1', maxHeight: '150px', overflowY: 'auto' }}>
-            {customStamps.map((stamp, i) => (
-                <div key={i} style={{ position: 'relative' }}>
-                    <img src={stamp} style={{ height: '40px', border: '1px solid #ccc', borderRadius: '4px', cursor: 'pointer', backgroundColor: '#fff' }} 
-                        onClick={() => {
-                            takeSnapshot();
-                            const center = screenToFlowPosition({ x: window.innerWidth / 2, y: window.innerHeight / 2 });
-                            const maxZ = Math.max(0, ...nodesRef.current.map((n: any) => Number(n.zIndex) || 0));
-                            setNodes((nds:any[]) => [...nds.map((n:any) => ({...n, selected: false})), { id: `img-${Date.now()}`, position: { x: center.x - 100, y: center.y - 50 }, zIndex: maxZ + 1, selected: true, data: { isImage: true, imageUrl: stamp, imgPosX: 0, imgPosY: 0, imgZoom: 1, isCropping: false, cropBaseW: 200, cropBaseH: 100 }, style: { width: 200, height: 100, backgroundColor: 'transparent', padding: 0, borderColor: 'transparent', borderWidth: 0 } }]);
-                            setIsShapeMenuOpen(false);
-                            setIsStampMenuOpen(false);
-                        }}
-                    />
-                </div>
-            ))}
-        </div>
-    )}
-    {isStampMenuOpen && customStamps.length === 0 && (
-        <p style={{ fontSize: '12px', color: '#64748b', textAlign: 'center', margin: '5px 0' }}>読み取った図形がありません</p>
-    )}
+    <div style={{ display: 'flex', gap: '8px' }}>
+        <button onClick={() => { addNode('shape', 'rect'); setIsShapeMenuOpen(false); setIsStampMenuOpen(false); }} style={{ padding: '8px 16px', fontSize: '14px', fontWeight: 'bold', cursor: 'pointer', borderRadius: '6px', background: '#eff6ff', color: '#1d4ed8', border: '1px solid #bfdbfe', whiteSpace: 'nowrap' }}>▬ 長方形</button>
+        <button onClick={() => { addNode('shape', 'square'); setIsShapeMenuOpen(false); setIsStampMenuOpen(false); }} style={{ padding: '8px 16px', fontSize: '14px', fontWeight: 'bold', cursor: 'pointer', borderRadius: '6px', background: '#eff6ff', color: '#1d4ed8', border: '1px solid #bfdbfe', whiteSpace: 'nowrap' }}>■ 正方形</button>
+        <button onClick={() => { addNode('shape', 'ellipse'); setIsShapeMenuOpen(false); setIsStampMenuOpen(false); }} style={{ padding: '8px 16px', fontSize: '14px', fontWeight: 'bold', cursor: 'pointer', borderRadius: '6px', background: '#eff6ff', color: '#1d4ed8', border: '1px solid #bfdbfe', whiteSpace: 'nowrap' }}>⬭ 楕円</button>
+        <button onClick={() => { addNode('shape', 'circle'); setIsShapeMenuOpen(false); setIsStampMenuOpen(false); }} style={{ padding: '8px 16px', fontSize: '14px', fontWeight: 'bold', cursor: 'pointer', borderRadius: '6px', background: '#eff6ff', color: '#1d4ed8', border: '1px solid #bfdbfe', whiteSpace: 'nowrap' }}>● 正円</button>
+        <button onClick={() => setIsStampMenuOpen(!isStampMenuOpen)} style={{ padding: '8px 12px', fontSize: '14px', fontWeight: 'bold', cursor: 'pointer', borderRadius: '6px', background: isStampMenuOpen ? '#dcfce7' : '#f8fafc', color: isStampMenuOpen ? '#166534' : '#475569', border: '1px solid #cbd5e1', whiteSpace: 'nowrap' }}>🖼️ 準選抜</button>
+        <button onClick={() => { setIsShapeMenuOpen(false); setIsStampMenuOpen(false); }} style={{ padding: '8px 12px', fontSize: '14px', fontWeight: 'bold', cursor: 'pointer', borderRadius: '6px', background: '#fee2e2', color: '#b91c1c', border: '1px solid #fecaca', whiteSpace: 'nowrap' }}>閉じる</button>
+    </div>
+    
+    {isStampMenuOpen && customStamps.length > 0 && (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', padding: '10px', backgroundColor: '#f1f5f9', borderRadius: '8px', border: '1px solid #cbd5e1', maxHeight: '150px', overflowY: 'auto' }}>
+            {customStamps.map((stamp, i) => (
+                <div key={i} style={{ position: 'relative' }}>
+                    <img src={stamp} style={{ height: '40px', border: '1px solid #ccc', borderRadius: '4px', cursor: 'pointer', backgroundColor: '#fff' }} 
+                        onClick={() => {
+                            takeSnapshot();
+                            const center = screenToFlowPosition({ x: window.innerWidth / 2, y: window.innerHeight / 2 });
+                            const maxZ = Math.max(0, ...nodesRef.current.map((n: any) => Number(n.zIndex) || 0));
+                            setNodes((nds:any[]) => [...nds.map((n:any) => ({...n, selected: false})), { id: `img-${Date.now()}`, position: { x: center.x - 100, y: center.y - 50 }, zIndex: maxZ + 1, selected: true, data: { isImage: true, imageUrl: stamp, imgPosX: 0, imgPosY: 0, imgZoom: 1, isCropping: false, cropBaseW: 200, cropBaseH: 100 }, style: { width: 200, height: 100, backgroundColor: 'transparent', padding: 0, borderColor: 'transparent', borderWidth: 0 } }]);
+                            setIsShapeMenuOpen(false);
+                            setIsStampMenuOpen(false);
+                        }}
+                    />
+                    <button onClick={() => { const ns = customStamps.filter((_, idx) => idx !== i); setCustomStamps(ns); localStorage.setItem('my-logic-stamps', JSON.stringify(ns)); }} style={{ position: 'absolute', top: -5, right: -5, background: 'red', color: 'white', borderRadius: '50%', width: '12px', height: '12px', fontSize: '8px', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>×</button>
+                </div>
+            ))}
+        </div>
+    )}
+    {isStampMenuOpen && customStamps.length === 0 && (
+        <p style={{ fontSize: '12px', color: '#64748b', textAlign: 'center', margin: '5px 0' }}>読み取った図形がありません</p>
+    )}
 </div>
 )}
 
 {saveMessage && (
-    <div style={{ position: 'fixed', bottom: '80px', left: '50%', transform: 'translateX(-50%)', background: '#333', color: '#fff', padding: '10px 20px', borderRadius: '20px', zIndex: 9999, fontSize: '12px', fontWeight: 'bold', boxShadow: '0 4px 12px rgba(0,0,0,0.15)' }}>
-        {saveMessage}
-    </div>
+    <div style={{ position: 'fixed', bottom: '80px', left: '50%', transform: 'translateX(-50%)', background: '#333', color: '#fff', padding: '10px 20px', borderRadius: '20px', zIndex: 9999, fontSize: '12px', fontWeight: 'bold', boxShadow: '0 4px 12px rgba(0,0,0,0.15)' }}>
+        {saveMessage}
+    </div>
 )}
 </div>
 </div>
