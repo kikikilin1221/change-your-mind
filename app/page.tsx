@@ -370,11 +370,25 @@ const [tempColor, setTempColor] = useState('#f59e0b');
 const canvasRefs = useRef<Record<string, any>>({});
 const [isDrawingMode, setIsDrawingMode] = useState(false);
 const [isDrawingMenuOpen, setIsDrawingMenuOpen] = useState(false);
-const [penStyle, setPenStyle] = useState<'pen' | 'marker' | 'eraser' | 'pencil' | 'brush' | 'thick'>('pen');
-const [strokeColor, setStrokeColor] = useState('#000000');
-const [strokeWidth, setStrokeWidth] = useState(2);
-const [eraserWidth, setEraserWidth] = useState(15);
-const [penOpacity, setPenOpacity] = useState(1);
+// ★ ペンの個別設定を記憶するステート
+const [activeTool, setActiveTool] = useState('pen1');
+const [toolSettings, setToolSettings] = useState<Record<string, any>>({
+    pen1: { color: '#000000', width: 2, opacity: 1, type: 'pen' },
+    pen2: { color: '#ef4444', width: 2, opacity: 1, type: 'pen' },
+    pen3: { color: '#3b82f6', width: 2, opacity: 1, type: 'pen' },
+    pen4: { color: '#10b981', width: 2, opacity: 1, type: 'pen' },
+    marker: { color: '#eab308', width: 16, opacity: 0.4, type: 'marker' },
+    thick: { color: '#000000', width: 10, opacity: 1, type: 'thick' },
+    eraser: { width: 15, type: 'eraser' }
+});
+
+const currentSettings = toolSettings[activeTool] || toolSettings.pen1;
+const penStyle = currentSettings.type;
+const strokeColor = currentSettings.color || '#000000';
+const strokeWidth = currentSettings.width || 2;
+const penOpacity = currentSettings.opacity || 1;
+const eraserWidth = toolSettings.eraser?.width || 15;
+const [isStampMenuOpen, setIsStampMenuOpen] = useState(false); // 準選抜図形メニュー用
 const [drawBtnPos, setDrawBtnPos] = useState({ left: -1, top: -1 });
 useEffect(() => { setDrawBtnPos({ left: window.innerWidth - 100, top: window.innerHeight - 150 }); }, []);
 const drawBtnDragRef = useRef<{ startX: number, startY: number, initX: number, initY: number } | null>(null);
@@ -479,17 +493,28 @@ const handlePaneClick = useCallback((e: React.MouseEvent) => {
                     if (ws) ws.classList.remove('hide-bg');
                     if (bgNode) bgNode.style.display = 'block';
                     
-                    // ★ 画像のピクセルデータを解析して「背景色」を完全に透明に削り落とす魔法
-                    const ctx = canvas.getContext('2d');
+                    // ★ 究極の背景透明化アルゴリズム（輪郭スムージング付き）
+                    const ctx = canvas.getContext('2d', { willReadFrequently: true });
                     if (ctx) {
                         const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
                         const data = imgData.data;
-                        const bgR = data[0], bgG = data[1], bgB = data[2]; // 左上を背景色とみなす
+                        // 左上のピクセルを背景色としてサンプリング
+                        const bgR = data[0], bgG = data[1], bgB = data[2]; 
+                        
                         for (let i = 0; i < data.length; i += 4) {
                             const r = data[i], g = data[i+1], b = data[i+2], a = data[i+3];
-                            // 背景色に近い色（誤差15以内）なら、透明度(Alpha)を0にする
-                            if (a > 0 && Math.abs(r - bgR) < 15 && Math.abs(g - bgG) < 15 && Math.abs(b - bgB) < 15) {
+                            if (a === 0) continue;
+                            
+                            // 背景色との距離（色の違い）を計算
+                            const distance = Math.sqrt(Math.pow(r - bgR, 2) + Math.pow(g - bgG, 2) + Math.pow(b - bgB, 2));
+                            
+                            if (distance < 20) {
+                                // 完全に背景色と同じなら完全に透明にする
                                 data[i+3] = 0;
+                            } else if (distance < 60) {
+                                // 文字の輪郭のグレー残りを防ぐため、境界部分に半透明グラデーションをかける
+                                const alphaFactor = (distance - 20) / 40;
+                                data[i+3] = Math.floor(a * alphaFactor);
                             }
                         }
                         ctx.putImageData(imgData, 0, 0);
@@ -558,18 +583,18 @@ useEffect(() => {
     }
 }, [isDrawingMode, layers.length]);
 
-// ペン切り替え関数
-const changePenMode = useCallback((mode: 'pen' | 'marker' | 'eraser' | 'pencil' | 'brush' | 'thick') => {
-    setPenStyle(mode);
+// ペン切り替え＆設定保存関数
+const changePenMode = useCallback((toolId: string) => {
+    setActiveTool(toolId);
+    const isEraser = toolId === 'eraser';
     if (activeLayerId && canvasRefs.current[activeLayerId]) {
-        canvasRefs.current[activeLayerId].eraseMode(mode === 'eraser');
+        canvasRefs.current[activeLayerId].eraseMode(isEraser);
     }
-    if (mode === 'pen') { setStrokeWidth(2); setPenOpacity(1); }
-    if (mode === 'pencil') { setStrokeWidth(1); setPenOpacity(0.6); } // 少し薄く細く
-    if (mode === 'brush') { setStrokeWidth(8); setPenOpacity(0.9); }
-    if (mode === 'marker') { setStrokeWidth(16); setPenOpacity(0.4); } // 蛍光ペン復活
-    if (mode === 'thick') { setStrokeWidth(25); setPenOpacity(1); }
 }, [activeLayerId]);
+
+const updateToolSetting = useCallback((key: string, value: any) => {
+    setToolSettings(prev => ({ ...prev, [activeTool]: { ...prev[activeTool], [key]: value } }));
+}, [activeTool]);
 
 // レイヤー追加関数
 const addLayer = useCallback(() => {
@@ -577,7 +602,7 @@ const addLayer = useCallback(() => {
     // 新しいレイヤーを一番上（配列の先頭）に追加
     setLayers(prev => [{ id: newId, name: `レイヤー ${prev.length + 1}`, visible: true }, ...prev]);
     setActiveLayerId(newId);
-    setPenStyle('pen');
+    setActiveTool('pen1');
 }, []);
 
 // レイヤー圧縮関数
@@ -2196,39 +2221,47 @@ style={{ cursor: creationStep ? 'crosshair' : 'default' }}
     </div>
 
     <div style={{ padding: '15px', borderRadius: '12px', backgroundColor: '#f8f9fa', border: '1px solid #ddd', marginBottom: '15px' }}>
-        <label style={{fontSize: '11px', fontWeight: 'bold', color: '#1d4ed8', marginBottom: '10px', display: 'block'}}>ペンの種類</label>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '5px', marginBottom: '15px' }}>
-            <button onClick={() => changePenMode('pen')} style={{ padding: '6px', fontSize: '11px', fontWeight: 'bold', borderRadius: '4px', cursor: 'pointer', border: penStyle === 'pen' ? '2px solid #3b82f6' : '1px solid #ccc', backgroundColor: penStyle === 'pen' ? '#eff6ff' : '#fff' }}>🖊️ ペン</button>
-            <button onClick={() => changePenMode('pencil')} style={{ padding: '6px', fontSize: '11px', fontWeight: 'bold', borderRadius: '4px', cursor: 'pointer', border: penStyle === 'pencil' ? '2px solid #3b82f6' : '1px solid #ccc', backgroundColor: penStyle === 'pencil' ? '#eff6ff' : '#fff' }}>✏️ 鉛筆</button>
-            <button onClick={() => changePenMode('brush')} style={{ padding: '6px', fontSize: '11px', fontWeight: 'bold', borderRadius: '4px', cursor: 'pointer', border: penStyle === 'brush' ? '2px solid #3b82f6' : '1px solid #ccc', backgroundColor: penStyle === 'brush' ? '#eff6ff' : '#fff' }}>🖌️ 筆ペン</button>
-            <button onClick={() => changePenMode('marker')} style={{ padding: '6px', fontSize: '11px', fontWeight: 'bold', borderRadius: '4px', cursor: 'pointer', border: penStyle === 'marker' ? '2px solid #eab308' : '1px solid #ccc', backgroundColor: penStyle === 'marker' ? '#fefce8' : '#fff' }}>🖍️ 蛍光</button>
-            <button onClick={() => changePenMode('thick')} style={{ padding: '6px', fontSize: '11px', fontWeight: 'bold', borderRadius: '4px', cursor: 'pointer', border: penStyle === 'thick' ? '2px solid #3b82f6' : '1px solid #ccc', backgroundColor: penStyle === 'thick' ? '#eff6ff' : '#fff' }}>🖍️ 太ペン</button>
-            <button onClick={() => changePenMode('eraser')} style={{ padding: '6px', fontSize: '11px', fontWeight: 'bold', borderRadius: '4px', cursor: 'pointer', border: penStyle === 'eraser' ? '2px solid #ef4444' : '1px solid #ccc', backgroundColor: penStyle === 'eraser' ? '#fef2f2' : '#fff' }}>🧽 消しゴム</button>
+        <label style={{fontSize: '11px', fontWeight: 'bold', color: '#1d4ed8', marginBottom: '10px', display: 'block'}}>ペンの種類 (個別保存)</label>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '4px', marginBottom: '15px' }}>
+            <button onClick={() => changePenMode('pen1')} style={{ padding: '6px 2px', fontSize: '10px', fontWeight: 'bold', borderRadius: '4px', cursor: 'pointer', border: activeTool === 'pen1' ? '2px solid #3b82f6' : '1px solid #ccc', backgroundColor: activeTool === 'pen1' ? '#eff6ff' : '#fff', color: toolSettings.pen1.color }}>ペン1</button>
+            <button onClick={() => changePenMode('pen2')} style={{ padding: '6px 2px', fontSize: '10px', fontWeight: 'bold', borderRadius: '4px', cursor: 'pointer', border: activeTool === 'pen2' ? '2px solid #3b82f6' : '1px solid #ccc', backgroundColor: activeTool === 'pen2' ? '#eff6ff' : '#fff', color: toolSettings.pen2.color }}>ペン2</button>
+            <button onClick={() => changePenMode('pen3')} style={{ padding: '6px 2px', fontSize: '10px', fontWeight: 'bold', borderRadius: '4px', cursor: 'pointer', border: activeTool === 'pen3' ? '2px solid #3b82f6' : '1px solid #ccc', backgroundColor: activeTool === 'pen3' ? '#eff6ff' : '#fff', color: toolSettings.pen3.color }}>ペン3</button>
+            <button onClick={() => changePenMode('pen4')} style={{ padding: '6px 2px', fontSize: '10px', fontWeight: 'bold', borderRadius: '4px', cursor: 'pointer', border: activeTool === 'pen4' ? '2px solid #3b82f6' : '1px solid #ccc', backgroundColor: activeTool === 'pen4' ? '#eff6ff' : '#fff', color: toolSettings.pen4.color }}>ペン4</button>
+            
+            <button onClick={() => changePenMode('marker')} style={{ padding: '6px 2px', fontSize: '10px', fontWeight: 'bold', borderRadius: '4px', cursor: 'pointer', border: activeTool === 'marker' ? '2px solid #eab308' : '1px solid #ccc', backgroundColor: activeTool === 'marker' ? '#fefce8' : '#fff' }}>蛍光</button>
+            <button onClick={() => changePenMode('thick')} style={{ padding: '6px 2px', fontSize: '10px', fontWeight: 'bold', borderRadius: '4px', cursor: 'pointer', border: activeTool === 'thick' ? '2px solid #3b82f6' : '1px solid #ccc', backgroundColor: activeTool === 'thick' ? '#eff6ff' : '#fff' }}>太字</button>
+            <button onClick={() => changePenMode('eraser')} style={{ padding: '6px 2px', fontSize: '10px', fontWeight: 'bold', borderRadius: '4px', cursor: 'pointer', border: activeTool === 'eraser' ? '2px solid #ef4444' : '1px solid #ccc', backgroundColor: activeTool === 'eraser' ? '#fef2f2' : '#fff', gridColumn: 'span 2' }}>🧽 消しゴム</button>
         </div>
 
-        <label style={{fontSize: '11px', fontWeight: 'bold', display: 'block', marginBottom: '5px'}}>色設定</label>
-        <div style={{ display: 'flex', gap: '5px', marginBottom: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
-            {/* ★ デフォルト5色（固定） */}
-            {['#000000', '#ef4444', '#3b82f6', '#f59e0b', '#10b981'].map(c => (
-                <button key={'defColor'+c} onClick={() => setStrokeColor(c)} style={{ width: '24px', height: '24px', backgroundColor: c, border: strokeColor === c ? '2px solid #000' : '1px solid #ddd', borderRadius: '4px', cursor: 'pointer', flexShrink: 0 }} />
-            ))}
-            <div style={{width: '1px', height: '24px', backgroundColor: '#cbd5e1', margin: '0 2px'}} />
-            {/* ★ カスタム色（準選抜） */}
-            {customColors.map(c => (
-                <button key={'drawColor'+c} onClick={() => setStrokeColor(c)} onKeyDown={(e) => { if(e.key === 'Backspace' || e.key === 'Delete') { const nc = customColors.filter(col => col !== c); setCustomColors(nc); localStorage.setItem('my-logic-custom-colors', JSON.stringify(nc)); } }} title="選択してDeleteキーで削除" style={{ width: '24px', height: '24px', backgroundColor: c, border: strokeColor === c ? '2px solid #000' : '1px solid #ddd', borderRadius: '4px', cursor: 'pointer' }} />
-            ))}
-            <input type="color" value={strokeColor} onChange={(e) => setStrokeColor(e.target.value)} style={{width:'24px', height:'24px', cursor: 'pointer', border: 'none', padding: 0}} />
-            <button onClick={() => { if (!customColors.includes(strokeColor) && !['#000000', '#ef4444', '#3b82f6', '#f59e0b', '#10b981'].includes(strokeColor)) { const nc = [...customColors, strokeColor]; setCustomColors(nc); localStorage.setItem('my-logic-custom-colors', JSON.stringify(nc)); } }} style={{ fontSize: '10px', padding: '4px 8px', background: '#f8fafc', border: '1px solid #cbd5e1', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}>＋準選抜</button>
-        </div>
+        {activeTool !== 'eraser' && (
+            <>
+                <label style={{fontSize: '11px', fontWeight: 'bold', display: 'block', marginBottom: '5px'}}>色設定</label>
+                <div style={{ display: 'flex', gap: '5px', marginBottom: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
+                    {['#000000', '#ef4444', '#3b82f6', '#f59e0b', '#10b981'].map(c => (
+                        <button key={'defColor'+c} onClick={() => updateToolSetting('color', c)} style={{ width: '24px', height: '24px', backgroundColor: c, border: strokeColor === c ? '2px solid #000' : '1px solid #ddd', borderRadius: '4px', cursor: 'pointer', flexShrink: 0 }} />
+                    ))}
+                    <div style={{width: '1px', height: '24px', backgroundColor: '#cbd5e1', margin: '0 2px'}} />
+                    {customColors.map(c => (
+                        <button key={'drawColor'+c} onClick={() => updateToolSetting('color', c)} onKeyDown={(e) => { if(e.key === 'Backspace' || e.key === 'Delete') { const nc = customColors.filter(col => col !== c); setCustomColors(nc); localStorage.setItem('my-logic-custom-colors', JSON.stringify(nc)); } }} title="選択してDeleteキーで削除" style={{ width: '24px', height: '24px', backgroundColor: c, border: strokeColor === c ? '2px solid #000' : '1px solid #ddd', borderRadius: '4px', cursor: 'pointer' }} />
+                    ))}
+                    <input type="color" value={strokeColor} onChange={(e) => updateToolSetting('color', e.target.value)} style={{width:'24px', height:'24px', cursor: 'pointer', border: 'none', padding: 0}} />
+                    <button onClick={() => { if (!customColors.includes(strokeColor) && !['#000000', '#ef4444', '#3b82f6', '#f59e0b', '#10b981'].includes(strokeColor)) { const nc = [...customColors, strokeColor]; setCustomColors(nc); localStorage.setItem('my-logic-custom-colors', JSON.stringify(nc)); } }} style={{ fontSize: '10px', padding: '4px 8px', background: '#f8fafc', border: '1px solid #cbd5e1', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}>＋準選抜</button>
+                </div>
+            </>
+        )}
 
-        <label style={{fontSize: '10px', fontWeight: 'bold', display: 'block', marginBottom: '5px'}}>透明度 ({Math.round(penOpacity * 100)}%)</label>
-        <input type="range" min="0.1" max="1" step="0.1" value={penOpacity} onChange={(e) => setPenOpacity(Number(e.target.value))} style={{width:'100%', marginBottom:'15px'}} />
+        {activeTool !== 'eraser' && (
+            <>
+                <label style={{fontSize: '10px', fontWeight: 'bold', display: 'block', marginBottom: '5px'}}>透明度 ({Math.round(penOpacity * 100)}%)</label>
+                <input type="range" min="0.1" max="1" step="0.1" value={penOpacity} onChange={(e) => updateToolSetting('opacity', Number(e.target.value))} style={{width:'100%', marginBottom:'15px'}} />
+            </>
+        )}
 
-        <label style={{fontSize: '10px', fontWeight: 'bold', display: 'block', marginBottom: '5px'}}>太さ ({penStyle === 'eraser' ? eraserWidth : strokeWidth}px)</label>
-        {penStyle !== 'eraser' ? (
-            <input type="range" min="0.5" max="50" step="0.5" value={strokeWidth} onChange={(e) => setStrokeWidth(Number(e.target.value))} style={{width:'100%', marginBottom:'15px'}} />
+        <label style={{fontSize: '10px', fontWeight: 'bold', display: 'block', marginBottom: '5px'}}>太さ ({activeTool === 'eraser' ? eraserWidth : strokeWidth}px)</label>
+        {activeTool !== 'eraser' ? (
+            <input type="range" min="0.5" max="50" step="0.5" value={strokeWidth} onChange={(e) => updateToolSetting('width', Number(e.target.value))} style={{width:'100%', marginBottom:'15px'}} />
         ) : (
-            <input type="range" min="5" max="300" step="5" value={eraserWidth} onChange={(e) => setEraserWidth(Number(e.target.value))} style={{width:'100%', marginBottom:'15px'}} />
+            <input type="range" min="5" max="300" step="5" value={eraserWidth} onChange={(e) => updateToolSetting('width', Number(e.target.value))} style={{width:'100%', marginBottom:'15px'}} />
         )}
 
         <div style={{ display: 'flex', gap: '5px' }}>
@@ -2780,12 +2813,37 @@ const newColor = e.target.value; setLevelData(prev => ({ ...prev, [currentLevel]
 
 {/* ★ 独立させた図形メニューポップアップ */}
 {isShapeMenuOpen && (
-<div className="no-print" style={{ position: 'fixed', bottom: '80px', left: '50%', transform: 'translateX(-50%)', backgroundColor: '#fff', border: '2px solid #3b82f6', borderRadius: '12px', padding: '12px', display: 'flex', gap: '8px', boxShadow: '0 10px 25px rgba(0,0,0,0.2)', zIndex: 999999 }}>
-    <button onClick={() => { addNode('shape', 'rect'); setIsShapeMenuOpen(false); }} style={{ padding: '8px 16px', fontSize: '14px', fontWeight: 'bold', cursor: 'pointer', borderRadius: '6px', background: '#eff6ff', color: '#1d4ed8', border: '1px solid #bfdbfe', whiteSpace: 'nowrap' }}>▬ 長方形</button>
-    <button onClick={() => { addNode('shape', 'square'); setIsShapeMenuOpen(false); }} style={{ padding: '8px 16px', fontSize: '14px', fontWeight: 'bold', cursor: 'pointer', borderRadius: '6px', background: '#eff6ff', color: '#1d4ed8', border: '1px solid #bfdbfe', whiteSpace: 'nowrap' }}>■ 正方形</button>
-    <button onClick={() => { addNode('shape', 'ellipse'); setIsShapeMenuOpen(false); }} style={{ padding: '8px 16px', fontSize: '14px', fontWeight: 'bold', cursor: 'pointer', borderRadius: '6px', background: '#eff6ff', color: '#1d4ed8', border: '1px solid #bfdbfe', whiteSpace: 'nowrap' }}>⬭ 楕円</button>
-    <button onClick={() => { addNode('shape', 'circle'); setIsShapeMenuOpen(false); }} style={{ padding: '8px 16px', fontSize: '14px', fontWeight: 'bold', cursor: 'pointer', borderRadius: '6px', background: '#eff6ff', color: '#1d4ed8', border: '1px solid #bfdbfe', whiteSpace: 'nowrap' }}>● 正円</button>
-    <button onClick={() => setIsShapeMenuOpen(false)} style={{ padding: '8px 12px', fontSize: '14px', fontWeight: 'bold', cursor: 'pointer', borderRadius: '6px', background: '#fee2e2', color: '#b91c1c', border: '1px solid #fecaca', whiteSpace: 'nowrap' }}>閉じる</button>
+<div className="no-print" style={{ position: 'fixed', bottom: '80px', left: '50%', transform: 'translateX(-50%)', backgroundColor: '#fff', border: '2px solid #3b82f6', borderRadius: '12px', padding: '12px', display: 'flex', flexDirection: 'column', gap: '10px', boxShadow: '0 10px 25px rgba(0,0,0,0.2)', zIndex: 999999 }}>
+    <div style={{ display: 'flex', gap: '8px' }}>
+        <button onClick={() => { addNode('shape', 'rect'); setIsShapeMenuOpen(false); setIsStampMenuOpen(false); }} style={{ padding: '8px 16px', fontSize: '14px', fontWeight: 'bold', cursor: 'pointer', borderRadius: '6px', background: '#eff6ff', color: '#1d4ed8', border: '1px solid #bfdbfe', whiteSpace: 'nowrap' }}>▬ 長方形</button>
+        <button onClick={() => { addNode('shape', 'square'); setIsShapeMenuOpen(false); setIsStampMenuOpen(false); }} style={{ padding: '8px 16px', fontSize: '14px', fontWeight: 'bold', cursor: 'pointer', borderRadius: '6px', background: '#eff6ff', color: '#1d4ed8', border: '1px solid #bfdbfe', whiteSpace: 'nowrap' }}>■ 正方形</button>
+        <button onClick={() => { addNode('shape', 'ellipse'); setIsShapeMenuOpen(false); setIsStampMenuOpen(false); }} style={{ padding: '8px 16px', fontSize: '14px', fontWeight: 'bold', cursor: 'pointer', borderRadius: '6px', background: '#eff6ff', color: '#1d4ed8', border: '1px solid #bfdbfe', whiteSpace: 'nowrap' }}>⬭ 楕円</button>
+        <button onClick={() => { addNode('shape', 'circle'); setIsShapeMenuOpen(false); setIsStampMenuOpen(false); }} style={{ padding: '8px 16px', fontSize: '14px', fontWeight: 'bold', cursor: 'pointer', borderRadius: '6px', background: '#eff6ff', color: '#1d4ed8', border: '1px solid #bfdbfe', whiteSpace: 'nowrap' }}>● 正円</button>
+        <button onClick={() => setIsStampMenuOpen(!isStampMenuOpen)} style={{ padding: '8px 12px', fontSize: '14px', fontWeight: 'bold', cursor: 'pointer', borderRadius: '6px', background: isStampMenuOpen ? '#dcfce7' : '#f8fafc', color: isStampMenuOpen ? '#166534' : '#475569', border: '1px solid #cbd5e1', whiteSpace: 'nowrap' }}>🖼️ 準選抜</button>
+        <button onClick={() => { setIsShapeMenuOpen(false); setIsStampMenuOpen(false); }} style={{ padding: '8px 12px', fontSize: '14px', fontWeight: 'bold', cursor: 'pointer', borderRadius: '6px', background: '#fee2e2', color: '#b91c1c', border: '1px solid #fecaca', whiteSpace: 'nowrap' }}>閉じる</button>
+    </div>
+    
+    {isStampMenuOpen && customStamps.length > 0 && (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', padding: '10px', backgroundColor: '#f1f5f9', borderRadius: '8px', border: '1px solid #cbd5e1', maxHeight: '150px', overflowY: 'auto' }}>
+            {customStamps.map((stamp, i) => (
+                <div key={i} style={{ position: 'relative' }}>
+                    <img src={stamp} style={{ height: '40px', border: '1px solid #ccc', borderRadius: '4px', cursor: 'pointer', backgroundColor: '#fff' }} 
+                        onClick={() => {
+                            takeSnapshot();
+                            const center = screenToFlowPosition({ x: window.innerWidth / 2, y: window.innerHeight / 2 });
+                            const maxZ = Math.max(0, ...nodesRef.current.map((n: any) => Number(n.zIndex) || 0));
+                            setNodes((nds:any[]) => [...nds.map((n:any) => ({...n, selected: false})), { id: `img-${Date.now()}`, position: { x: center.x - 100, y: center.y - 50 }, zIndex: maxZ + 1, selected: true, data: { isImage: true, imageUrl: stamp, imgPosX: 0, imgPosY: 0, imgZoom: 1, isCropping: false, cropBaseW: 200, cropBaseH: 100 }, style: { width: 200, height: 100, background: 'transparent', padding: 0, borderColor: 'transparent', borderWidth: 0 } }]);
+                            setIsShapeMenuOpen(false);
+                            setIsStampMenuOpen(false);
+                        }}
+                    />
+                </div>
+            ))}
+        </div>
+    )}
+    {isStampMenuOpen && customStamps.length === 0 && (
+        <p style={{ fontSize: '12px', color: '#64748b', textAlign: 'center', margin: '5px 0' }}>読み取った図形がありません</p>
+    )}
 </div>
 )}
 
