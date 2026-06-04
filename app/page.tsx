@@ -2740,11 +2740,12 @@ el.innerHTML = currentVal;
 <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
     <button onClick={() => setIsShapeMenuOpen(!isShapeMenuOpen)} style={{ ...primaryBtnStyle, backgroundColor: '#f59e0b', boxShadow: '0 2px 4px rgba(245, 158, 11, 0.3)' }}>🟦 図形</button>
     {isShapeMenuOpen && (
-        <div className="no-print" style={{ position: 'fixed', bottom: '65px', left: '50%', transform: 'translateX(-50%)', backgroundColor: '#fff', border: '2px solid #3b82f6', borderRadius: '12px', padding: '12px', display: 'flex', gap: '8px', boxShadow: '0 10px 25px rgba(0,0,0,0.2)', zIndex: 100000 }}>
+        <div className="no-print" style={{ position: 'fixed', bottom: '80px', left: '50%', transform: 'translateX(-50%)', backgroundColor: '#fff', border: '2px solid #3b82f6', borderRadius: '12px', padding: '12px', display: 'flex', gap: '8px', boxShadow: '0 10px 25px rgba(0,0,0,0.2)', zIndex: 999999 }}>
             <button onClick={() => { addNode('shape', 'rect'); setIsShapeMenuOpen(false); }} style={{ padding: '8px 16px', fontSize: '14px', fontWeight: 'bold', cursor: 'pointer', borderRadius: '6px', background: '#eff6ff', color: '#1d4ed8', border: '1px solid #bfdbfe', whiteSpace: 'nowrap' }}>▬ 長方形</button>
             <button onClick={() => { addNode('shape', 'square'); setIsShapeMenuOpen(false); }} style={{ padding: '8px 16px', fontSize: '14px', fontWeight: 'bold', cursor: 'pointer', borderRadius: '6px', background: '#eff6ff', color: '#1d4ed8', border: '1px solid #bfdbfe', whiteSpace: 'nowrap' }}>■ 正方形</button>
             <button onClick={() => { addNode('shape', 'ellipse'); setIsShapeMenuOpen(false); }} style={{ padding: '8px 16px', fontSize: '14px', fontWeight: 'bold', cursor: 'pointer', borderRadius: '6px', background: '#eff6ff', color: '#1d4ed8', border: '1px solid #bfdbfe', whiteSpace: 'nowrap' }}>⬭ 楕円</button>
             <button onClick={() => { addNode('shape', 'circle'); setIsShapeMenuOpen(false); }} style={{ padding: '8px 16px', fontSize: '14px', fontWeight: 'bold', cursor: 'pointer', borderRadius: '6px', background: '#eff6ff', color: '#1d4ed8', border: '1px solid #bfdbfe', whiteSpace: 'nowrap' }}>● 正円</button>
+            <button onClick={() => setIsShapeMenuOpen(false)} style={{ padding: '8px 12px', fontSize: '14px', fontWeight: 'bold', cursor: 'pointer', borderRadius: '6px', background: '#fee2e2', color: '#b91c1c', border: '1px solid #fecaca', whiteSpace: 'nowrap' }}>閉じる</button>
         </div>
     )}
 </div>
