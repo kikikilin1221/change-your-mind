@@ -471,9 +471,8 @@ const handlePaneClick = useCallback((e: React.MouseEvent) => {
             const screenW = Math.max(10, Math.abs(e.clientX - rawX));
             const screenH = Math.max(10, Math.abs(e.clientY - rawY));
 
-            setSaveMessage('読み取り中...');
+            setSaveMessage('読み取り・透過処理中...');
             
-            // ★ ブラウザの根底からすべてを強制的に透明にする
             const htmlNode = document.documentElement;
             const originalHtmlBg = htmlNode.style.backgroundColor;
             const originalBodyBg = document.body.style.backgroundColor;
@@ -481,52 +480,83 @@ const handlePaneClick = useCallback((e: React.MouseEvent) => {
             htmlNode.style.backgroundColor = 'transparent';
             document.body.style.backgroundColor = 'transparent';
             
-            const ws = document.getElementById('workspace-container');
+            const ws = document.getElementById('main-editor-wrapper');
             const origWsBg = ws ? ws.style.backgroundColor : '';
             if (ws) ws.style.backgroundColor = 'transparent';
             
             const bgNode = document.querySelector('.react-flow__background') as HTMLElement;
             if (bgNode) bgNode.style.display = 'none';
 
-            import('html2canvas').then(({ default: html2canvas }) => {
-                html2canvas(document.body, { x: screenX, y: screenY, width: screenW, height: screenH, backgroundColor: null, scale: 2 }).then(canvas => {
-                    if (ws) ws.classList.remove('hide-bg');
-                    if (bgNode) bgNode.style.display = 'block';
-                    
-                    // ★ 究極の背景透明化アルゴリズム（輪郭スムージング付き）
-                    const ctx = canvas.getContext('2d', { willReadFrequently: true });
-                    if (ctx) {
-                        const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-                        const data = imgData.data;
-                        // 左上のピクセルを背景色としてサンプリング
-                        const bgR = data[0], bgG = data[1], bgB = data[2]; 
-                        
-                        for (let i = 0; i < data.length; i += 4) {
-                            const r = data[i], g = data[i+1], b = data[i+2], a = data[i+3];
-                            if (a === 0) continue;
+            if (typeof window !== 'undefined') {
+                import('html2canvas').then(({ default: html2canvas }) => {
+                    html2canvas(document.body, { 
+                        x: screenX, 
+                        y: screenY, 
+                        width: screenW, 
+                        height: screenH, 
+                        backgroundColor: null, 
+                        scale: 2 // 高画質化
+                    }).then(canvas => {
+                        htmlNode.style.backgroundColor = originalHtmlBg;
+                        document.body.style.backgroundColor = originalBodyBg;
+                        if (ws) ws.style.backgroundColor = origWsBg;
+                        if (bgNode) bgNode.style.display = 'block';
+
+                        // ★ 画期的なアイディア：高度なピクセル解析（アンチエイリアス対応エッジスムージング透過）
+                        const ctx = canvas.getContext('2d', { willReadFrequently: true });
+                        if (ctx) {
+                            const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+                            const data = imgData.data;
                             
-                            // 背景色との距離（色の違い）を計算
-                            const distance = Math.sqrt(Math.pow(r - bgR, 2) + Math.pow(g - bgG, 2) + Math.pow(b - bgB, 2));
+                            // 左上のピクセルを「消すべき背景色」としてサンプリング
+                            const bgR = data[0], bgG = data[1], bgB = data[2]; 
                             
-                            if (distance < 20) {
-                                // 完全に背景色と同じなら完全に透明にする
-                                data[i+3] = 0;
-                            } else if (distance < 60) {
-                                // 文字の輪郭のグレー残りを防ぐため、境界部分に半透明グラデーションをかける
-                                const alphaFactor = (distance - 20) / 40;
-                                data[i+3] = Math.floor(a * alphaFactor);
+                            for (let i = 0; i < data.length; i += 4) {
+                                const r = data[i], g = data[i+1], b = data[i+2], a = data[i+3];
+                                if (a === 0) continue;
+                                
+                                // 背景色との「色の距離」を三平方の定理で計算
+                                const diff = Math.sqrt(Math.pow(r - bgR, 2) + Math.pow(g - bgG, 2) + Math.pow(b - bgB, 2));
+                                
+                                if (diff < 15) {
+                                    // 背景とほぼ同じ色は「完全透過」
+                                    data[i+3] = 0;
+                                } else if (diff < 80) {
+                                    // エッジ（輪郭）のピクセルは、色の差に応じて「半透明」にする（ジャギジャギのグレー残りを防ぐ）
+                                    const alphaFactor = (diff - 15) / 65; 
+                                    data[i+3] = Math.floor(a * alphaFactor);
+                                }
                             }
+                            ctx.putImageData(imgData, 0, 0);
                         }
-                        ctx.putImageData(imgData, 0, 0);
-                    }
-                    const dataUrl = canvas.toDataURL('image/png');
-                    const newStamps = [...customStamps, dataUrl];
-                    setCustomStamps(newStamps);
-                    localStorage.setItem('my-logic-stamps', JSON.stringify(newStamps));
-                    setSaveMessage('図形を読み取りました！');
-                    setTimeout(() => setSaveMessage(null), 2000);
+
+                        const dataUrl = canvas.toDataURL('image/png');
+                        const newStamps = [...customStamps, dataUrl];
+                        setCustomStamps(newStamps);
+                        localStorage.setItem('my-logic-stamps', JSON.stringify(newStamps));
+                        
+                        // ★ 白い下敷きバグを修正：backgroundColorを明示的にtransparentにし、ドラッグしたサイズそのままで配置する
+                        const maxZ = Math.max(0, ...nodesRef.current.map((n: any) => Number(n.zIndex) || 0));
+                        setNodes((nds:any[]) => [...nds.map((n:any) => ({...n, selected: false})), { 
+                            id: `img-${Date.now()}`, 
+                            position: { x: screenX, y: screenY }, 
+                            zIndex: maxZ + 1, 
+                            selected: true, 
+                            data: { isImage: true, imageUrl: dataUrl, imgPosX: 0, imgPosY: 0, imgZoom: 1, isCropping: false, cropBaseW: Math.round(screenW), cropBaseH: Math.round(screenH) }, 
+                            style: { width: Math.round(screenW), height: Math.round(screenH), backgroundColor: 'transparent', padding: 0, borderColor: 'transparent', borderWidth: 0 } 
+                        }]);
+
+                        setSaveMessage('図形を透過読み取りしました！');
+                        setTimeout(() => setSaveMessage(null), 2000);
+                    }).catch(err => {
+                        console.error(err);
+                        htmlNode.style.backgroundColor = originalHtmlBg;
+                        document.body.style.backgroundColor = originalBodyBg;
+                        if (ws) ws.style.backgroundColor = origWsBg;
+                        if (bgNode) bgNode.style.display = 'block';
+                    });
                 });
-            });
+            }
             setCreationStep(null);
         } else {
             takeSnapshot();
@@ -2832,7 +2862,7 @@ const newColor = e.target.value; setLevelData(prev => ({ ...prev, [currentLevel]
                             takeSnapshot();
                             const center = screenToFlowPosition({ x: window.innerWidth / 2, y: window.innerHeight / 2 });
                             const maxZ = Math.max(0, ...nodesRef.current.map((n: any) => Number(n.zIndex) || 0));
-                            setNodes((nds:any[]) => [...nds.map((n:any) => ({...n, selected: false})), { id: `img-${Date.now()}`, position: { x: center.x - 100, y: center.y - 50 }, zIndex: maxZ + 1, selected: true, data: { isImage: true, imageUrl: stamp, imgPosX: 0, imgPosY: 0, imgZoom: 1, isCropping: false, cropBaseW: 200, cropBaseH: 100 }, style: { width: 200, height: 100, background: 'transparent', padding: 0, borderColor: 'transparent', borderWidth: 0 } }]);
+                            setNodes((nds:any[]) => [...nds.map((n:any) => ({...n, selected: false})), { id: `img-${Date.now()}`, position: { x: center.x - 100, y: center.y - 50 }, zIndex: maxZ + 1, selected: true, data: { isImage: true, imageUrl: stamp, imgPosX: 0, imgPosY: 0, imgZoom: 1, isCropping: false, cropBaseW: 200, cropBaseH: 100 }, style: { width: 200, height: 100, backgroundColor: 'transparent', padding: 0, borderColor: 'transparent', borderWidth: 0 } }]);
                             setIsShapeMenuOpen(false);
                             setIsStampMenuOpen(false);
                         }}
