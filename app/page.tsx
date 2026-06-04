@@ -2872,25 +2872,25 @@ const newColor = e.target.value; setLevelData(prev => ({ ...prev, [currentLevel]
 <button className="no-print" onClick={() => setIsBottomBarOpen(true)} style={{ position: 'absolute', bottom: 10, right: 10, zIndex: 100, padding: '4px 8px', fontSize: '10px', background: '#e2e8f0', border: '1px solid #cbd5e1', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold', color: '#475569', boxShadow: '0 -2px 4px rgba(0,0,0,0.1)' }}>▲ ツールバーを表示</button>
 )}
 
-{/* ★ 大幅に拡大＆押しやすくなったフローティング描画ボタン */}
+{/* ★ 超巨大化したフローティング描画ボタン（直径200pxの完全な真円） */}
 {drawBtnPos.left >= 0 && (
 <div className="no-print" style={{ position: 'fixed', left: `${drawBtnPos.left}px`, top: `${drawBtnPos.top}px`, zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-    <div 
-        onMouseDown={(e) => { e.preventDefault(); drawBtnDragRef.current = { startX: e.clientX, startY: e.clientY, initX: drawBtnPos.left, initY: drawBtnPos.top }; }}
-        style={{ width: '100px', height: '100px', borderRadius: '50%', background: 'rgba(59, 130, 246, 0.15)', border: '2px dashed #3b82f6', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'move', backdropFilter: 'blur(3px)', boxShadow: '0 6px 16px rgba(0,0,0,0.15)' }}
-        title="外枠をドラッグして移動"
-    >
-        <button 
-            onMouseDown={(e) => e.stopPropagation()} 
-            onClick={() => { const next = !isDrawingMode; setIsDrawingMode(next); setIsDrawingMenuOpen(next); if(next) changePenMode('pen'); }} 
-            style={{ width: '80px', height: '80px', borderRadius: '50%', backgroundColor: isDrawingMode ? '#ef4444' : '#8b5cf6', color: '#fff', border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.3)', cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: 0, transition: 'transform 0.1s' }}
-            onMouseEnter={(e) => e.currentTarget.style.transform = 'scale(1.05)'}
-            onMouseLeave={(e) => e.currentTarget.style.transform = 'scale(1)'}
-        >
-            <span style={{ fontSize: '32px', marginBottom: '2px' }}>{isDrawingMode ? '❌' : '✏️'}</span>
-            <span style={{ fontSize: '12px', fontWeight: 'bold' }}>{isDrawingMode ? '描画終了' : '描画する'}</span>
-        </button>
-    </div>
+    <div 
+        onMouseDown={(e) => { e.preventDefault(); drawBtnDragRef.current = { startX: e.clientX, startY: e.clientY, initX: drawBtnPos.left, initY: drawBtnPos.top }; }}
+        style={{ width: '200px', height: '200px', borderRadius: '50%', background: 'rgba(59, 130, 246, 0.15)', border: '4px dashed #3b82f6', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'move', backdropFilter: 'blur(3px)', boxShadow: '0 6px 16px rgba(0,0,0,0.15)', boxSizing: 'border-box' }}
+        title="外枠をドラッグして移動"
+    >
+        <button 
+            onMouseDown={(e) => e.stopPropagation()} 
+            onClick={() => { const next = !isDrawingMode; setIsDrawingMode(next); setIsDrawingMenuOpen(next); if(next) changePenMode('pen'); }} 
+            style={{ width: '160px', height: '160px', borderRadius: '50%', backgroundColor: isDrawingMode ? '#ef4444' : '#8b5cf6', color: '#fff', border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.3)', cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: 0, transition: 'transform 0.1s', boxSizing: 'border-box', flexShrink: 0, aspectRatio: '1 / 1' }}
+            onMouseEnter={(e) => e.currentTarget.style.transform = 'scale(1.05)'}
+            onMouseLeave={(e) => e.currentTarget.style.transform = 'scale(1)'}
+        >
+            <span style={{ fontSize: '64px', marginBottom: '8px', lineHeight: 1 }}>{isDrawingMode ? '❌' : '✏️'}</span>
+            <span style={{ fontSize: '18px', fontWeight: 'bold' }}>{isDrawingMode ? '描画終了' : '描画する'}</span>
+        </button>
+    </div>
 </div>
 )}
 
