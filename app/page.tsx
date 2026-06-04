@@ -892,6 +892,37 @@ const handleApplyAlign = useCallback((direction: 'left' | 'right' | 'top' | 'bot
     }));
 }, [alignSource, takeSnapshot, setNodes]);
 
+// ★ 追加：2つの図形を最短距離でピタッと接合する機能
+const handleSnapNodes = useCallback(() => {
+    if (selectedNodes.length !== 2) return;
+    takeSnapshot();
+    const [n1, n2] = selectedNodes;
+    const w1 = n1.measured?.width || Number(n1.style?.width) || 200;
+    const h1 = n1.measured?.height || Number(n1.style?.height) || 100;
+    const w2 = n2.measured?.width || Number(n2.style?.width) || 200;
+    const h2 = n2.measured?.height || Number(n2.style?.height) || 100;
+
+    const c1x = n1.position.x + w1 / 2;
+    const c1y = n1.position.y + h1 / 2;
+    const c2x = n2.position.x + w2 / 2;
+    const c2y = n2.position.y + h2 / 2;
+
+    const dx = Math.abs(c1x - c2x);
+    const dy = Math.abs(c1y - c2y);
+
+    setNodes(nds => nds.map(n => {
+        if (n.id !== n2.id) return n;
+        let newX = n.position.x;
+        let newY = n.position.y;
+        if (dx > dy) {
+            newX = c1x < c2x ? n1.position.x + w1 : n1.position.x - w2; // 横に接する
+        } else {
+            newY = c1y < c2y ? n1.position.y + h1 : n1.position.y - h2; // 縦に接する
+        }
+        return { ...n, position: { x: newX, y: newY } };
+    }));
+}, [selectedNodes, takeSnapshot, setNodes]);
+
 useEffect(() => {
 if (primaryNode && !primaryNode.data?.isTable) {
 let size = primaryNode.style?.fontSize;
@@ -1603,8 +1634,8 @@ const handleKeyDown = (e: KeyboardEvent) => {
 const activeEl = document.activeElement as HTMLElement; const isContentEditing = activeEl?.tagName === 'INPUT' || activeEl?.tagName === 'TEXTAREA' || activeEl?.isContentEditable;
 if (isContentEditing && e.key !== 'Tab') { return; }
 
-// ★ 追加：F4キーで直前の動作を反復
-if (e.key === 'F4') {
+// ★ 修正：Mac対策！ F4 または Cmd+E (Ctrl+E) で直前の動作を反復
+if (e.key === 'F4' || ((e.ctrlKey || e.metaKey) && e.key === 'e')) {
     e.preventDefault();
     const action = lastActionRef.current;
     if (action) {
@@ -1615,18 +1646,27 @@ if (e.key === 'F4') {
     return;
 }
 
-// ★ 追加：矢印キーでの画面移動（パン操作）
+// ★ 修正：矢印キーのバグを解消（図形移動と画面パンを完全に分離）
 if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key) && !isContentEditing) {
-    // 選択中の要素がある場合は、移動操作をReactFlow（図形の微細な移動）に譲るためキャンセル
-    if (selectedNodes.length > 0) return; 
-    
-    e.preventDefault();
-    const { x, y, zoom } = getViewport();
-    const panSpeed = 40; // 移動速度
-    if (e.key === 'ArrowUp') setViewport({ x, y: y + panSpeed, zoom });
-    if (e.key === 'ArrowDown') setViewport({ x, y: y - panSpeed, zoom });
-    if (e.key === 'ArrowLeft') setViewport({ x: x + panSpeed, y, zoom });
-    if (e.key === 'ArrowRight') setViewport({ x: x - panSpeed, y, zoom });
+    e.preventDefault();
+    if (selectedNodes.length > 0) {
+        // 図形の直接移動（ReactFlowのバグを回避して自力で座標を動かす）
+        const moveSpeed = e.shiftKey ? 15 : 2;
+        let dx = 0, dy = 0;
+        if (e.key === 'ArrowUp') dy = -moveSpeed;
+        if (e.key === 'ArrowDown') dy = moveSpeed;
+        if (e.key === 'ArrowLeft') dx = -moveSpeed;
+        if (e.key === 'ArrowRight') dx = moveSpeed;
+        setNodes((nds: any[]) => nds.map((n: any) => n.selected ? { ...n, position: { x: n.position.x + dx, y: n.position.y + dy } } : n));
+    } else {
+        // 画面のパン移動
+        const { x, y, zoom } = getViewport();
+        const panSpeed = 40;
+        if (e.key === 'ArrowUp') setViewport({ x, y: y + panSpeed, zoom });
+        if (e.key === 'ArrowDown') setViewport({ x, y: y - panSpeed, zoom });
+        if (e.key === 'ArrowLeft') setViewport({ x: x + panSpeed, y, zoom });
+        if (e.key === 'ArrowRight') setViewport({ x: x - panSpeed, y, zoom });
+    }
     return;
 }
 
@@ -2098,8 +2138,8 @@ else if (el.dataset.editing !== 'true') { el.dataset.editing = 'true'; el.innerH
 <NodeResizer 
     minWidth={30} 
     minHeight={30} 
-    keepAspectRatio={!!n.data?.keepRatio || isShiftPressed}
-    isVisible={n.selected && (!isTableAndCellEditing || n.data?.isGroupContainer)} 
+    keepAspectRatio={isShiftPressed} 
+    isVisible={n.selected && (!isTableAndCellEditing || n.data?.isGroupContainer)}
     lineStyle={{ border: n.data?.isCropping ? '2px dashed #ef4444' : '1px solid #3b82f6', zIndex: 100 }} 
     handleStyle={{ background: n.data?.isCropping ? '#ef4444' : '#3b82f6', zIndex: 100, borderRadius: '50%' }} 
     onResizeStart={(_, params) => { 
@@ -2381,6 +2421,37 @@ style={{ cursor: creationStep ? 'crosshair' : 'default' }}
 <h3 style={{fontSize:'14px', margin: 0}}>{selectedNodes.length > 1 ? `${selectedNodes.length}個の要素を一括編集` : primaryNode.data?.isTable ? '表の設定' : primaryNode.data?.isImage ? '画像編集' : primaryNode.data?.isShape ? '図形設定' : 'テキスト設定'}</h3>
 <button onClick={clearSelection} style={{ border: 'none', background: 'none', fontSize: '18px', cursor: 'pointer', padding: '0 5px' }}>×</button>
 </div>
+
+{/* ★ 追加：接合ボタン */}
+{selectedNodes.length === 2 && (
+<div style={{ padding: '10px', background: '#f5f3ff', borderRadius: '8px', marginBottom: '15px', border: '1px solid #ddd6fe' }}>
+    <label style={{fontSize: '11px', fontWeight: 'bold', color: '#4338ca', marginBottom: '8px', display: 'block'}}>🧲 最短距離で接合する</label>
+    <p style={{fontSize: '9px', color: '#4f46e5', margin: '0 0 5px 0', lineHeight: 1.2}}>2つの図形を一番近い辺でピッタリくっつけます。</p>
+    <button onClick={handleSnapNodes} style={{ width: '100%', padding: '8px', fontSize: '11px', background: '#4f46e5', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold', boxShadow: '0 2px 4px rgba(79, 70, 229, 0.3)' }}>
+        ピタッと接合する
+    </button>
+</div>
+)}
+
+{/* ★ 修正：すべての要素で使える安全なテキスト編集枠 */}
+{selectedNodes.length === 1 && !primaryNode.data?.isImage && !primaryNode.data?.isTable && (
+<div style={{ padding: '10px', background: '#eef2ff', borderRadius: '8px', marginBottom: '15px', border: '1px solid #c7d2fe' }}>
+    <label style={{fontSize: '11px', fontWeight: 'bold', color: '#3730a3'}}>📝 テキストを安全に編集</label>
+    <div
+        className="html-content"
+        contentEditable={true}
+        suppressContentEditableWarning
+        onInput={(e) => updateSelectedNodes({ content: e.currentTarget.innerHTML })}
+        onBlur={(e) => updateSelectedNodes({ content: e.currentTarget.innerHTML })}
+        style={{ width: '100%', minHeight: '40px', padding: '8px', fontSize: '12px', border: '1px solid #a5b4fc', borderRadius: '4px', backgroundColor: '#fff', outline: 'none', overflowY: 'auto', cursor: 'text', marginTop: '5px' }}
+        ref={el => {
+            if (!el) return;
+            const currentVal = primaryNode.data?.content || '';
+            if (el.innerHTML !== currentVal && document.activeElement !== el) el.innerHTML = currentVal;
+        }}
+    />
+</div>
+)}
 
 <div style={{ padding: '10px', background: '#f0fdf4', borderRadius: '8px', marginBottom: '15px', border: '1px solid #bbf7d0' }}>
     <label style={{fontSize: '11px', fontWeight: 'bold', color: '#166534', marginBottom: '8px', display: 'block'}}>📏 サイズコピー（書式）</label>
