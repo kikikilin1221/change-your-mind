@@ -2736,19 +2736,7 @@ el.innerHTML = currentVal;
 <button onClick={() => addNode('text')} style={primaryBtnStyle}>📝 テキスト</button>
 <button onClick={() => addNode('image')} style={{ ...primaryBtnStyle, backgroundColor: '#10b981', boxShadow: '0 2px 4px rgba(16, 185, 129, 0.3)' }}>📸 画像</button>
 
-{/* ★ 図形ポップアップメニュー */}
-<div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
-    <button onClick={() => setIsShapeMenuOpen(!isShapeMenuOpen)} style={{ ...primaryBtnStyle, backgroundColor: '#f59e0b', boxShadow: '0 2px 4px rgba(245, 158, 11, 0.3)' }}>🟦 図形</button>
-    {isShapeMenuOpen && (
-        <div className="no-print" style={{ position: 'fixed', bottom: '80px', left: '50%', transform: 'translateX(-50%)', backgroundColor: '#fff', border: '2px solid #3b82f6', borderRadius: '12px', padding: '12px', display: 'flex', gap: '8px', boxShadow: '0 10px 25px rgba(0,0,0,0.2)', zIndex: 999999 }}>
-            <button onClick={() => { addNode('shape', 'rect'); setIsShapeMenuOpen(false); }} style={{ padding: '8px 16px', fontSize: '14px', fontWeight: 'bold', cursor: 'pointer', borderRadius: '6px', background: '#eff6ff', color: '#1d4ed8', border: '1px solid #bfdbfe', whiteSpace: 'nowrap' }}>▬ 長方形</button>
-            <button onClick={() => { addNode('shape', 'square'); setIsShapeMenuOpen(false); }} style={{ padding: '8px 16px', fontSize: '14px', fontWeight: 'bold', cursor: 'pointer', borderRadius: '6px', background: '#eff6ff', color: '#1d4ed8', border: '1px solid #bfdbfe', whiteSpace: 'nowrap' }}>■ 正方形</button>
-            <button onClick={() => { addNode('shape', 'ellipse'); setIsShapeMenuOpen(false); }} style={{ padding: '8px 16px', fontSize: '14px', fontWeight: 'bold', cursor: 'pointer', borderRadius: '6px', background: '#eff6ff', color: '#1d4ed8', border: '1px solid #bfdbfe', whiteSpace: 'nowrap' }}>⬭ 楕円</button>
-            <button onClick={() => { addNode('shape', 'circle'); setIsShapeMenuOpen(false); }} style={{ padding: '8px 16px', fontSize: '14px', fontWeight: 'bold', cursor: 'pointer', borderRadius: '6px', background: '#eff6ff', color: '#1d4ed8', border: '1px solid #bfdbfe', whiteSpace: 'nowrap' }}>● 正円</button>
-            <button onClick={() => setIsShapeMenuOpen(false)} style={{ padding: '8px 12px', fontSize: '14px', fontWeight: 'bold', cursor: 'pointer', borderRadius: '6px', background: '#fee2e2', color: '#b91c1c', border: '1px solid #fecaca', whiteSpace: 'nowrap' }}>閉じる</button>
-        </div>
-    )}
-</div>
+<button onClick={() => setIsShapeMenuOpen(!isShapeMenuOpen)} style={{ ...primaryBtnStyle, backgroundColor: '#f59e0b', boxShadow: '0 2px 4px rgba(245, 158, 11, 0.3)' }}>🟦 図形</button>
 
 <button onClick={() => addNode('table')} style={{ ...primaryBtnStyle, backgroundColor: '#6366f1', boxShadow: '0 2px 4px rgba(99, 102, 241, 0.3)' }}>🧮 表</button>
 
@@ -2790,6 +2778,17 @@ const newColor = e.target.value; setLevelData(prev => ({ ...prev, [currentLevel]
 </div>
 )}
 
+{/* ★ 独立させた図形メニューポップアップ */}
+{isShapeMenuOpen && (
+<div className="no-print" style={{ position: 'fixed', bottom: '80px', left: '50%', transform: 'translateX(-50%)', backgroundColor: '#fff', border: '2px solid #3b82f6', borderRadius: '12px', padding: '12px', display: 'flex', gap: '8px', boxShadow: '0 10px 25px rgba(0,0,0,0.2)', zIndex: 999999 }}>
+    <button onClick={() => { addNode('shape', 'rect'); setIsShapeMenuOpen(false); }} style={{ padding: '8px 16px', fontSize: '14px', fontWeight: 'bold', cursor: 'pointer', borderRadius: '6px', background: '#eff6ff', color: '#1d4ed8', border: '1px solid #bfdbfe', whiteSpace: 'nowrap' }}>▬ 長方形</button>
+    <button onClick={() => { addNode('shape', 'square'); setIsShapeMenuOpen(false); }} style={{ padding: '8px 16px', fontSize: '14px', fontWeight: 'bold', cursor: 'pointer', borderRadius: '6px', background: '#eff6ff', color: '#1d4ed8', border: '1px solid #bfdbfe', whiteSpace: 'nowrap' }}>■ 正方形</button>
+    <button onClick={() => { addNode('shape', 'ellipse'); setIsShapeMenuOpen(false); }} style={{ padding: '8px 16px', fontSize: '14px', fontWeight: 'bold', cursor: 'pointer', borderRadius: '6px', background: '#eff6ff', color: '#1d4ed8', border: '1px solid #bfdbfe', whiteSpace: 'nowrap' }}>⬭ 楕円</button>
+    <button onClick={() => { addNode('shape', 'circle'); setIsShapeMenuOpen(false); }} style={{ padding: '8px 16px', fontSize: '14px', fontWeight: 'bold', cursor: 'pointer', borderRadius: '6px', background: '#eff6ff', color: '#1d4ed8', border: '1px solid #bfdbfe', whiteSpace: 'nowrap' }}>● 正円</button>
+    <button onClick={() => setIsShapeMenuOpen(false)} style={{ padding: '8px 12px', fontSize: '14px', fontWeight: 'bold', cursor: 'pointer', borderRadius: '6px', background: '#fee2e2', color: '#b91c1c', border: '1px solid #fecaca', whiteSpace: 'nowrap' }}>閉じる</button>
+</div>
+)}
+
 {saveMessage && (
     <div style={{ position: 'fixed', bottom: '80px', left: '50%', transform: 'translateX(-50%)', background: '#333', color: '#fff', padding: '10px 20px', borderRadius: '20px', zIndex: 9999, fontSize: '12px', fontWeight: 'bold', boxShadow: '0 4px 12px rgba(0,0,0,0.15)' }}>
         {saveMessage}
@@ -2799,4 +2798,5 @@ const newColor = e.target.value; setLevelData(prev => ({ ...prev, [currentLevel]
 </div>
 );
 }
+
 export default function App() { return (<ReactFlowProvider><FlowEditor /></ReactFlowProvider>); }
