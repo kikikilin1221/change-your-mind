@@ -396,11 +396,35 @@ const [drawBtnPos, setDrawBtnPos] = useState({ left: -1, top: -1 });
 useEffect(() => { setDrawBtnPos({ left: window.innerWidth - 100, top: window.innerHeight - 150 }); }, []);
 const drawBtnDragRef = useRef<{ startX: number, startY: number, initX: number, initY: number } | null>(null);
 
-const [customStamps, setCustomStamps] = useState<string[]>([]);
+const [customStamps, setCustomStamps] = useState<any[]>([]);
+const [stampCategories, setStampCategories] = useState<string[]>(['未分類']);
+const [activeCategory, setActiveCategory] = useState<string>('未分類');
+const [pendingStampUrl, setPendingStampUrl] = useState<string | null>(null);
+
 useEffect(() => {
-    const savedStamps = localStorage.getItem('my-logic-stamps');
-    if (savedStamps) { try { setCustomStamps(JSON.parse(savedStamps)); } catch(e){} }
+    const savedStamps = localStorage.getItem('my-logic-stamps-v2');
+    if (savedStamps) { 
+        try { 
+            const parsed = JSON.parse(savedStamps);
+            setCustomStamps(parsed.stamps || []);
+            setStampCategories(parsed.categories || ['未分類']);
+        } catch(e){} 
+    } else {
+        const oldStamps = localStorage.getItem('my-logic-stamps');
+        if (oldStamps) {
+            try {
+                const parsedOld = JSON.parse(oldStamps);
+                const migrated = parsedOld.map((url:string) => ({ url, category: '未分類' }));
+                setCustomStamps(migrated);
+            } catch(e) {}
+        }
+    }
 }, []);
+
+const [trashPos, setTrashPos] = useState({ left: 20, top: window.innerHeight - 80 });
+useEffect(() => { setTrashPos({ left: 20, top: window.innerHeight - 80 }); }, []);
+const trashDragRef = useRef<{ startX: number, startY: number, initX: number, initY: number } | null>(null);
+const [isTrashHovered, setIsTrashHovered] = useState(false);
 
 const sketchRef = useRef<any>(null);
 // レイヤー管理ステート
@@ -535,9 +559,7 @@ const handlePaneClick = useCallback((e: React.MouseEvent) => {
                         }
 
                         const dataUrl = canvas.toDataURL('image/png');
-                        const newStamps = [...customStamps, dataUrl];
-                        setCustomStamps(newStamps);
-                        localStorage.setItem('my-logic-stamps', JSON.stringify(newStamps));
+                        setPendingStampUrl(dataUrl);
                         
                         // ★ 白い下敷きバグを修正：backgroundColorを明示的にtransparentにし、ドラッグしたサイズそのままで配置する
                         const maxZ = Math.max(0, ...nodesRef.current.map((n: any) => Number(n.zIndex) || 0));
@@ -1752,8 +1774,37 @@ const imgDrag = imageCropDragRef.current;
 if (imgDrag) { const dx = (e.clientX - imgDrag.startX) / zoom; const dy = (e.clientY - imgDrag.startY) / zoom; setNodes((nds: any[]) => nds.map((n: any) => n.id === imgDrag.id ? { ...n, data: { ...(n.data || {}), imgPosX: imgDrag.initX + dx, imgPosY: imgDrag.initY + dy } } : n)); }
 const dDrag = drawBtnDragRef.current;
 if (dDrag) { setDrawBtnPos({ left: dDrag.initX + (e.clientX - dDrag.startX), top: dDrag.initY + (e.clientY - dDrag.startY) }); }
+
+const tDrag = trashDragRef.current;
+if (tDrag) { setTrashPos({ left: tDrag.initX + (e.clientX - tDrag.startX), top: tDrag.initY + (e.clientY - tDrag.startY) }); }
+
+if (nodesRef.current.some(n => n.selected) && !dDrag && !tDrag) {
+    const trashRect = { left: trashPos.left, right: trashPos.left + 200, top: trashPos.top, bottom: trashPos.top + 40 };
+    if (e.clientX >= trashRect.left && e.clientX <= trashRect.right && e.clientY >= trashRect.top && e.clientY <= trashRect.bottom) {
+        setIsTrashHovered(true);
+    } else {
+        setIsTrashHovered(false);
+    }
+}
 };
-const onMouseUp = () => { setTimeout(() => { previewDragRef.current = null; }, 50); imageCropDragRef.current = null; tableActionRef.current = null; drawBtnDragRef.current = null; };
+
+const onMouseUp = () => { 
+    if (isTrashHovered) {
+        takeSnapshot();
+        const selIds = nodesRef.current.filter((n: any) => n.selected).map((n: any) => n.id);
+        setNodes((nds: any[]) => nds.filter((n: any) => !n.selected)); 
+        setEdges((eds: any[]) => eds.filter((e: any) => !e.selected && !selIds.includes(e.source) && !selIds.includes(e.target)));
+        setSelectedCells({});
+        setSaveMessage('🗑️ ゴミ箱に捨てました');
+        setTimeout(() => setSaveMessage(null), 2000);
+    }
+    setTimeout(() => { previewDragRef.current = null; }, 50); 
+    imageCropDragRef.current = null; 
+    tableActionRef.current = null; 
+    drawBtnDragRef.current = null; 
+    trashDragRef.current = null;
+    setIsTrashHovered(false);
+};
 window.addEventListener('mousemove', onMouseMove); window.addEventListener('mouseup', onMouseUp);
 return () => { window.removeEventListener('mousemove', onMouseMove); window.removeEventListener('mouseup', onMouseUp); };
 }, [getZoom]);
@@ -2534,7 +2585,11 @@ style={{ cursor: creationStep ? 'crosshair' : 'default' }}
 </>
 )}
 <label style={{fontSize: '10px', fontWeight: 'bold'}}>ズーム倍率</label>
-<input type="range" min="0.5" max="3" step="0.1" value={Number(primaryNode.data?.imgZoom || 1)} onChange={(e) => updateSelectedNodes({ imgZoom: parseFloat(e.target.value) })} style={{width:'100%'}} />
+<input type="range" min="0.5" max="3" step="0.1" value={Number(primaryNode.data?.imgZoom || 1)} onChange={(e) => updateSelectedNodes({ imgZoom: parseFloat(e.target.value) })} style={{width:'100%', marginBottom: '10px'}} />
+<div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '5px' }}>
+    <button onClick={() => { takeSnapshot(); updateSelectedNodes((n:any) => ({ flipH: !n.flipH })); }} style={{ padding: '6px', fontSize: '12px', cursor: 'pointer', borderRadius: '4px', background: primaryNode.data?.flipH ? '#ddd' : '#fff', border: '1px solid #ccc' }}>↔ 左右反転</button>
+    <button onClick={() => { takeSnapshot(); updateSelectedNodes((n:any) => ({ flipV: !n.flipV })); }} style={{ padding: '6px', fontSize: '12px', cursor: 'pointer', borderRadius: '4px', background: primaryNode.data?.flipV ? '#ddd' : '#fff', border: '1px solid #ccc' }}>↕ 上下反転</button>
+</div>
 </div>
 )}
 
@@ -2757,7 +2812,10 @@ el.innerHTML = currentVal;
 </p>
 <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '10px' }}>
 <div style={{ display:'flex', gap:'5px', alignItems: 'center' }}>
-<button onMouseDown={(e) => e.preventDefault()} onClick={() => applyUnifiedFormat('bold')} style={{ cursor:'pointer', border:'1px solid #ccc', padding: '4px 8px', fontSize:'11px', borderRadius: '4px', background: '#fff' }}>太字</button>
+<button onMouseDown={(e) => e.preventDefault()} onClick={() => {
+    applyUnifiedFormat('bold');
+    setTimeout(() => { const el = document.activeElement as HTMLElement; if (el && el.classList.contains('html-content')) updateEdgeDesign({ label: el.innerHTML }); }, 10);
+}} style={{ cursor:'pointer', border:'1px solid #ccc', padding: '4px 8px', fontSize:'11px', borderRadius: '4px', background: '#fff' }}>太字</button>
 
 {['#000000', '#ef4444', '#eab308', '#10b981', '#3b82f6'].map(c => (
   <button key={c} onMouseDown={(e) => e.preventDefault()} onClick={() => applyUnifiedFormat('foreColor', c)} style={{ width: '18px', height: '18px', backgroundColor: c, border: '1px solid #ddd', borderRadius: '3px', cursor: 'pointer' }} />
@@ -2897,47 +2955,135 @@ const newColor = e.target.value; setLevelData(prev => ({ ...prev, [currentLevel]
 </div>
 )}
 
-{/* ★ 独立させた図形メニューポップアップ */}
+{/* ★ 独立させた図形メニューポップアップ（分類機能付き） */}
 {isShapeMenuOpen && (
-<div className="no-print" style={{ position: 'fixed', bottom: '80px', left: '50%', transform: 'translateX(-50%)', backgroundColor: '#fff', border: '2px solid #3b82f6', borderRadius: '12px', padding: '12px', display: 'flex', flexDirection: 'column', gap: '10px', boxShadow: '0 10px 25px rgba(0,0,0,0.2)', zIndex: 999999 }}>
-    <div style={{ display: 'flex', gap: '8px' }}>
-        <button onClick={() => { addNode('shape', 'rect'); setIsShapeMenuOpen(false); setIsStampMenuOpen(false); }} style={{ padding: '8px 16px', fontSize: '14px', fontWeight: 'bold', cursor: 'pointer', borderRadius: '6px', background: '#eff6ff', color: '#1d4ed8', border: '1px solid #bfdbfe', whiteSpace: 'nowrap' }}>▬ 長方形</button>
-        <button onClick={() => { addNode('shape', 'square'); setIsShapeMenuOpen(false); setIsStampMenuOpen(false); }} style={{ padding: '8px 16px', fontSize: '14px', fontWeight: 'bold', cursor: 'pointer', borderRadius: '6px', background: '#eff6ff', color: '#1d4ed8', border: '1px solid #bfdbfe', whiteSpace: 'nowrap' }}>■ 正方形</button>
-        <button onClick={() => { addNode('shape', 'ellipse'); setIsShapeMenuOpen(false); setIsStampMenuOpen(false); }} style={{ padding: '8px 16px', fontSize: '14px', fontWeight: 'bold', cursor: 'pointer', borderRadius: '6px', background: '#eff6ff', color: '#1d4ed8', border: '1px solid #bfdbfe', whiteSpace: 'nowrap' }}>⬭ 楕円</button>
-        <button onClick={() => { addNode('shape', 'circle'); setIsShapeMenuOpen(false); setIsStampMenuOpen(false); }} style={{ padding: '8px 16px', fontSize: '14px', fontWeight: 'bold', cursor: 'pointer', borderRadius: '6px', background: '#eff6ff', color: '#1d4ed8', border: '1px solid #bfdbfe', whiteSpace: 'nowrap' }}>● 正円</button>
-        <button onClick={() => setIsStampMenuOpen(!isStampMenuOpen)} style={{ padding: '8px 12px', fontSize: '14px', fontWeight: 'bold', cursor: 'pointer', borderRadius: '6px', background: isStampMenuOpen ? '#dcfce7' : '#f8fafc', color: isStampMenuOpen ? '#166534' : '#475569', border: '1px solid #cbd5e1', whiteSpace: 'nowrap' }}>🖼️ 準選抜</button>
-        <button onClick={() => { setIsShapeMenuOpen(false); setIsStampMenuOpen(false); }} style={{ padding: '8px 12px', fontSize: '14px', fontWeight: 'bold', cursor: 'pointer', borderRadius: '6px', background: '#fee2e2', color: '#b91c1c', border: '1px solid #fecaca', whiteSpace: 'nowrap' }}>閉じる</button>
-    </div>
-    
-    {isStampMenuOpen && customStamps.length > 0 && (
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', padding: '10px', backgroundColor: '#f1f5f9', borderRadius: '8px', border: '1px solid #cbd5e1', maxHeight: '150px', overflowY: 'auto' }}>
-            {customStamps.map((stamp, i) => (
-                <div key={i} style={{ position: 'relative' }}>
-                    <img src={stamp} style={{ height: '40px', border: '1px solid #ccc', borderRadius: '4px', cursor: 'pointer', backgroundColor: '#fff' }} 
-                        onClick={() => {
-                            takeSnapshot();
-                            const center = screenToFlowPosition({ x: window.innerWidth / 2, y: window.innerHeight / 2 });
-                            const maxZ = Math.max(0, ...nodesRef.current.map((n: any) => Number(n.zIndex) || 0));
-                            setNodes((nds:any[]) => [...nds.map((n:any) => ({...n, selected: false})), { id: `img-${Date.now()}`, position: { x: center.x - 100, y: center.y - 50 }, zIndex: maxZ + 1, selected: true, data: { isImage: true, imageUrl: stamp, imgPosX: 0, imgPosY: 0, imgZoom: 1, isCropping: false, cropBaseW: 200, cropBaseH: 100 }, style: { width: 200, height: 100, backgroundColor: 'transparent', padding: 0, borderColor: 'transparent', borderWidth: 0 } }]);
-                            setIsShapeMenuOpen(false);
-                            setIsStampMenuOpen(false);
-                        }}
-                    />
-                    <button onClick={() => { const ns = customStamps.filter((_, idx) => idx !== i); setCustomStamps(ns); localStorage.setItem('my-logic-stamps', JSON.stringify(ns)); }} style={{ position: 'absolute', top: -5, right: -5, background: 'red', color: 'white', borderRadius: '50%', width: '12px', height: '12px', fontSize: '8px', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>×</button>
-                </div>
-            ))}
-        </div>
-    )}
-    {isStampMenuOpen && customStamps.length === 0 && (
-        <p style={{ fontSize: '12px', color: '#64748b', textAlign: 'center', margin: '5px 0' }}>読み取った図形がありません</p>
-    )}
+<div className="no-print" style={{ position: 'fixed', bottom: '80px', left: '50%', transform: 'translateX(-50%)', backgroundColor: '#fff', border: '2px solid #3b82f6', borderRadius: '12px', padding: '12px', display: 'flex', flexDirection: 'column', gap: '10px', boxShadow: '0 10px 25px rgba(0,0,0,0.2)', zIndex: 999999, width: isStampMenuOpen ? '400px' : 'auto' }}>
+    <div style={{ display: 'flex', gap: '8px', justifyContent: 'center' }}>
+        <button onClick={() => { addNode('shape', 'rect'); setIsShapeMenuOpen(false); setIsStampMenuOpen(false); }} style={{ padding: '8px 16px', fontSize: '14px', fontWeight: 'bold', cursor: 'pointer', borderRadius: '6px', background: '#eff6ff', color: '#1d4ed8', border: '1px solid #bfdbfe', whiteSpace: 'nowrap' }}>▬ 長方形</button>
+        <button onClick={() => { addNode('shape', 'square'); setIsShapeMenuOpen(false); setIsStampMenuOpen(false); }} style={{ padding: '8px 16px', fontSize: '14px', fontWeight: 'bold', cursor: 'pointer', borderRadius: '6px', background: '#eff6ff', color: '#1d4ed8', border: '1px solid #bfdbfe', whiteSpace: 'nowrap' }}>■ 正方形</button>
+        <button onClick={() => { addNode('shape', 'ellipse'); setIsShapeMenuOpen(false); setIsStampMenuOpen(false); }} style={{ padding: '8px 16px', fontSize: '14px', fontWeight: 'bold', cursor: 'pointer', borderRadius: '6px', background: '#eff6ff', color: '#1d4ed8', border: '1px solid #bfdbfe', whiteSpace: 'nowrap' }}>⬭ 楕円</button>
+        <button onClick={() => { addNode('shape', 'circle'); setIsShapeMenuOpen(false); setIsStampMenuOpen(false); }} style={{ padding: '8px 16px', fontSize: '14px', fontWeight: 'bold', cursor: 'pointer', borderRadius: '6px', background: '#eff6ff', color: '#1d4ed8', border: '1px solid #bfdbfe', whiteSpace: 'nowrap' }}>● 正円</button>
+        <button onClick={() => setIsStampMenuOpen(!isStampMenuOpen)} style={{ padding: '8px 12px', fontSize: '14px', fontWeight: 'bold', cursor: 'pointer', borderRadius: '6px', background: isStampMenuOpen ? '#dcfce7' : '#f8fafc', color: isStampMenuOpen ? '#166534' : '#475569', border: '1px solid #cbd5e1', whiteSpace: 'nowrap' }}>🖼️ 準選抜</button>
+        <button onClick={() => { setIsShapeMenuOpen(false); setIsStampMenuOpen(false); }} style={{ padding: '8px 12px', fontSize: '14px', fontWeight: 'bold', cursor: 'pointer', borderRadius: '6px', background: '#fee2e2', color: '#b91c1c', border: '1px solid #fecaca', whiteSpace: 'nowrap' }}>閉じる</button>
+    </div>
+    
+    {isStampMenuOpen && (
+        <div style={{ borderTop: '1px solid #eee', paddingTop: '10px' }}>
+            <div style={{ display: 'flex', gap: '5px', overflowX: 'auto', paddingBottom: '5px', marginBottom: '10px' }}>
+                {stampCategories.map(cat => (
+                    <button key={cat} onClick={() => setActiveCategory(cat)} style={{ padding: '4px 10px', fontSize: '12px', fontWeight: 'bold', borderRadius: '20px', border: activeCategory === cat ? 'none' : '1px solid #ccc', backgroundColor: activeCategory === cat ? '#3b82f6' : '#fff', color: activeCategory === cat ? '#fff' : '#666', whiteSpace: 'nowrap', cursor: 'pointer' }}>
+                        {cat}
+                    </button>
+                ))}
+            </div>
+
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', padding: '10px', backgroundColor: '#f1f5f9', borderRadius: '8px', border: '1px solid #cbd5e1', minHeight: '80px', maxHeight: '200px', overflowY: 'auto' }}>
+                {customStamps.filter(s => s.category === activeCategory).length === 0 ? (
+                    <p style={{ fontSize: '12px', color: '#94a3b8', width: '100%', textAlign: 'center', marginTop: '20px' }}>この分類には図形がありません</p>
+                ) : (
+                    customStamps.filter(s => s.category === activeCategory).map((stamp, i) => (
+                        <div key={i} style={{ position: 'relative' }}>
+                            <img src={stamp.url} style={{ height: '50px', border: '1px solid #ccc', borderRadius: '4px', cursor: 'pointer', backgroundColor: '#fff' }} 
+                                onClick={() => {
+                                    takeSnapshot();
+                                    const center = screenToFlowPosition({ x: window.innerWidth / 2, y: window.innerHeight / 2 });
+                                    const maxZ = Math.max(0, ...nodesRef.current.map((n: any) => Number(n.zIndex) || 0));
+                                    setNodes((nds:any[]) => [...nds.map((n:any) => ({...n, selected: false})), { id: `img-${Date.now()}`, position: { x: center.x - 100, y: center.y - 50 }, zIndex: maxZ + 1, selected: true, data: { isImage: true, imageUrl: stamp.url, imgPosX: 0, imgPosY: 0, imgZoom: 1, isCropping: false, cropBaseW: 200, cropBaseH: 100 }, style: { width: 200, height: 100, backgroundColor: 'transparent', padding: 0, borderColor: 'transparent', borderWidth: 0 } }]);
+                                    setIsShapeMenuOpen(false);
+                                    setIsStampMenuOpen(false);
+                                }}
+                            />
+                            <button onClick={() => { const ns = customStamps.filter(s => s.url !== stamp.url); setCustomStamps(ns); localStorage.setItem('my-logic-stamps-v2', JSON.stringify({ stamps: ns, categories: stampCategories })); }} style={{ position: 'absolute', top: -8, right: -8, background: '#ef4444', color: 'white', borderRadius: '50%', width: '20px', height: '20px', fontSize: '12px', fontWeight: 'bold', border: '2px solid #fff', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 2px 4px rgba(0,0,0,0.2)' }}>×</button>
+                        </div>
+                    ))
+                )}
+            </div>
+            
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '10px' }}>
+                <button onClick={() => {
+                    const newCat = prompt('新しい分類名を入力してください');
+                    if (newCat && !stampCategories.includes(newCat)) {
+                        const newCats = [...stampCategories, newCat];
+                        setStampCategories(newCats);
+                        setActiveCategory(newCat);
+                        localStorage.setItem('my-logic-stamps-v2', JSON.stringify({ stamps: customStamps, categories: newCats }));
+                    }
+                }} style={{ fontSize: '11px', padding: '4px 8px', background: '#fff', border: '1px solid #ccc', borderRadius: '4px', cursor: 'pointer' }}>＋ 新しい分類を作成</button>
+
+                {activeCategory !== '未分類' && (
+                    <button onClick={() => {
+                        if (confirm(`分類「${activeCategory}」と、その中の図形をすべて削除しますか？`)) {
+                            const newStamps = customStamps.filter(s => s.category !== activeCategory);
+                            const newCats = stampCategories.filter(c => c !== activeCategory);
+                            setCustomStamps(newStamps);
+                            setStampCategories(newCats);
+                            setActiveCategory('未分類');
+                            localStorage.setItem('my-logic-stamps-v2', JSON.stringify({ stamps: newStamps, categories: newCats }));
+                        }
+                    }} style={{ fontSize: '11px', padding: '4px 8px', background: '#fef2f2', color: '#dc2626', border: '1px solid #fca5a5', borderRadius: '4px', cursor: 'pointer' }}>🗑️ この分類を削除</button>
+                )}
+            </div>
+        </div>
+    )}
+</div>
+)}
+
+{/* ★ ゴミ捨てボックス（光る長方形） */}
+{trashPos.left >= 0 && (
+<div className="no-print" style={{ position: 'fixed', left: `${trashPos.left}px`, top: `${trashPos.top}px`, zIndex: 9998, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+    <div 
+        onMouseDown={(e) => { e.preventDefault(); trashDragRef.current = { startX: e.clientX, startY: e.clientY, initX: trashPos.left, initY: trashPos.top }; }}
+        style={{ width: '200px', height: '40px', borderRadius: '6px', background: isTrashHovered ? '#ef4444' : 'rgba(100, 116, 139, 0.8)', border: isTrashHovered ? '2px solid #f87171' : '1px solid #475569', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'move', backdropFilter: 'blur(4px)', boxShadow: isTrashHovered ? '0 0 20px rgba(239, 68, 68, 0.8)' : '0 4px 6px rgba(0,0,0,0.2)', transition: 'all 0.2s' }}
+        title="ドラッグして移動。要素を重ねてドロップで削除"
+    >
+        <span style={{ fontSize: '14px', color: '#fff', fontWeight: 'bold', pointerEvents: 'none' }}>{isTrashHovered ? '🔥 ここで離して削除！' : '🗑️ ゴミ捨てボックス'}</span>
+    </div>
+</div>
+)}
+
+{/* ★ 読み取り直後の分類選択ミニパネル */}
+{pendingStampUrl && (
+<div style={{ position: 'fixed', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', background: '#fff', padding: '20px', borderRadius: '12px', zIndex: 9999999, boxShadow: '0 20px 40px rgba(0,0,0,0.3)', border: '2px solid #3b82f6', width: '300px' }}>
+    <h3 style={{ margin: '0 0 15px 0', fontSize: '16px', color: '#1e3a8a', textAlign: 'center' }}>図形を保存しました！</h3>
+    <p style={{ fontSize: '12px', color: '#475569', marginBottom: '10px' }}>どの分類（フォルダ）に保存しますか？</p>
+    
+    <select 
+        value={activeCategory} 
+        onChange={(e) => setActiveCategory(e.target.value)}
+        style={{ width: '100%', padding: '8px', fontSize: '14px', borderRadius: '6px', border: '1px solid #ccc', marginBottom: '15px' }}
+    >
+        {stampCategories.map(cat => <option key={cat} value={cat}>{cat}</option>)}
+    </select>
+
+    <div style={{ display: 'flex', gap: '10px', marginBottom: '15px' }}>
+        <input type="text" id="new-cat-input" placeholder="新しい分類を作る" style={{ flex: 1, padding: '6px', fontSize: '12px', borderRadius: '4px', border: '1px solid #ccc' }} />
+        <button onClick={() => {
+            const input = document.getElementById('new-cat-input') as HTMLInputElement;
+            if (input && input.value && !stampCategories.includes(input.value)) {
+                setStampCategories(prev => [...prev, input.value]);
+                setActiveCategory(input.value);
+                input.value = '';
+            }
+        }} style={{ padding: '6px 10px', fontSize: '12px', background: '#e2e8f0', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}>作成</button>
+    </div>
+
+    <button onClick={() => {
+        const newStamps = [...customStamps, { url: pendingStampUrl, category: activeCategory }];
+        setCustomStamps(newStamps);
+        localStorage.setItem('my-logic-stamps-v2', JSON.stringify({ stamps: newStamps, categories: stampCategories }));
+        setPendingStampUrl(null);
+        setSaveMessage(`「${activeCategory}」に保存しました！`);
+        setTimeout(() => setSaveMessage(null), 2000);
+    }} style={{ width: '100%', padding: '10px', fontSize: '14px', background: '#3b82f6', color: '#fff', border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold', boxShadow: '0 4px 6px rgba(59, 130, 246, 0.3)' }}>
+        この分類に決定
+    </button>
 </div>
 )}
 
 {saveMessage && (
-    <div style={{ position: 'fixed', bottom: '80px', left: '50%', transform: 'translateX(-50%)', background: '#333', color: '#fff', padding: '10px 20px', borderRadius: '20px', zIndex: 9999, fontSize: '12px', fontWeight: 'bold', boxShadow: '0 4px 12px rgba(0,0,0,0.15)' }}>
-        {saveMessage}
-    </div>
+    <div style={{ position: 'fixed', bottom: '130px', left: '50%', transform: 'translateX(-50%)', background: '#333', color: '#fff', padding: '10px 20px', borderRadius: '20px', zIndex: 9999, fontSize: '12px', fontWeight: 'bold', boxShadow: '0 4px 12px rgba(0,0,0,0.15)' }}>
+        {saveMessage}
+    </div>
 )}
 </div>
 </div>
