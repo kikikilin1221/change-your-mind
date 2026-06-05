@@ -429,8 +429,8 @@ const trashDragRef = useRef<{ startX: number, startY: number, initX: number, ini
 const [isTrashHovered, setIsTrashHovered] = useState(false);
 
 const sketchRef = useRef<any>(null);
-// レイヤー管理ステート
-const [layers, setLayers] = useState<{id: string, name: string, visible: boolean}[]>([]);
+// レイヤー管理ステート（★ fileId を持たせてファイルごとに独立させる）
+const [layers, setLayers] = useState<{id: string, name: string, visible: boolean, fileId?: string}[]>([]);
 const [activeLayerId, setActiveLayerId] = useState<string | null>(null);
 
 // ★ 新機能用ステート（枠線・定規・論理記号）
@@ -480,7 +480,7 @@ const addSymbolNode = useCallback((symbol: string) => {
     };
     
     setNodes((nds:any[]) => [...nds.map((n:any) => ({...n, selected: false})), newNode]);
-}, [takeSnapshot, shapeStrokeColor, symbolFontSize]);
+}, [takeSnapshot, shapeStrokeColor, symbolFontSize, screenToFlowPosition]);
 
 // 枠・定規・読み取り作成のクリック処理 (1回目＝始点、2回目＝終点)
 const handlePaneClick = useCallback((e: React.MouseEvent) => {
@@ -634,12 +634,13 @@ const handlePaneClick = useCallback((e: React.MouseEvent) => {
 
 // 描画モード開始時に初期レイヤーを生成
 useEffect(() => {
-    if (isDrawingMode && layers.length === 0) {
+    const currentFileLayers = layers.filter(l => l.fileId === activeFileId);
+    if (isDrawingMode && currentFileLayers.length === 0) {
         const initialId = `layer-${Date.now()}`;
-        setLayers([{ id: initialId, name: 'レイヤー 1', visible: true }]);
+        setLayers(prev => [{ id: initialId, name: 'レイヤー 1', visible: true, fileId: activeFileId }, ...prev]);
         setActiveLayerId(initialId);
     }
-}, [isDrawingMode, layers.length]);
+}, [isDrawingMode, layers, activeFileId]);
 
 // ペン切り替え＆設定保存関数
 const changePenMode = useCallback((toolId: string) => {
@@ -657,15 +658,17 @@ const updateToolSetting = useCallback((key: string, value: any) => {
 // レイヤー追加関数
 const addLayer = useCallback(() => {
     const newId = `layer-${Date.now()}`;
-    // 新しいレイヤーを一番上（配列の先頭）に追加
-    setLayers(prev => [{ id: newId, name: `レイヤー ${prev.length + 1}`, visible: true }, ...prev]);
+    setLayers(prev => {
+        const currentFileLayers = prev.filter(l => l.fileId === activeFileId);
+        return [{ id: newId, name: `レイヤー ${currentFileLayers.length + 1}`, visible: true, fileId: activeFileId }, ...prev];
+    });
     setActiveLayerId(newId);
     setActiveTool('pen1');
-}, []);
+}, [activeFileId]);
 
 // レイヤー圧縮関数
 const compressLayers = useCallback(async () => {
-    const visibleLayers = layers.filter(l => l.visible);
+    const visibleLayers = layers.filter(l => l.visible && l.fileId === activeFileId);
     if (visibleLayers.length < 2) return alert('圧縮するには2つ以上の表示レイヤーが必要です。');
     takeSnapshot();
     setSaveMessage('圧縮中...');
@@ -678,22 +681,35 @@ const compressLayers = useCallback(async () => {
         }
     }
     const newId = `layer-${Date.now()}`;
-    setLayers([{ id: newId, name: '圧縮済レイヤー', visible: true }]);
+    setLayers(prev => {
+        const others = prev.filter(l => !visibleLayers.some(v => v.id === l.id));
+        return [{ id: newId, name: '圧縮済レイヤー', visible: true, fileId: activeFileId }, ...others];
+    });
     setActiveLayerId(newId);
     setTimeout(() => { canvasRefs.current[newId]?.loadPaths(allPaths); setSaveMessage('圧縮完了'); setTimeout(() => setSaveMessage(null), 1500); }, 200);
-}, [layers, takeSnapshot]);
+}, [layers, takeSnapshot, activeFileId]);
 
 // レイヤー順序入れ替え関数
-const moveLayer = useCallback((index: number, direction: -1 | 1) => {
+const moveLayer = useCallback((layerId: string, direction: -1 | 1) => {
     setLayers(prev => {
-        const newLayers = [...prev];
-        if (index + direction < 0 || index + direction >= newLayers.length) return prev;
-        const temp = newLayers[index];
-        newLayers[index] = newLayers[index + direction];
-        newLayers[index + direction] = temp;
-        return newLayers;
+        const fileLayers = prev.filter(l => l.fileId === activeFileId);
+        const index = fileLayers.findIndex(l => l.id === layerId);
+        if (index < 0 || index + direction < 0 || index + direction >= fileLayers.length) return prev;
+        
+        const newFileLayers = [...fileLayers];
+        const temp = newFileLayers[index];
+        newFileLayers[index] = newFileLayers[index + direction];
+        newFileLayers[index + direction] = temp;
+
+        let insertIdx = 0;
+        return prev.map(l => {
+            if (l.fileId === activeFileId) {
+                return newFileLayers[insertIdx++];
+            }
+            return l;
+        });
     });
-}, []);
+}, [activeFileId]);
 
 
 useEffect(() => {
@@ -2337,6 +2353,7 @@ return (
     panOnDrag={!isLassoMode || selectedNodes.length === 1} 
     selectionOnDrag={isLassoMode && selectedNodes.length !== 1} 
     selectionMode={SelectionMode.Partial}
+    zoomOnDoubleClick={false} // ★ 追加：背景ダブルクリックによるズームを無効化
     
     minZoom={0.05} 
     maxZoom={4}
@@ -2363,6 +2380,7 @@ style={{ cursor: creationStep ? 'crosshair' : 'default' }}
         {[...layers].reverse().map((layer, reverseIndex) => {
             const zIndex = reverseIndex;
             const isActive = isDrawingMode && activeLayerId === layer.id;
+            const isVisibleInFile = layer.fileId === activeFileId; // ★ 追加：現在のファイルのレイヤーだけ表示する
             return (
                 <div key={layer.id} className={isActive ? `canvas-${penStyle}` : ''} style={{ position: 'absolute', inset: 0, zIndex, pointerEvents: (isActive && !creationStep) ? 'auto' : 'none', opacity: layer.visible ? 1 : 0 }}>
                 <ReactSketchCanvas
@@ -2480,15 +2498,15 @@ style={{ cursor: creationStep ? 'crosshair' : 'default' }}
         <p style={{fontSize: '9px', color: '#64748b', marginBottom: '10px'}}>※選択中のレイヤーにのみ描画・消去されます。</p>
         
         <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-            {layers.map((layer, index) => (
+            {layers.filter(l => l.fileId === activeFileId).map((layer, index, currentFileLayers) => (
                 <div key={layer.id} onClick={() => { setActiveLayerId(layer.id); changePenMode('pen'); }} style={{ display: 'flex', alignItems: 'center', background: activeLayerId === layer.id ? '#fff' : 'transparent', padding: '6px', borderRadius: '6px', border: activeLayerId === layer.id ? '2px solid #3b82f6' : '1px solid #cbd5e1', cursor: 'pointer' }}>
                     <input type="checkbox" checked={layer.visible} onChange={(e) => { e.stopPropagation(); setLayers(prev => prev.map(l => l.id === layer.id ? {...l, visible: !l.visible} : l)); }} style={{ marginRight: '8px' }} />
                     <span style={{ flex: 1, fontSize: '11px', fontWeight: activeLayerId === layer.id ? 'bold' : 'normal', color: activeLayerId === layer.id ? '#1e40af' : '#475569' }}>
                         {layer.name} {activeLayerId === layer.id && '🖌️'}
                     </span>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-                        <button disabled={index === 0} onClick={(e) => { e.stopPropagation(); moveLayer(index, -1); }} style={{ fontSize: '8px', padding: '0 4px', cursor: index === 0 ? 'default' : 'pointer' }}>▲</button>
-                        <button disabled={index === layers.length - 1} onClick={(e) => { e.stopPropagation(); moveLayer(index, 1); }} style={{ fontSize: '8px', padding: '0 4px', cursor: index === layers.length - 1 ? 'default' : 'pointer' }}>▼</button>
+                        <button disabled={index === 0} onClick={(e) => { e.stopPropagation(); moveLayer(layer.id, -1); }} style={{ fontSize: '8px', padding: '0 4px', cursor: index === 0 ? 'default' : 'pointer' }}>▲</button>
+                        <button disabled={index === currentFileLayers.length - 1} onClick={(e) => { e.stopPropagation(); moveLayer(layer.id, 1); }} style={{ fontSize: '8px', padding: '0 4px', cursor: index === currentFileLayers.length - 1 ? 'default' : 'pointer' }}>▼</button>
                     </div>
                 </div>
             ))}
