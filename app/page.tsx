@@ -238,6 +238,7 @@ const [tableBorderColor, setTableBorderColor] = useState('#000000');
 const previewDragRef = useRef<{ id: string, startX: number, startY: number, initX: number, initY: number, moved: boolean } | null>(null);
 const imageCropDragRef = useRef<{ id: string, startX: number, startY: number, initX: number, initY: number } | null>(null);
 const tableActionRef = useRef<TableActionType | null>(null);
+const [previewMousePos, setPreviewMousePos] = useState<{x: number, y: number} | null>(null); // ★ 追加：ラバーバンド用
 const copiedTableCellsRef = useRef<any>(null); 
 const lastActionRef = useRef<{ type: string, args: any[] } | null>(null); // ★ 追加：F4キーでの反復機能用
 const nodesRef = useRef<any[]>([]);
@@ -429,8 +430,8 @@ const trashDragRef = useRef<{ startX: number, startY: number, initX: number, ini
 const [isTrashHovered, setIsTrashHovered] = useState(false);
 
 const sketchRef = useRef<any>(null);
-// レイヤー管理ステート（★ fileId を持たせてファイルごとに独立させる）
-const [layers, setLayers] = useState<{id: string, name: string, visible: boolean, fileId?: string}[]>([]);
+// ★ 修正：レイヤーに fileId と levelId を持たせて完全に独立させる
+const [layers, setLayers] = useState<{id: string, name: string, visible: boolean, fileId?: string, levelId?: string}[]>([]);
 const [activeLayerId, setActiveLayerId] = useState<string | null>(null);
 
 // ★ 新機能用ステート（枠線・定規・論理記号）
@@ -549,10 +550,8 @@ const handlePaneClick = useCallback((e: React.MouseEvent) => {
                                 const diff = Math.sqrt(Math.pow(r - bgR, 2) + Math.pow(g - bgG, 2) + Math.pow(b - bgB, 2));
                                 
                                 if (diff < 15) {
-                                    // 背景とほぼ同じ色は「完全透過」
                                     data[i+3] = 0;
                                 } else if (diff < 80) {
-                                    // エッジ（輪郭）のピクセルは、色の差に応じて「半透明」にする（ジャギジャギのグレー残りを防ぐ）
                                     const alphaFactor = (diff - 15) / 65; 
                                     data[i+3] = Math.floor(a * alphaFactor);
                                 }
@@ -563,7 +562,6 @@ const handlePaneClick = useCallback((e: React.MouseEvent) => {
                         const dataUrl = canvas.toDataURL('image/png');
                         setPendingStampUrl(dataUrl);
                         
-                        // ★ 白い下敷きバグを修正：backgroundColorを明示的にtransparentにし、ドラッグしたサイズそのままで配置する
                         const maxZ = Math.max(0, ...nodesRef.current.map((n: any) => Number(n.zIndex) || 0));
                         setNodes((nds:any[]) => [...nds.map((n:any) => ({...n, selected: false})), { 
                             id: `img-${Date.now()}`, 
@@ -632,15 +630,19 @@ const handlePaneClick = useCallback((e: React.MouseEvent) => {
     }
 }, [creationStep, screenToFlowPosition, shapeStrokeColor, shapeStrokeWidth, takeSnapshot, setNodes, customStamps]);
 
-// 描画モード開始時に初期レイヤーを生成
+// ★ 修正：描画モード開始時に初期レイヤーを生成（現在のファイル＆階層ごとに）
 useEffect(() => {
-    const currentFileLayers = layers.filter(l => l.fileId === activeFileId);
-    if (isDrawingMode && currentFileLayers.length === 0) {
+    const currentLayers = layers.filter(l => l.fileId === activeFileId && l.levelId === currentLevel);
+    if (isDrawingMode && currentLayers.length === 0) {
         const initialId = `layer-${Date.now()}`;
-        setLayers(prev => [{ id: initialId, name: 'レイヤー 1', visible: true, fileId: activeFileId }, ...prev]);
+        setLayers(prev => [{ id: initialId, name: 'レイヤー 1', visible: true, fileId: activeFileId, levelId: currentLevel }, ...prev]);
         setActiveLayerId(initialId);
+    } else if (isDrawingMode && activeLayerId) {
+        if (!currentLayers.some(l => l.id === activeLayerId) && currentLayers.length > 0) {
+            setActiveLayerId(currentLayers[0].id);
+        }
     }
-}, [isDrawingMode, layers, activeFileId]);
+}, [isDrawingMode, layers, activeFileId, currentLevel, activeLayerId]);
 
 // ペン切り替え＆設定保存関数
 const changePenMode = useCallback((toolId: string) => {
@@ -655,20 +657,20 @@ const updateToolSetting = useCallback((key: string, value: any) => {
     setToolSettings(prev => ({ ...prev, [activeTool]: { ...prev[activeTool], [key]: value } }));
 }, [activeTool]);
 
-// レイヤー追加関数
+// ★ 修正：レイヤー追加関数（ファイル＆階層情報を持たせる）
 const addLayer = useCallback(() => {
     const newId = `layer-${Date.now()}`;
     setLayers(prev => {
-        const currentFileLayers = prev.filter(l => l.fileId === activeFileId);
-        return [{ id: newId, name: `レイヤー ${currentFileLayers.length + 1}`, visible: true, fileId: activeFileId }, ...prev];
+        const currentLayers = prev.filter(l => l.fileId === activeFileId && l.levelId === currentLevel);
+        return [{ id: newId, name: `レイヤー ${currentLayers.length + 1}`, visible: true, fileId: activeFileId, levelId: currentLevel }, ...prev];
     });
     setActiveLayerId(newId);
     setActiveTool('pen1');
-}, [activeFileId]);
+}, [activeFileId, currentLevel]);
 
-// レイヤー圧縮関数
+// ★ 修正：レイヤー圧縮関数（現在のファイル＆階層のものだけ圧縮）
 const compressLayers = useCallback(async () => {
-    const visibleLayers = layers.filter(l => l.visible && l.fileId === activeFileId);
+    const visibleLayers = layers.filter(l => l.visible && l.fileId === activeFileId && l.levelId === currentLevel);
     if (visibleLayers.length < 2) return alert('圧縮するには2つ以上の表示レイヤーが必要です。');
     takeSnapshot();
     setSaveMessage('圧縮中...');
@@ -683,33 +685,33 @@ const compressLayers = useCallback(async () => {
     const newId = `layer-${Date.now()}`;
     setLayers(prev => {
         const others = prev.filter(l => !visibleLayers.some(v => v.id === l.id));
-        return [{ id: newId, name: '圧縮済レイヤー', visible: true, fileId: activeFileId }, ...others];
+        return [{ id: newId, name: '圧縮済レイヤー', visible: true, fileId: activeFileId, levelId: currentLevel }, ...others];
     });
     setActiveLayerId(newId);
     setTimeout(() => { canvasRefs.current[newId]?.loadPaths(allPaths); setSaveMessage('圧縮完了'); setTimeout(() => setSaveMessage(null), 1500); }, 200);
-}, [layers, takeSnapshot, activeFileId]);
+}, [layers, takeSnapshot, activeFileId, currentLevel]);
 
-// レイヤー順序入れ替え関数
+// ★ 修正：レイヤー順序入れ替え関数
 const moveLayer = useCallback((layerId: string, direction: -1 | 1) => {
     setLayers(prev => {
-        const fileLayers = prev.filter(l => l.fileId === activeFileId);
-        const index = fileLayers.findIndex(l => l.id === layerId);
-        if (index < 0 || index + direction < 0 || index + direction >= fileLayers.length) return prev;
+        const currentLayers = prev.filter(l => l.fileId === activeFileId && l.levelId === currentLevel);
+        const index = currentLayers.findIndex(l => l.id === layerId);
+        if (index < 0 || index + direction < 0 || index + direction >= currentLayers.length) return prev;
         
-        const newFileLayers = [...fileLayers];
-        const temp = newFileLayers[index];
-        newFileLayers[index] = newFileLayers[index + direction];
-        newFileLayers[index + direction] = temp;
+        const newCurrentLayers = [...currentLayers];
+        const temp = newCurrentLayers[index];
+        newCurrentLayers[index] = newCurrentLayers[index + direction];
+        newCurrentLayers[index + direction] = temp;
 
         let insertIdx = 0;
         return prev.map(l => {
-            if (l.fileId === activeFileId) {
-                return newFileLayers[insertIdx++];
+            if (l.fileId === activeFileId && l.levelId === currentLevel) {
+                return newCurrentLayers[insertIdx++];
             }
             return l;
         });
     });
-}, [activeFileId]);
+}, [activeFileId, currentLevel]);
 
 
 useEffect(() => {
@@ -1754,6 +1756,7 @@ window.addEventListener('custom-edge-blur', handleEdgeBlur); return () => window
 
 useEffect(() => {
 const onMouseMove = (e: MouseEvent) => {
+setPreviewMousePos({ x: e.clientX, y: e.clientY }); // ★ 補助線（ラバーバンド）のための座標記録
 const zoom = getZoom();
 
 const action = tableActionRef.current;
@@ -2403,23 +2406,24 @@ style={{ cursor: creationStep ? 'crosshair' : 'default' }}
 
 {/* ★ 描画編集メニュー（右側パネル） */}
 {isDrawingMode && isDrawingMenuOpen && (
-<div className="no-print" onMouseDown={(e) => e.stopPropagation()} onClick={(e) => e.stopPropagation()} style={{ position:'absolute', right:0, top:0, bottom:0, width:'320px', borderLeft:'1px solid #ddd', padding:'15px', backgroundColor:'#fff', zIndex:1000, overflowY: 'auto', boxShadow: '-4px 0 10px rgba(0,0,0,0.05)' }}>
+<div className="no-print" onMouseDown={(e) => e.stopPropagation()} onClick={(e) => e.stopPropagation()} style={{ position:'absolute', right:0, top:0, bottom:0, width:'340px', borderLeft:'1px solid #ddd', padding:'15px', backgroundColor:'#fff', zIndex:1000, overflowY: 'auto', boxShadow: '-4px 0 10px rgba(0,0,0,0.05)' }}>
     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
-        <h3 style={{fontSize:'14px', margin: 0}}>🎨 描画メニュー</h3>
-        <button onClick={() => setIsDrawingMenuOpen(false)} style={{ border: 'none', background: 'none', fontSize: '18px', cursor: 'pointer', padding: '0 5px' }}>×</button>
+        <h3 style={{fontSize:'16px', margin: 0}}>🎨 描画メニュー</h3>
+        <button onClick={() => setIsDrawingMenuOpen(false)} style={{ border: 'none', background: 'none', fontSize: '20px', cursor: 'pointer', padding: '0 5px' }}>×</button>
     </div>
 
     <div style={{ padding: '15px', borderRadius: '12px', backgroundColor: '#f8f9fa', border: '1px solid #ddd', marginBottom: '15px' }}>
-        <label style={{fontSize: '11px', fontWeight: 'bold', color: '#1d4ed8', marginBottom: '10px', display: 'block'}}>ペンの種類 (個別保存)</label>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '4px', marginBottom: '15px' }}>
-            <button onClick={() => changePenMode('pen1')} style={{ padding: '6px 2px', fontSize: '10px', fontWeight: 'bold', borderRadius: '4px', cursor: 'pointer', border: activeTool === 'pen1' ? '2px solid #3b82f6' : '1px solid #ccc', backgroundColor: activeTool === 'pen1' ? '#eff6ff' : '#fff', color: toolSettings.pen1.color }}>ペン1</button>
-            <button onClick={() => changePenMode('pen2')} style={{ padding: '6px 2px', fontSize: '10px', fontWeight: 'bold', borderRadius: '4px', cursor: 'pointer', border: activeTool === 'pen2' ? '2px solid #3b82f6' : '1px solid #ccc', backgroundColor: activeTool === 'pen2' ? '#eff6ff' : '#fff', color: toolSettings.pen2.color }}>ペン2</button>
-            <button onClick={() => changePenMode('pen3')} style={{ padding: '6px 2px', fontSize: '10px', fontWeight: 'bold', borderRadius: '4px', cursor: 'pointer', border: activeTool === 'pen3' ? '2px solid #3b82f6' : '1px solid #ccc', backgroundColor: activeTool === 'pen3' ? '#eff6ff' : '#fff', color: toolSettings.pen3.color }}>ペン3</button>
-            <button onClick={() => changePenMode('pen4')} style={{ padding: '6px 2px', fontSize: '10px', fontWeight: 'bold', borderRadius: '4px', cursor: 'pointer', border: activeTool === 'pen4' ? '2px solid #3b82f6' : '1px solid #ccc', backgroundColor: activeTool === 'pen4' ? '#eff6ff' : '#fff', color: toolSettings.pen4.color }}>ペン4</button>
+        <label style={{fontSize: '12px', fontWeight: 'bold', color: '#1d4ed8', marginBottom: '10px', display: 'block'}}>ペンの種類 (個別保存)</label>
+        {/* ★ ペンボタンを大型化 */}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '6px', marginBottom: '15px' }}>
+            <button onClick={() => changePenMode('pen1')} style={{ padding: '10px 4px', fontSize: '12px', fontWeight: 'bold', borderRadius: '6px', cursor: 'pointer', border: activeTool === 'pen1' ? '2px solid #3b82f6' : '1px solid #ccc', backgroundColor: activeTool === 'pen1' ? '#eff6ff' : '#fff', color: toolSettings.pen1.color }}>ペン1</button>
+            <button onClick={() => changePenMode('pen2')} style={{ padding: '10px 4px', fontSize: '12px', fontWeight: 'bold', borderRadius: '6px', cursor: 'pointer', border: activeTool === 'pen2' ? '2px solid #3b82f6' : '1px solid #ccc', backgroundColor: activeTool === 'pen2' ? '#eff6ff' : '#fff', color: toolSettings.pen2.color }}>ペン2</button>
+            <button onClick={() => changePenMode('pen3')} style={{ padding: '10px 4px', fontSize: '12px', fontWeight: 'bold', borderRadius: '6px', cursor: 'pointer', border: activeTool === 'pen3' ? '2px solid #3b82f6' : '1px solid #ccc', backgroundColor: activeTool === 'pen3' ? '#eff6ff' : '#fff', color: toolSettings.pen3.color }}>ペン3</button>
+            <button onClick={() => changePenMode('pen4')} style={{ padding: '10px 4px', fontSize: '12px', fontWeight: 'bold', borderRadius: '6px', cursor: 'pointer', border: activeTool === 'pen4' ? '2px solid #3b82f6' : '1px solid #ccc', backgroundColor: activeTool === 'pen4' ? '#eff6ff' : '#fff', color: toolSettings.pen4.color }}>ペン4</button>
             
-            <button onClick={() => changePenMode('marker')} style={{ padding: '6px 2px', fontSize: '10px', fontWeight: 'bold', borderRadius: '4px', cursor: 'pointer', border: activeTool === 'marker' ? '2px solid #eab308' : '1px solid #ccc', backgroundColor: activeTool === 'marker' ? '#fefce8' : '#fff' }}>蛍光</button>
-            <button onClick={() => changePenMode('thick')} style={{ padding: '6px 2px', fontSize: '10px', fontWeight: 'bold', borderRadius: '4px', cursor: 'pointer', border: activeTool === 'thick' ? '2px solid #3b82f6' : '1px solid #ccc', backgroundColor: activeTool === 'thick' ? '#eff6ff' : '#fff' }}>太字</button>
-            <button onClick={() => changePenMode('eraser')} style={{ padding: '6px 2px', fontSize: '10px', fontWeight: 'bold', borderRadius: '4px', cursor: 'pointer', border: activeTool === 'eraser' ? '2px solid #ef4444' : '1px solid #ccc', backgroundColor: activeTool === 'eraser' ? '#fef2f2' : '#fff', gridColumn: 'span 2' }}>🧽 消しゴム</button>
+            <button onClick={() => changePenMode('marker')} style={{ padding: '10px 4px', fontSize: '12px', fontWeight: 'bold', borderRadius: '6px', cursor: 'pointer', border: activeTool === 'marker' ? '2px solid #eab308' : '1px solid #ccc', backgroundColor: activeTool === 'marker' ? '#fefce8' : '#333', color: activeTool === 'marker' ? '#854d0e' : '#eab308' }}>蛍光</button>
+            <button onClick={() => changePenMode('thick')} style={{ padding: '10px 4px', fontSize: '12px', fontWeight: 'bold', borderRadius: '6px', cursor: 'pointer', border: activeTool === 'thick' ? '2px solid #3b82f6' : '1px solid #ccc', backgroundColor: activeTool === 'thick' ? '#eff6ff' : '#fff' }}>太字</button>
+            <button onClick={() => changePenMode('eraser')} style={{ padding: '10px 4px', fontSize: '12px', fontWeight: 'bold', borderRadius: '6px', cursor: 'pointer', border: activeTool === 'eraser' ? '2px solid #ef4444' : '1px solid #ccc', backgroundColor: activeTool === 'eraser' ? '#fef2f2' : '#fff', gridColumn: 'span 2' }}>🧽 消しゴム</button>
         </div>
 
         {activeTool !== 'eraser' && (
@@ -3072,6 +3076,32 @@ const newColor = e.target.value; setLevelData(prev => ({ ...prev, [currentLevel]
     )}
 </div>
 )}
+
+{/* ★ 追加：枠線・定規・読み取り時の補助線（ラバーバンド） */}
+{creationStep && creationStep.rawX !== undefined && creationStep.rawY !== undefined && previewMousePos && (
+    <div style={{ position: 'fixed', inset: 0, zIndex: 10000, pointerEvents: 'none' }}>
+        {(() => {
+            const rx = creationStep.rawX;
+            const ry = creationStep.rawY;
+            const cx = previewMousePos.x;
+            const cy = previewMousePos.y;
+            const minX = Math.min(rx, cx);
+            const minY = Math.min(ry, cy);
+            const w = Math.max(1, Math.abs(cx - rx));
+            const h = Math.max(1, Math.abs(cy - ry));
+            if (creationStep.type === 'frame' || creationStep.type === 'capture') {
+                return <div style={{ position: 'absolute', left: minX, top: minY, width: w, height: h, border: creationStep.type === 'capture' ? '2px dashed #10b981' : '2px dashed #3b82f6', backgroundColor: creationStep.type === 'capture' ? 'rgba(16, 185, 129, 0.1)' : 'rgba(59, 130, 246, 0.1)' }} />;
+            } else if (creationStep.type === 'ruler-h') {
+                return <div style={{ position: 'absolute', left: minX, top: ry - (shapeStrokeWidth/2), width: w, height: shapeStrokeWidth, backgroundColor: shapeStrokeColor, opacity: 0.5 }} />;
+            } else if (creationStep.type === 'ruler-v') {
+                return <div style={{ position: 'absolute', left: rx - (shapeStrokeWidth/2), top: minY, width: shapeStrokeWidth, height: h, backgroundColor: shapeStrokeColor, opacity: 0.5 }} />;
+            }
+            return null;
+        })()}
+    </div>
+)}
+
+{/* ★ ゴミ捨てボックス（光る長方形） */}
 
 {/* ★ ゴミ捨てボックス（光る長方形） */}
 {trashPos.left >= 0 && (
