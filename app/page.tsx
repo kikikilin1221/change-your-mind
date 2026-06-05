@@ -144,7 +144,7 @@ id={`edit-edge-${id}`} className={isEditing ? "nodrag html-content editing-mode"
 onMouseDown={(e) => { if (isEditing) e.stopPropagation(); }} onKeyDown={(e) => { if (isEditing) e.stopPropagation(); }}
 onInput={(e) => { (data as any)._tempContent = e.currentTarget.innerHTML; }}
 onBlur={(e) => { const finalHtml = (data as any)._tempContent ?? e.currentTarget.innerHTML; window.dispatchEvent(new CustomEvent('custom-edge-blur', { detail: { id, html: finalHtml } })); }}
-style={{ padding: '2px 4px', fontSize: `${fontSize}px`, fontWeight: 'bold', color: '#333', textShadow: '0 0 3px var(--bg-color, #fff), 0 0 3px var(--bg-color, #fff), 0 0 3px var(--bg-color, #fff)', width: 'max-content', cursor: isEditing ? 'text' : 'pointer', minHeight: '1.2em', outline: 'none', writingMode: (style as any)?.writingMode || 'horizontal-tb', ...labelStyle }}
+style={{ padding: '2px 4px', fontSize: `${fontSize}px`, color: '#333', textShadow: '0 0 3px var(--bg-color, #fff), 0 0 3px var(--bg-color, #fff), 0 0 3px var(--bg-color, #fff)', width: 'max-content', cursor: isEditing ? 'text' : 'pointer', minHeight: '1.2em', outline: 'none', whiteSpace: 'pre-wrap', writingMode: (style as any)?.writingMode || 'horizontal-tb', ...labelStyle }}
 ref={el => {
 if (!el) return;
 if (!isEditing) { const newHtml = renderHTMLWithMath(displayLabel); if (el.innerHTML !== newHtml) el.innerHTML = newHtml; el.dataset.editing = 'false'; } 
@@ -1775,37 +1775,8 @@ const imgDrag = imageCropDragRef.current;
 if (imgDrag) { const dx = (e.clientX - imgDrag.startX) / zoom; const dy = (e.clientY - imgDrag.startY) / zoom; setNodes((nds: any[]) => nds.map((n: any) => n.id === imgDrag.id ? { ...n, data: { ...(n.data || {}), imgPosX: imgDrag.initX + dx, imgPosY: imgDrag.initY + dy } } : n)); }
 const dDrag = drawBtnDragRef.current;
 if (dDrag) { setDrawBtnPos({ left: dDrag.initX + (e.clientX - dDrag.startX), top: dDrag.initY + (e.clientY - dDrag.startY) }); }
-
-const tDrag = trashDragRef.current;
-if (tDrag) { setTrashPos({ left: tDrag.initX + (e.clientX - tDrag.startX), top: tDrag.initY + (e.clientY - tDrag.startY) }); }
-
-if (nodesRef.current.some(n => n.selected) && !dDrag && !tDrag) {
-    const trashRect = { left: trashPos.left, right: trashPos.left + 200, top: trashPos.top, bottom: trashPos.top + 40 };
-    if (e.clientX >= trashRect.left && e.clientX <= trashRect.right && e.clientY >= trashRect.top && e.clientY <= trashRect.bottom) {
-        setIsTrashHovered(true);
-    } else {
-        setIsTrashHovered(false);
-    }
-}
 };
-
-const onMouseUp = () => { 
-    if (isTrashHovered) {
-        takeSnapshot();
-        const selIds = nodesRef.current.filter((n: any) => n.selected).map((n: any) => n.id);
-        setNodes((nds: any[]) => nds.filter((n: any) => !n.selected)); 
-        setEdges((eds: any[]) => eds.filter((e: any) => !e.selected && !selIds.includes(e.source) && !selIds.includes(e.target)));
-        setSelectedCells({});
-        setSaveMessage('🗑️ ゴミ箱に捨てました');
-        setTimeout(() => setSaveMessage(null), 2000);
-    }
-    setTimeout(() => { previewDragRef.current = null; }, 50); 
-    imageCropDragRef.current = null; 
-    tableActionRef.current = null; 
-    drawBtnDragRef.current = null; 
-    trashDragRef.current = null;
-    setIsTrashHovered(false);
-};
+const onMouseUp = () => { setTimeout(() => { previewDragRef.current = null; }, 50); imageCropDragRef.current = null; tableActionRef.current = null; drawBtnDragRef.current = null; };
 window.addEventListener('mousemove', onMouseMove); window.addEventListener('mouseup', onMouseUp);
 return () => { window.removeEventListener('mousemove', onMouseMove); window.removeEventListener('mouseup', onMouseUp); };
 }, [getZoom]);
@@ -2794,7 +2765,7 @@ contentEditable={true}
 suppressContentEditableWarning
 onInput={(e) => updateEdgeDesign({ label: e.currentTarget.innerHTML })}
 onBlur={(e) => updateEdgeDesign({ label: e.currentTarget.innerHTML })}
-style={{ width: '100%', minHeight: '40px', padding: '8px', fontSize: '12px', border: '1px solid #a5b4fc', borderRadius: '4px', backgroundColor: '#fff', outline: 'none', overflowY: 'auto', cursor: 'text' }}
+style={{ width: '100%', minHeight: '40px', padding: '8px', fontSize: '12px', border: '1px solid #a5b4fc', borderRadius: '4px', backgroundColor: '#fff', outline: 'none', overflowY: 'auto', cursor: 'text', textAlign: selectedEdge.data?.labelStyle?.textAlign || 'center' }}
 ref={el => {
 if (!el) return;
 const currentVal = selectedEdge.label || '';
@@ -2826,6 +2797,7 @@ el.innerHTML = currentVal;
 <div style={{ display:'flex', gap:'5px' }}>
 <button onClick={() => updateEdgeDesign({ labelStyle: { ...selectedEdge.data?.labelStyle, textAlign: 'left' } })} style={{ cursor:'pointer', border:'1px solid #ccc', padding: '4px 8px', fontSize:'11px', borderRadius: '4px', background: '#fff' }}>左詰</button>
 <button onClick={() => updateEdgeDesign({ labelStyle: { ...selectedEdge.data?.labelStyle, textAlign: 'center' } })} style={{ cursor:'pointer', border:'1px solid #ccc', padding: '4px 8px', fontSize:'11px', borderRadius: '4px', background: '#fff' }}>中央</button>
+<button onClick={() => updateEdgeDesign({ labelStyle: { ...selectedEdge.data?.labelStyle, textAlign: 'right' } })} style={{ cursor:'pointer', border:'1px solid #ccc', padding: '4px 8px', fontSize:'11px', borderRadius: '4px', background: '#fff' }}>右詰</button>
 </div>
 </div>
 
@@ -3031,7 +3003,7 @@ const newColor = e.target.value; setLevelData(prev => ({ ...prev, [currentLevel]
 
 {/* ★ ゴミ捨てボックス（光る長方形） */}
 {trashPos.left >= 0 && (
-<div className="no-print" style={{ position: 'fixed', left: `${trashPos.left}px`, top: `${trashPos.top}px`, zIndex: 9998, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+<div id="trash-bin" className="no-print" style={{ position: 'fixed', left: `${trashPos.left}px`, top: `${trashPos.top}px`, zIndex: 9998, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
     <div 
         onMouseDown={(e) => { e.preventDefault(); trashDragRef.current = { startX: e.clientX, startY: e.clientY, initX: trashPos.left, initY: trashPos.top }; }}
         style={{ width: '200px', height: '40px', borderRadius: '6px', background: isTrashHovered ? '#ef4444' : 'rgba(100, 116, 139, 0.8)', border: isTrashHovered ? '2px solid #f87171' : '1px solid #475569', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'move', backdropFilter: 'blur(4px)', boxShadow: isTrashHovered ? '0 0 20px rgba(239, 68, 68, 0.8)' : '0 4px 6px rgba(0,0,0,0.2)', transition: 'all 0.2s' }}
