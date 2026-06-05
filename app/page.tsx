@@ -502,7 +502,7 @@ const handlePaneClick = useCallback((e: React.MouseEvent) => {
             const screenW = Math.max(10, Math.abs(e.clientX - rawX));
             const screenH = Math.max(10, Math.abs(e.clientY - rawY));
 
-            setSaveMessage('読み取り・透過処理中...');
+            // ★ 修正：通知メッセージを消し、スクショに写り込まないようにする
             
             const htmlNode = document.documentElement;
             const originalHtmlBg = htmlNode.style.backgroundColor;
@@ -2378,12 +2378,15 @@ style={{ cursor: creationStep ? 'crosshair' : 'default' }}
 
 {/* ★ 手書き描画レイヤー（空間連動型マルチレイヤー） */}
 <div className="no-print" style={{ position: 'absolute', inset: 0, zIndex: 900, pointerEvents: 'none', overflow: 'hidden' }}>
-    {/* ★ ここでReact Flowのズームとパンに手書きレイヤーを同期させる */}
     <div style={{ position: 'absolute', left: -5000, top: -5000, width: 10000, height: 10000, transform: `translate(${transform[0]}px, ${transform[1]}px) scale(${transform[2]})`, transformOrigin: '5000px 5000px' }}>
         {[...layers].reverse().map((layer, reverseIndex) => {
+            const isVisibleInCurrentView = layer.fileId === activeFileId && layer.levelId === currentLevel;
             const zIndex = reverseIndex;
             const isActive = isDrawingMode && activeLayerId === layer.id;
-            const isVisibleInFile = layer.fileId === activeFileId; // ★ 追加：現在のファイルのレイヤーだけ表示する
+            
+            // ★ 修正：現在のファイル・階層に属していないレイヤーは「そもそもHTML上にレンダリングしない（破棄する）」
+            if (!isVisibleInCurrentView) return null;
+
             return (
                 <div key={layer.id} className={isActive ? `canvas-${penStyle}` : ''} style={{ position: 'absolute', inset: 0, zIndex, pointerEvents: (isActive && !creationStep) ? 'auto' : 'none', opacity: layer.visible ? 1 : 0 }}>
                 <ReactSketchCanvas
@@ -2392,16 +2395,13 @@ style={{ cursor: creationStep ? 'crosshair' : 'default' }}
                     eraserWidth={eraserWidth}
                     strokeColor={penStyle === 'eraser' ? '#000000' : (strokeColor.startsWith('#') ? `rgba(${parseInt(strokeColor.slice(1,3),16)}, ${parseInt(strokeColor.slice(3,5),16)}, ${parseInt(strokeColor.slice(5,7),16)}, ${penOpacity})` : strokeColor)}
                     canvasColor="transparent"
-                    // ★ 選択中のレイヤーにのみフィルターと点線（ザラザラ感）を適用
                     style={{ width: '100%', height: '100%', border: 'none', filter: (isActive && penStyle === 'pencil') ? 'url(#pencil-texture)' : (isActive && penStyle === 'brush') ? 'url(#brush-texture)' : 'none' }}
-                    // strokeDashArray prop removed because it's not supported by ReactSketchCanvas props
-                    // For pencil style, dashed effect is applied via CSS filter/texture above
                     withTimestamp={true}
                 />
             </div>
         );
     })}
-    </div> {/* ← ★これを追加して同期用ラッパーを閉じる */}
+    </div>
 </div>
 
 {/* ★ 描画編集メニュー（右側パネル） */}
