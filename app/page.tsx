@@ -421,8 +421,9 @@ useEffect(() => {
     }
 }, []);
 
-const [trashPos, setTrashPos] = useState({ left: 20, top: window.innerHeight - 80 });
-useEffect(() => { setTrashPos({ left: 20, top: window.innerHeight - 80 }); }, []);
+// ★ ゴミ箱（Trash）機能のステート
+const [trashPos, setTrashPos] = useState({ left: 20, top: -1000 }); // サーバー側では適当な固定値にしておく
+useEffect(() => { setTrashPos({ left: 20, top: window.innerHeight - 80 }); }, []); // ブラウザ側で正しく計算される
 const trashDragRef = useRef<{ startX: number, startY: number, initX: number, initY: number } | null>(null);
 const [isTrashHovered, setIsTrashHovered] = useState(false);
 
