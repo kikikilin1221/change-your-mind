@@ -1776,36 +1776,12 @@ if (imgDrag) { const dx = (e.clientX - imgDrag.startX) / zoom; const dy = (e.cli
 const dDrag = drawBtnDragRef.current;
 if (dDrag) { setDrawBtnPos({ left: dDrag.initX + (e.clientX - dDrag.startX), top: dDrag.initY + (e.clientY - dDrag.startY) }); }
 
-// ★ 追加：ゴミ箱のドラッグ移動とホバー判定
+// ★ ゴミ箱自体をドラッグして移動させる処理
 const tDrag = trashDragRef.current;
 if (tDrag) { setTrashPos({ left: tDrag.initX + (e.clientX - tDrag.startX), top: tDrag.initY + (e.clientY - tDrag.startY) }); }
-
-const trashEl = document.getElementById('trash-bin');
-if (trashEl && nodesRef.current.some(n => n.selected) && !dDrag && !tDrag) {
-    const rect = trashEl.getBoundingClientRect();
-    if (e.clientX >= rect.left && e.clientX <= rect.right && e.clientY >= rect.top && e.clientY <= rect.bottom) {
-        setIsTrashHovered(true);
-    } else {
-        setIsTrashHovered(false);
-    }
-}
 };
 
 const onMouseUp = (e: MouseEvent) => { 
-    // ★ 追加：ゴミ箱の上で離したら削除する処理
-    const trashEl = document.getElementById('trash-bin');
-    if (trashEl && nodesRef.current.some(n => n.selected)) {
-        const rect = trashEl.getBoundingClientRect();
-        if (e.clientX >= rect.left && e.clientX <= rect.right && e.clientY >= rect.top && e.clientY <= rect.bottom) {
-            takeSnapshot();
-            const selIds = nodesRef.current.filter((n: any) => n.selected).map((n: any) => n.id);
-            setNodes((nds: any[]) => nds.filter((n: any) => !n.selected)); 
-            setEdges((eds: any[]) => eds.filter((edge: any) => !edge.selected && !selIds.includes(edge.source) && !selIds.includes(edge.target)));
-            setSelectedCells({});
-            setSaveMessage('🗑️ ゴミ箱に捨てました');
-            setTimeout(() => setSaveMessage(null), 2000);
-        }
-    }
     setTimeout(() => { previewDragRef.current = null; }, 50); 
     imageCropDragRef.current = null; 
     tableActionRef.current = null; 
@@ -1828,7 +1804,20 @@ return [...nds.map((n: any) => ({...n, selected: false})), { id: `img-${Date.now
 }; reader.readAsDataURL(file);
 };
 
-const onNodeDrag = useCallback((_: any, node: any) => {
+const onNodeDrag = useCallback((e: any, node: any) => {
+    // ★ 図形をドラッグ中にゴミ箱の上に重なったら光らせる
+    const trashEl = document.getElementById('trash-bin');
+    if (trashEl) {
+        const rect = trashEl.getBoundingClientRect();
+        const clientX = e.clientX ?? (e.touches && e.touches[0]?.clientX);
+        const clientY = e.clientY ?? (e.touches && e.touches[0]?.clientY);
+        if (clientX >= rect.left && clientX <= rect.right && clientY >= rect.top && clientY <= rect.bottom) {
+            setIsTrashHovered(true);
+        } else {
+            setIsTrashHovered(false);
+        }
+    }
+
     const SNAP_THRESHOLD = 30;
     let lineX: number | undefined, lineY: number | undefined;
     const nW = Number(node.style?.width) || 200;
@@ -1953,7 +1942,35 @@ const onNodeResizeStop = useCallback(() => {
 setGuides({});
 }, []);
 
-const onNodeDragStop = useCallback((_: any, node: any) => { takeSnapshot(); setNodes((nds: any[]) => nds.map((n: any) => n.id === node.id ? { ...n, position: node.position } : n)); setGuides({}); }, [takeSnapshot]);
+const onNodeDragStop = useCallback((e: any, node: any) => { 
+    takeSnapshot(); 
+    
+    // ★ ゴミ箱の上でドロップされたら削除する
+    const trashEl = document.getElementById('trash-bin');
+    if (trashEl) {
+        const rect = trashEl.getBoundingClientRect();
+        const clientX = e.clientX ?? (e.changedTouches && e.changedTouches[0]?.clientX);
+        const clientY = e.clientY ?? (e.changedTouches && e.changedTouches[0]?.clientY);
+        
+        if (clientX >= rect.left && clientX <= rect.right && clientY >= rect.top && clientY <= rect.bottom) {
+            const selIds = nodesRef.current.filter((n: any) => n.selected).map((n: any) => n.id);
+            if (!selIds.includes(node.id)) selIds.push(node.id); // つかんでいた図形も対象にする
+            
+            setNodes((nds: any[]) => nds.filter((n: any) => !selIds.includes(n.id))); 
+            setEdges((eds: any[]) => eds.filter((edge: any) => !selIds.includes(edge.source) && !selIds.includes(edge.target)));
+            setSelectedCells({});
+            setSaveMessage('🗑️ ゴミ箱にポイッ！');
+            setTimeout(() => setSaveMessage(null), 2000);
+            setIsTrashHovered(false);
+            setGuides({});
+            return; // 削除したのでここで終了
+        }
+    }
+
+    setIsTrashHovered(false);
+    setNodes((nds: any[]) => nds.map((n: any) => n.id === node.id ? { ...n, position: node.position } : n)); 
+    setGuides({}); 
+}, [takeSnapshot]);
 
 const flowNodes = useMemo(() => {
 const centerNode: any = { id: 'center-mark', type: 'default', position: { x: -10, y: -10 }, draggable: false, selectable: false, data: { label: '＋' }, style: { width: 20, height: 20, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#ef4444', fontSize: '14px', fontWeight: 'bold', background: 'rgba(255,255,255,0.7)', borderRadius: '50%', border: '2px solid #ef4444', zIndex: -1000, pointerEvents: 'none', padding: 0 } };
