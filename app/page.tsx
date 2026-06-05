@@ -494,7 +494,6 @@ const handlePaneClick = useCallback((e: React.MouseEvent) => {
         setSaveMessage('終点をクリックしてください');
     } else {
         if (creationStep.type === 'capture') {
-            takeSnapshot();
             const rawX = creationStep.rawX!;
             const rawY = creationStep.rawY!;
             const screenX = Math.min(rawX, e.clientX);
@@ -502,88 +501,72 @@ const handlePaneClick = useCallback((e: React.MouseEvent) => {
             const screenW = Math.max(10, Math.abs(e.clientX - rawX));
             const screenH = Math.max(10, Math.abs(e.clientY - rawY));
 
-            // ★ 修正：通知メッセージを消し、スクショに写り込まないようにする
-            
-            const htmlNode = document.documentElement;
-            const originalHtmlBg = htmlNode.style.backgroundColor;
-            const originalBodyBg = document.body.style.backgroundColor;
-            
-            htmlNode.style.backgroundColor = 'transparent';
-            document.body.style.backgroundColor = 'transparent';
-            
-            const ws = document.getElementById('main-editor-wrapper');
-            const origWsBg = ws ? ws.style.backgroundColor : '';
-            if (ws) ws.style.backgroundColor = 'transparent';
-            
-            const bgNode = document.querySelector('.react-flow__background') as HTMLElement;
-            if (bgNode) bgNode.style.display = 'none';
-
-            if (typeof window !== 'undefined') {
-                import('html2canvas').then(({ default: html2canvas }) => {
-                    html2canvas(document.body, { 
-                        x: screenX, 
-                        y: screenY, 
-                        width: screenW, 
-                        height: screenH, 
-                        backgroundColor: null, 
-                        scale: 2 // 高画質化
-                    }).then(canvas => {
-                        htmlNode.style.backgroundColor = originalHtmlBg;
-                        document.body.style.backgroundColor = originalBodyBg;
-                        if (ws) ws.style.backgroundColor = origWsBg;
-                        if (bgNode) bgNode.style.display = 'block';
-
-                        // ★ 画期的なアイディア：高度なピクセル解析（アンチエイリアス対応エッジスムージング透過）
-                        const ctx = canvas.getContext('2d', { willReadFrequently: true });
-                        if (ctx) {
-                            const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-                            const data = imgData.data;
-                            
-                            // 左上のピクセルを「消すべき背景色」としてサンプリング
-                            const bgR = data[0], bgG = data[1], bgB = data[2]; 
-                            
-                            for (let i = 0; i < data.length; i += 4) {
-                                const r = data[i], g = data[i+1], b = data[i+2], a = data[i+3];
-                                if (a === 0) continue;
-                                
-                                // 背景色との「色の距離」を三平方の定理で計算
-                                const diff = Math.sqrt(Math.pow(r - bgR, 2) + Math.pow(g - bgG, 2) + Math.pow(b - bgB, 2));
-                                
-                                if (diff < 15) {
-                                    data[i+3] = 0;
-                                } else if (diff < 80) {
-                                    const alphaFactor = (diff - 15) / 65; 
-                                    data[i+3] = Math.floor(a * alphaFactor);
-                                }
-                            }
-                            ctx.putImageData(imgData, 0, 0);
-                        }
-
-                        const dataUrl = canvas.toDataURL('image/png');
-                        setPendingStampUrl(dataUrl);
-                        
-                        const maxZ = Math.max(0, ...nodesRef.current.map((n: any) => Number(n.zIndex) || 0));
-                        setNodes((nds:any[]) => [...nds.map((n:any) => ({...n, selected: false})), { 
-                            id: `img-${Date.now()}`, 
-                            position: { x: screenX, y: screenY }, 
-                            zIndex: maxZ + 1, 
-                            selected: true, 
-                            data: { isImage: true, imageUrl: dataUrl, imgPosX: 0, imgPosY: 0, imgZoom: 1, isCropping: false, cropBaseW: Math.round(screenW), cropBaseH: Math.round(screenH) }, 
-                            style: { width: Math.round(screenW), height: Math.round(screenH), backgroundColor: 'transparent', padding: 0, borderColor: 'transparent', borderWidth: 0 } 
-                        }]);
-
-                        setSaveMessage('図形を透過読み取りしました！');
-                        setTimeout(() => setSaveMessage(null), 2000);
-                    }).catch(err => {
-                        console.error(err);
-                        htmlNode.style.backgroundColor = originalHtmlBg;
-                        document.body.style.backgroundColor = originalBodyBg;
-                        if (ws) ws.style.backgroundColor = origWsBg;
-                        if (bgNode) bgNode.style.display = 'block';
-                    });
-                });
-            }
+            // ★ 修正1：スクショに「終点をクリック…」の文字や枠が写らないように、先にUIを完全に消す！
             setCreationStep(null);
+            setSaveMessage(null);
+            
+            // ★ 修正2：DOMから確実に文字が消えるのを0.1秒待ってから撮影を開始する
+            setTimeout(() => {
+                const htmlNode = document.documentElement;
+                const originalHtmlBg = htmlNode.style.backgroundColor;
+                const originalBodyBg = document.body.style.backgroundColor;
+                
+                htmlNode.style.backgroundColor = 'transparent';
+                document.body.style.backgroundColor = 'transparent';
+                
+                const ws = document.getElementById('main-editor-wrapper');
+                const origWsBg = ws ? ws.style.backgroundColor : '';
+                if (ws) ws.style.backgroundColor = 'transparent';
+                
+                const bgNode = document.querySelector('.react-flow__background') as HTMLElement;
+                if (bgNode) bgNode.style.display = 'none';
+
+                if (typeof window !== 'undefined') {
+                    import('html2canvas').then(({ default: html2canvas }) => {
+                        html2canvas(document.body, { 
+                            x: screenX, 
+                            y: screenY, 
+                            width: screenW, 
+                            height: screenH, 
+                            backgroundColor: null, 
+                            scale: 2 
+                        }).then(canvas => {
+                            htmlNode.style.backgroundColor = originalHtmlBg;
+                            document.body.style.backgroundColor = originalBodyBg;
+                            if (ws) ws.style.backgroundColor = origWsBg;
+                            if (bgNode) bgNode.style.display = 'block';
+
+                            const ctx = canvas.getContext('2d', { willReadFrequently: true });
+                            if (ctx) {
+                                const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+                                const data = imgData.data;
+                                const bgR = data[0], bgG = data[1], bgB = data[2]; 
+                                for (let i = 0; i < data.length; i += 4) {
+                                    const r = data[i], g = data[i+1], b = data[i+2], a = data[i+3];
+                                    if (a === 0) continue;
+                                    const diff = Math.sqrt(Math.pow(r - bgR, 2) + Math.pow(g - bgG, 2) + Math.pow(b - bgB, 2));
+                                    if (diff < 15) { data[i+3] = 0; } 
+                                    else if (diff < 80) { data[i+3] = Math.floor(a * ((diff - 15) / 65)); }
+                                }
+                                ctx.putImageData(imgData, 0, 0);
+                            }
+
+                            // ★ 修正3：勝手に貼り付けず、準選抜パネルに送るだけにする
+                            const dataUrl = canvas.toDataURL('image/png');
+                            setPendingStampUrl(dataUrl);
+                            
+                            takeSnapshot(); 
+                        }).catch(err => {
+                            console.error(err);
+                            htmlNode.style.backgroundColor = originalHtmlBg;
+                            document.body.style.backgroundColor = originalBodyBg;
+                            if (ws) ws.style.backgroundColor = origWsBg;
+                            if (bgNode) bgNode.style.display = 'block';
+                        });
+                    });
+                }
+            }, 100);
+            return; // 下の setCreationStep(null) を実行しないようここで抜ける
         } else {
             takeSnapshot();
             const x1 = creationStep.startX;
@@ -2384,11 +2367,9 @@ style={{ cursor: creationStep ? 'crosshair' : 'default' }}
             const zIndex = reverseIndex;
             const isActive = isDrawingMode && activeLayerId === layer.id;
             
-            // ★ 修正：現在のファイル・階層に属していないレイヤーは「そもそもHTML上にレンダリングしない（破棄する）」
-            if (!isVisibleInCurrentView) return null;
-
+            // ★ 修正：破棄すると描画が消えてしまうため、display: none でバックグラウンドに保持し続ける（他のファイルでは見えなくなる）
             return (
-                <div key={layer.id} className={isActive ? `canvas-${penStyle}` : ''} style={{ position: 'absolute', inset: 0, zIndex, pointerEvents: (isActive && !creationStep) ? 'auto' : 'none', opacity: layer.visible ? 1 : 0 }}>
+                <div key={layer.id} className={isActive ? `canvas-${penStyle}` : ''} style={{ position: 'absolute', inset: 0, zIndex, pointerEvents: (isActive && !creationStep) ? 'auto' : 'none', opacity: layer.visible ? 1 : 0, display: isVisibleInCurrentView ? 'block' : 'none' }}>
                 <ReactSketchCanvas
                     ref={el => { if (el) canvasRefs.current[layer.id] = el; }}
                     strokeWidth={strokeWidth}
