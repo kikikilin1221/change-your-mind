@@ -1775,8 +1775,44 @@ const imgDrag = imageCropDragRef.current;
 if (imgDrag) { const dx = (e.clientX - imgDrag.startX) / zoom; const dy = (e.clientY - imgDrag.startY) / zoom; setNodes((nds: any[]) => nds.map((n: any) => n.id === imgDrag.id ? { ...n, data: { ...(n.data || {}), imgPosX: imgDrag.initX + dx, imgPosY: imgDrag.initY + dy } } : n)); }
 const dDrag = drawBtnDragRef.current;
 if (dDrag) { setDrawBtnPos({ left: dDrag.initX + (e.clientX - dDrag.startX), top: dDrag.initY + (e.clientY - dDrag.startY) }); }
+
+// ★ 追加：ゴミ箱のドラッグ移動とホバー判定
+const tDrag = trashDragRef.current;
+if (tDrag) { setTrashPos({ left: tDrag.initX + (e.clientX - tDrag.startX), top: tDrag.initY + (e.clientY - tDrag.startY) }); }
+
+const trashEl = document.getElementById('trash-bin');
+if (trashEl && nodesRef.current.some(n => n.selected) && !dDrag && !tDrag) {
+    const rect = trashEl.getBoundingClientRect();
+    if (e.clientX >= rect.left && e.clientX <= rect.right && e.clientY >= rect.top && e.clientY <= rect.bottom) {
+        setIsTrashHovered(true);
+    } else {
+        setIsTrashHovered(false);
+    }
+}
 };
-const onMouseUp = () => { setTimeout(() => { previewDragRef.current = null; }, 50); imageCropDragRef.current = null; tableActionRef.current = null; drawBtnDragRef.current = null; };
+
+const onMouseUp = (e: MouseEvent) => { 
+    // ★ 追加：ゴミ箱の上で離したら削除する処理
+    const trashEl = document.getElementById('trash-bin');
+    if (trashEl && nodesRef.current.some(n => n.selected)) {
+        const rect = trashEl.getBoundingClientRect();
+        if (e.clientX >= rect.left && e.clientX <= rect.right && e.clientY >= rect.top && e.clientY <= rect.bottom) {
+            takeSnapshot();
+            const selIds = nodesRef.current.filter((n: any) => n.selected).map((n: any) => n.id);
+            setNodes((nds: any[]) => nds.filter((n: any) => !n.selected)); 
+            setEdges((eds: any[]) => eds.filter((edge: any) => !edge.selected && !selIds.includes(edge.source) && !selIds.includes(edge.target)));
+            setSelectedCells({});
+            setSaveMessage('🗑️ ゴミ箱に捨てました');
+            setTimeout(() => setSaveMessage(null), 2000);
+        }
+    }
+    setTimeout(() => { previewDragRef.current = null; }, 50); 
+    imageCropDragRef.current = null; 
+    tableActionRef.current = null; 
+    drawBtnDragRef.current = null; 
+    trashDragRef.current = null;
+    setIsTrashHovered(false);
+};
 window.addEventListener('mousemove', onMouseMove); window.addEventListener('mouseup', onMouseUp);
 return () => { window.removeEventListener('mousemove', onMouseMove); window.removeEventListener('mouseup', onMouseUp); };
 }, [getZoom]);
@@ -2782,22 +2818,18 @@ el.innerHTML = currentVal;
 ※線を選択して<b>Tabキー</b>で編集モードに入り、<br/>
 <u>マウスで文字をなぞって選択してから</u>押してください。
 </p>
-<div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '10px' }}>
+<div style={{ display: 'flex', justifyContent: 'flex-start', marginBottom: '10px' }}>
 <div style={{ display:'flex', gap:'5px', alignItems: 'center' }}>
 <button onMouseDown={(e) => e.preventDefault()} onClick={() => {
     applyUnifiedFormat('bold');
+    // ★ 線のテキストボックスの変更を即座にEdge本体に反映させる
     setTimeout(() => { const el = document.activeElement as HTMLElement; if (el && el.classList.contains('html-content')) updateEdgeDesign({ label: el.innerHTML }); }, 10);
 }} style={{ cursor:'pointer', border:'1px solid #ccc', padding: '4px 8px', fontSize:'11px', borderRadius: '4px', background: '#fff' }}>太字</button>
 
 {['#000000', '#ef4444', '#eab308', '#10b981', '#3b82f6'].map(c => (
-  <button key={c} onMouseDown={(e) => e.preventDefault()} onClick={() => applyUnifiedFormat('foreColor', c)} style={{ width: '18px', height: '18px', backgroundColor: c, border: '1px solid #ddd', borderRadius: '3px', cursor: 'pointer' }} />
+  <button key={c} onMouseDown={(e) => e.preventDefault()} onClick={() => applyUnifiedFormat('foreColor', c)} style={{ width: '18px', height: '18px', backgroundColor: c, border: '1px solid #ddd', borderRadius: '3px', cursor: 'pointer' }} />
 ))}
 <input type="color" onMouseDown={(e) => e.preventDefault()} onChange={(e) => applyUnifiedFormat('foreColor', e.target.value)} style={{width:'24px', height:'24px', cursor: 'pointer', border: 'none', padding: 0, marginLeft: '2px'}} />
-</div>
-<div style={{ display:'flex', gap:'5px' }}>
-<button onClick={() => updateEdgeDesign({ labelStyle: { ...selectedEdge.data?.labelStyle, textAlign: 'left' } })} style={{ cursor:'pointer', border:'1px solid #ccc', padding: '4px 8px', fontSize:'11px', borderRadius: '4px', background: '#fff' }}>左詰</button>
-<button onClick={() => updateEdgeDesign({ labelStyle: { ...selectedEdge.data?.labelStyle, textAlign: 'center' } })} style={{ cursor:'pointer', border:'1px solid #ccc', padding: '4px 8px', fontSize:'11px', borderRadius: '4px', background: '#fff' }}>中央</button>
-<button onClick={() => updateEdgeDesign({ labelStyle: { ...selectedEdge.data?.labelStyle, textAlign: 'right' } })} style={{ cursor:'pointer', border:'1px solid #ccc', padding: '4px 8px', fontSize:'11px', borderRadius: '4px', background: '#fff' }}>右詰</button>
 </div>
 </div>
 
