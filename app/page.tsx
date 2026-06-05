@@ -211,6 +211,7 @@ const [isBottomBarOpen, setIsBottomBarOpen] = useState(true);
 const [isPrintMode, setIsPrintMode] = useState(false);
 const [isExecutingPrint, setIsExecutingPrint] = useState(false);
 const [isLassoMode, setIsLassoMode] = useState(false);
+const [isCursorHidden, setIsCursorHidden] = useState(false); // ★ 追加：カーソルON/OFF用のステート
 
 const [files, setFiles] = useState<Record<string, any>>({});
 const [activeFileId, setActiveFileId] = useState<string>('default');
@@ -2278,6 +2279,7 @@ return (
 return (
 <div style={{ width: '100vw', height: '100vh', display: 'flex', flexDirection: 'row', overflow: 'hidden' }}>
 <style>{GLOBAL_CSS}</style>
+{isCursorHidden && <style>{`* { cursor: none !important; }`}</style>} {/* ★ 追加：カーソルを強制的に透明にする魔法 */}
 <input type="file" ref={jsonImportRef} style={{ display: 'none' }} onChange={importData} accept=".json" />
 <input type="file" ref={fileInputRef} style={{ display: 'none' }} onChange={handleFileChange} accept="image/*" />
 
@@ -2916,9 +2918,12 @@ el.innerHTML = currentVal;
 <button onClick={handleManualSave} style={{ ...primaryBtnStyle, backgroundColor: '#059669', boxShadow: '0 2px 4px rgba(5, 150, 105, 0.3)' }}>💾 保存</button>
 <button onClick={handleGroupSelection} style={{ ...actionBtnStyle, backgroundColor: '#3b82f6', color: '#fff', border: 'none' }}>🔒 グループ化</button>
 <button onClick={handleUngroupSelection} style={{ ...actionBtnStyle, backgroundColor: '#64748b', color: '#fff', border: 'none' }}>🔓 グループ解除</button>
-{/* ★ ここまで追加 */}
-<button onClick={() => jsonImportRef.current?.click()} style={actionBtnStyle}>📥 読込</button>
-<button onClick={exportData} style={actionBtnStyle}>📤 書出</button>
+
+{/* ★ 読込・書出を削除し、カーソルON/OFFボタンを追加 */}
+<button onClick={() => setIsCursorHidden(!isCursorHidden)} style={{ ...actionBtnStyle, backgroundColor: isCursorHidden ? '#ef4444' : '#fff', color: isCursorHidden ? '#fff' : '#333', border: isCursorHidden ? 'none' : '1px solid #ccc' }}>
+    {isCursorHidden ? '🖱️ カーソル: OFF' : '🖱️ カーソル: ON'}
+</button>
+
 <div style={{ width: '1px', height: '24px', backgroundColor: '#ddd', margin: '0 2px' }} />
 <button onClick={goBack} disabled={isRoot} style={{ ...actionBtnStyle, opacity: isRoot ? 0.4 : 1, cursor: isRoot ? 'default' : 'pointer' }}>🔙 前へ</button>
 <button onClick={goTop} disabled={isRoot} style={{ ...actionBtnStyle, opacity: isRoot ? 0.4 : 1, cursor: isRoot ? 'default' : 'pointer' }}>🏠 TOP</button>
