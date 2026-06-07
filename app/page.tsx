@@ -144,7 +144,20 @@ id={`edit-edge-${id}`} className={isEditing ? "nodrag html-content editing-mode"
 onMouseDown={(e) => { if (isEditing) e.stopPropagation(); }} onKeyDown={(e) => { if (isEditing) e.stopPropagation(); }}
 onInput={(e) => { (data as any)._tempContent = e.currentTarget.innerHTML; }}
 onBlur={(e) => { const finalHtml = (data as any)._tempContent ?? e.currentTarget.innerHTML; window.dispatchEvent(new CustomEvent('custom-edge-blur', { detail: { id, html: finalHtml } })); }}
-style={{ padding: '2px 4px', fontSize: `${fontSize}px`, color: '#333', textShadow: '0 0 3px var(--bg-color, #fff), 0 0 3px var(--bg-color, #fff), 0 0 3px var(--bg-color, #fff)', width: 'max-content', cursor: isEditing ? 'text' : 'pointer', minHeight: '1.2em', outline: 'none', whiteSpace: 'pre-wrap', writingMode: (style as any)?.writingMode || 'horizontal-tb', ...labelStyle }}
+style={{ 
+    padding: '2px 4px', 
+    fontSize: `${fontSize}px`, 
+    color: '#333', 
+    // ★ 修正：8方向に白い影を重ねて、縁取りを濃く太くする設定
+    textShadow: '1px 1px 0 #fff, -1px -1px 0 #fff, 1px -1px 0 #fff, -1px 1px 0 #fff, 0 1px 0 #fff, 0 -1px 0 #fff, 1px 0 0 #fff, -1px 0 0 #fff', 
+    width: 'max-content', 
+    cursor: isEditing ? 'text' : 'pointer', 
+    minHeight: '1.2em', 
+    outline: 'none', 
+    whiteSpace: 'pre-wrap', 
+    writingMode: (style as any)?.writingMode || 'horizontal-tb', 
+    ...labelStyle 
+}}
 ref={el => {
 if (!el) return;
 if (!isEditing) { const newHtml = renderHTMLWithMath(displayLabel); if (el.innerHTML !== newHtml) el.innerHTML = newHtml; el.dataset.editing = 'false'; } 
