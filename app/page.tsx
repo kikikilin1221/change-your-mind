@@ -144,7 +144,7 @@ id={`edit-edge-${id}`} className={isEditing ? "nodrag html-content editing-mode"
 onMouseDown={(e) => { if (isEditing) e.stopPropagation(); }} onKeyDown={(e) => { if (isEditing) e.stopPropagation(); }}
 onInput={(e) => { (data as any)._tempContent = e.currentTarget.innerHTML; }}
 onBlur={(e) => { const finalHtml = (data as any)._tempContent ?? e.currentTarget.innerHTML; window.dispatchEvent(new CustomEvent('custom-edge-blur', { detail: { id, html: finalHtml } })); }}
-style={{ padding: '2px 4px', fontSize: `${fontSize}px`, color: '#333', textShadow: '0 0 3px var(--bg-color, #fff), 0 0 3px var(--bg-color, #fff), 0 0 3px var(--bg-color, #fff)', width: 'max-content', cursor: isEditing ? 'text' : 'pointer', minHeight: '1.2em', outline: 'none', whiteSpace: 'pre-wrap', writingMode: (style as any)?.writingMode || 'horizontal-tb', ...labelStyle }}
+style={{ padding: '0px 4px', borderRadius: '4px', backgroundColor: (displayLabel || isEditing) ? 'var(--bg-color, #ffffff)' : 'transparent', fontSize: `${fontSize}px`, color: '#333', width: 'max-content', cursor: isEditing ? 'text' : 'pointer', minHeight: '1.2em', outline: 'none', whiteSpace: 'pre-wrap', writingMode: (style as any)?.writingMode || 'horizontal-tb', ...labelStyle }}
 ref={el => {
 if (!el) return;
 if (!isEditing) { const newHtml = renderHTMLWithMath(displayLabel); if (el.innerHTML !== newHtml) el.innerHTML = newHtml; el.dataset.editing = 'false'; } 
@@ -401,7 +401,7 @@ const drawBtnDragRef = useRef<{ startX: number, startY: number, initX: number, i
 const [customStamps, setCustomStamps] = useState<any[]>([]);
 const [stampCategories, setStampCategories] = useState<string[]>(['未分類']);
 const [activeCategory, setActiveCategory] = useState<string>('未分類');
-const [pendingStampUrl, setPendingStampUrl] = useState<string | null>(null);
+const [pendingStampData, setPendingStampData] = useState<{url: string, w: number, h: number} | null>(null);
 
 useEffect(() => {
     const savedStamps = localStorage.getItem('my-logic-stamps-v2');
@@ -551,9 +551,9 @@ const handlePaneClick = useCallback((e: React.MouseEvent) => {
                                 ctx.putImageData(imgData, 0, 0);
                             }
 
-                            // ★ 修正3：勝手に貼り付けず、準選抜パネルに送るだけにする
-                            const dataUrl = canvas.toDataURL('image/png');
-                            setPendingStampUrl(dataUrl);
+                            // ★ 修正：勝手に貼り付けず、サイズ情報と一緒に準選抜パネルに送る
+                                const dataUrl = canvas.toDataURL('image/png');
+                                setPendingStampData({ url: dataUrl, w: screenW, h: screenH });
                             
                             takeSnapshot(); 
                         }).catch(err => {
@@ -2164,8 +2164,12 @@ label: (
 
 {n.id !== 'center-mark' && (
 <>
+<Handle type="target" position={Position.Top} id="top-tgt" className="custom-handle-target custom-handle-offset-top" />
+<Handle type="target" position={Position.Bottom} id="bottom-tgt" className="custom-handle-target custom-handle-offset-bottom" />
 <Handle type="target" position={Position.Left} id="left-tgt" className="custom-handle-target custom-handle-offset-left" />
 <Handle type="target" position={Position.Right} id="right-tgt" className="custom-handle-target custom-handle-offset-right" />
+<Handle type="source" position={Position.Top} id="top-src" className="custom-handle custom-handle-offset-top" />
+<Handle type="source" position={Position.Bottom} id="bottom-src" className="custom-handle custom-handle-offset-bottom" />
 <Handle type="source" position={Position.Left} id="left-src" className="custom-handle custom-handle-offset-left" />
 <Handle type="source" position={Position.Right} id="right-src" className="custom-handle custom-handle-offset-right" />
 
@@ -2336,10 +2340,13 @@ return (
     edgeTypes={edgeTypes} 
     elevateNodesOnSelect={false} 
     multiSelectionKeyCode={['Shift', 'Meta', 'Control']}
-    panOnDrag={!isLassoMode || selectedNodes.length === 1} 
-    selectionOnDrag={isLassoMode && selectedNodes.length !== 1} 
+    panOnDrag={(!isLassoMode || selectedNodes.length === 1) && !creationStep} 
+    selectionOnDrag={isLassoMode && selectedNodes.length !== 1 && !creationStep} 
     selectionMode={SelectionMode.Partial}
-    zoomOnDoubleClick={false} // ★ 追加：背景ダブルクリックによるズームを無効化
+    zoomOnDoubleClick={false} 
+    zoomOnScroll={!creationStep}
+    nodesDraggable={!creationStep}
+    nodesConnectable={!creationStep}
     
     minZoom={0.05} 
     maxZoom={4}
@@ -2722,15 +2729,22 @@ style={{ cursor: creationStep ? 'crosshair' : 'default' }}
 <button onClick={() => handleLayout(undefined, undefined, 'vertical-rl')} style={{flex:1, cursor:'pointer', border:'1px solid #ccc', padding: '4px', fontSize:'11px', borderRadius: '4px', fontWeight: 'bold'}}>📜 縦書き</button>
 </div>
 
-{!primaryNode.data?.isTable && (
-<div style={{ marginBottom: '15px' }}>
-<label style={{fontSize: '10px', fontWeight: 'bold'}}>文字位置の微調整 (X / Y)</label>
-<input type="range" min="-100" max="100" value={Number(primaryNode.data?.textOffsetX || 0)} onChange={(e) => updateSelectedNodes({ textOffsetX: parseInt(e.target.value) })} style={{width:'100%', marginBottom: '5px'}} />
-<input type="range" min="-100" max="100" value={Number(primaryNode.data?.textOffsetY || 0)} onChange={(e) => updateSelectedNodes({ textOffsetY: parseInt(e.target.value) })} style={{width:'100%'}} />
-</div>
-)}
-
-<label style={{fontSize:'10px', fontWeight: 'bold'}}>全体の透明度</label>
+<label style={{fontSize: '10px', fontWeight: 'bold'}}>等比率スケール (全体拡大・縮小)</label>
+<input type="range" min="0.2" max="5" step="0.1" value={Number(primaryNode.data?.scale || 1)} onChange={(e) => { 
+    const val = parseFloat(e.target.value);
+    takeSnapshot();
+    setNodes(nds => nds.map(n => {
+        if (!n.selected) return n;
+        const baseW = n.data.baseW || n.measured?.width || Number(n.style?.width) || 200;
+        const baseH = n.data.baseH || n.measured?.height || Number(n.style?.height) || 100;
+        const baseFontSize = n.data.baseFontSize || parseFloat(n.style?.fontSize) || 14;
+        return {
+            ...n,
+            data: { ...n.data, scale: val, baseW, baseH, baseFontSize },
+            style: { ...n.style, width: baseW * val, height: baseH * val, fontSize: `${baseFontSize * val}px` }
+        };
+    }));
+}} style={{width:'100%', marginBottom:'10px'}} />
 <input type="range" min="0.1" max="1" step="0.1" value={Number(primaryNode.style?.opacity ?? 1)} onChange={(e) => { takeSnapshot(); updateSelectedNodes({}, { opacity: parseFloat(e.target.value) })}} style={{width:'100%', marginBottom:'10px'}} />
 
 <label style={{fontSize:'10px', fontWeight: 'bold'}}>枠線の太さ (px)</label>
@@ -2844,9 +2858,16 @@ el.innerHTML = currentVal;
 <div style={{ display:'flex', gap:'5px', alignItems: 'center' }}>
 <button onMouseDown={(e) => e.preventDefault()} onClick={() => {
     applyUnifiedFormat('bold');
-    // ★ 線のテキストボックスの変更を即座にEdge本体に反映させる
     setTimeout(() => { const el = document.activeElement as HTMLElement; if (el && el.classList.contains('html-content')) updateEdgeDesign({ label: el.innerHTML }); }, 10);
 }} style={{ cursor:'pointer', border:'1px solid #ccc', padding: '4px 8px', fontSize:'11px', borderRadius: '4px', background: '#fff' }}>太字</button>
+<button onMouseDown={(e) => e.preventDefault()} onClick={() => {
+    applyUnifiedFormat('strikeThrough');
+    setTimeout(() => { const el = document.activeElement as HTMLElement; if (el && el.classList.contains('html-content')) updateEdgeDesign({ label: el.innerHTML }); }, 10);
+}} style={{ cursor:'pointer', border:'1px solid #ccc', padding: '4px 8px', fontSize:'11px', borderRadius: '4px', background: '#fff' }}>二重線</button>
+<button onMouseDown={(e) => e.preventDefault()} onClick={() => {
+    applyUnifiedFormat('underline');
+    setTimeout(() => { const el = document.activeElement as HTMLElement; if (el && el.classList.contains('html-content')) updateEdgeDesign({ label: el.innerHTML }); }, 10);
+}} style={{ cursor:'pointer', border:'1px solid #ccc', padding: '4px 8px', fontSize:'11px', borderRadius: '4px', background: '#fff' }}>下線</button>
 
 {['#000000', '#ef4444', '#eab308', '#10b981', '#3b82f6'].map(c => (
   <button key={c} onMouseDown={(e) => e.preventDefault()} onClick={() => applyUnifiedFormat('foreColor', c)} style={{ width: '18px', height: '18px', backgroundColor: c, border: '1px solid #ddd', borderRadius: '3px', cursor: 'pointer' }} />
@@ -3018,7 +3039,9 @@ const newColor = e.target.value; setLevelData(prev => ({ ...prev, [currentLevel]
                                     takeSnapshot();
                                     const center = screenToFlowPosition({ x: window.innerWidth / 2, y: window.innerHeight / 2 });
                                     const maxZ = Math.max(0, ...nodesRef.current.map((n: any) => Number(n.zIndex) || 0));
-                                    setNodes((nds:any[]) => [...nds.map((n:any) => ({...n, selected: false})), { id: `img-${Date.now()}`, position: { x: center.x - 100, y: center.y - 50 }, zIndex: maxZ + 1, selected: true, data: { isImage: true, imageUrl: stamp.url, imgPosX: 0, imgPosY: 0, imgZoom: 1, isCropping: false, cropBaseW: 200, cropBaseH: 100 }, style: { width: 200, height: 100, backgroundColor: 'transparent', padding: 0, borderColor: 'transparent', borderWidth: 0 } }]);
+                                    const sW = stamp.width || 200;
+                                    const sH = stamp.height || 100;
+                                    setNodes((nds:any[]) => [...nds.map((n:any) => ({...n, selected: false})), { id: `img-${Date.now()}`, position: { x: center.x - sW/2, y: center.y - sH/2 }, zIndex: maxZ + 1, selected: true, data: { isImage: true, imageUrl: stamp.url, imgPosX: 0, imgPosY: 0, imgZoom: 1, scale: 1, isCropping: false, cropBaseW: Math.round(sW), cropBaseH: Math.round(sH) }, style: { width: Math.round(sW), height: Math.round(sH), backgroundColor: 'transparent', padding: 0, borderColor: 'transparent', borderWidth: 0 } }]);
                                     setIsShapeMenuOpen(false);
                                     setIsStampMenuOpen(false);
                                 }}
@@ -3098,7 +3121,7 @@ const newColor = e.target.value; setLevelData(prev => ({ ...prev, [currentLevel]
 )}
 
 {/* ★ 読み取り直後の分類選択ミニパネル */}
-{pendingStampUrl && (
+{pendingStampData && (
 <div style={{ position: 'fixed', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', background: '#fff', padding: '20px', borderRadius: '12px', zIndex: 9999999, boxShadow: '0 20px 40px rgba(0,0,0,0.3)', border: '2px solid #3b82f6', width: '300px' }}>
     <h3 style={{ margin: '0 0 15px 0', fontSize: '16px', color: '#1e3a8a', textAlign: 'center' }}>図形を保存しました！</h3>
     <p style={{ fontSize: '12px', color: '#475569', marginBottom: '10px' }}>どの分類（フォルダ）に保存しますか？</p>
@@ -3124,10 +3147,10 @@ const newColor = e.target.value; setLevelData(prev => ({ ...prev, [currentLevel]
     </div>
 
     <button onClick={() => {
-        const newStamps = [...customStamps, { url: pendingStampUrl, category: activeCategory }];
+        const newStamps = [...customStamps, { url: pendingStampData.url, category: activeCategory, width: pendingStampData.w, height: pendingStampData.h }];
         setCustomStamps(newStamps);
         localStorage.setItem('my-logic-stamps-v2', JSON.stringify({ stamps: newStamps, categories: stampCategories }));
-        setPendingStampUrl(null);
+        setPendingStampData(null);
         setSaveMessage(`「${activeCategory}」に保存しました！`);
         setTimeout(() => setSaveMessage(null), 2000);
     }} style={{ width: '100%', padding: '10px', fontSize: '14px', background: '#3b82f6', color: '#fff', border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold', boxShadow: '0 4px 6px rgba(59, 130, 246, 0.3)' }}>
