@@ -1101,30 +1101,39 @@ const updated = { ...files }; delete updated[id]; setFiles(updated); if (id === 
 };
 
 const updateSelectedNodes = useCallback((newData: any, newStyle: any = {}, newPosition: any = null) => {
-lastActionRef.current = { type: 'updateNodes', args: [newData, newStyle, newPosition] }; // ★ F4用に記録
-setNodes((nds: any[]) => nds.map((n: any) => {
-    if (!n.selected) return n;
-    
-    let updatedNode = { 
-        ...n, 
-        position: { ...n.position, ...(newPosition || {}) }, 
-        data: { ...(n.data || {}), ...(typeof newData === 'function' ? newData(n.data) : newData) }, 
-        style: { ...(n.style || {}), ...newStyle } 
-    };
-
-    // ★ 修正：数値入力によるサイズ変更を「絶対優先」させるための強制リセット
-    // 周囲の図形とのスナップやキャッシュを無視して、確実に数値を反映させる
-    if (newStyle.width !== undefined) {
-        updatedNode.width = newStyle.width;
-        updatedNode.measured = undefined; // 内部のサイズ記憶を破棄
+    // ★ 修正：F4用に記録する際、文字の中身自体（コピペ）は反復しないように除外する
+    let recordData = newData;
+    if (newData && typeof newData === 'object') {
+        recordData = { ...newData };
+        delete recordData.content;
+        delete recordData.tableTitle;
+        delete recordData.cells;
+        delete recordData._tempContent;
     }
-    if (newStyle.height !== undefined) {
-        updatedNode.height = newStyle.height;
-        updatedNode.measured = undefined; // 内部のサイズ記憶を破棄
-    }
+    lastActionRef.current = { type: 'updateNodes', args: [recordData, newStyle, newPosition] };
 
-    return updatedNode;
-}));
+    setNodes((nds: any[]) => nds.map((n: any) => {
+        if (!n.selected) return n;
+        
+        let updatedNode = { 
+            ...n, 
+            position: { ...n.position, ...(newPosition || {}) }, 
+            data: { ...(n.data || {}), ...(typeof newData === 'function' ? newData(n.data) : newData) }, 
+            style: { ...(n.style || {}), ...newStyle } 
+        };
+
+        // 数値入力によるサイズ変更を「絶対優先」させるための強制リセット
+        if (newStyle.width !== undefined) {
+            updatedNode.width = newStyle.width;
+            updatedNode.measured = undefined;
+        }
+        if (newStyle.height !== undefined) {
+            updatedNode.height = newStyle.height;
+            updatedNode.measured = undefined;
+        }
+
+        return updatedNode;
+    }));
 }, []);
 
 const updateEdgeDesign = useCallback((config: any) => {
