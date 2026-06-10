@@ -382,6 +382,34 @@ const handleUngroupSelection = useCallback(() => {
     setTimeout(() => setSaveMessage(null), 2000);
 }, [nodes, takeSnapshot]);
 
+const handleGroupToStamp = useCallback(() => {
+    const activeGroup = nodes.find(n => n.selected && n.data?.isGroupContainer);
+    if (!activeGroup) {
+        alert('図形として登録するグループ（枠）を選択してください。');
+        return;
+    }
+    const groupEl = document.querySelector(`[data-id="${activeGroup.id}"]`) as HTMLElement;
+    if (!groupEl) return;
+    
+    // 一時的にグループの青い点線を消して撮影する
+    const originalBorder = groupEl.style.border;
+    groupEl.style.border = 'none';
+    
+    import('html2canvas').then(({ default: html2canvas }) => {
+        html2canvas(groupEl, { backgroundColor: null, scale: 2 }).then(canvas => {
+            groupEl.style.border = originalBorder; // 枠線を戻す
+            const dataUrl = canvas.toDataURL('image/png');
+            const w = activeGroup.measured?.width || Number(activeGroup.style?.width) || 200;
+            const h = activeGroup.measured?.height || Number(activeGroup.style?.height) || 100;
+            // 準選抜パネルを呼び出す
+            setPendingStampData({ url: dataUrl, w, h });
+        }).catch(err => {
+            console.error(err);
+            groupEl.style.border = originalBorder;
+        });
+    });
+}, [nodes]);
+
 const [saveMessage, setSaveMessage] = useState<string | null>(null);
 const [customColors, setCustomColors] = useState<string[]>([]);
 const [tempColor, setTempColor] = useState('#f59e0b');
@@ -1191,7 +1219,7 @@ label: newLabel
 
 const applyUnifiedFormat = (type: string, value: any = '') => {
     const activeEl = document.activeElement as HTMLElement;
-    if (!activeEl || activeEl.getAttribute('contentEditable') !== 'true') return;
+    if (!activeEl || !activeEl.isContentEditable) return; // ★ 修正：確実に編集モードを検知する
     takeSnapshot();
     lastActionRef.current = { type: 'format', args: [type, value] }; // ★ F4用に記録
     if (type === 'fontSize') {
@@ -1720,8 +1748,8 @@ useEffect(() => {
 const handleKeyDown = (e: KeyboardEvent) => {
 const activeEl = document.activeElement as HTMLElement; const isContentEditing = activeEl?.tagName === 'INPUT' || activeEl?.tagName === 'TEXTAREA' || activeEl?.isContentEditable;
 
-// ★ 修正：テキスト編集中でも Cmd+E (F4) を最優先でキャッチして装飾を反復！
-if (e.key === 'F4' || ((e.ctrlKey || e.metaKey) && e.key === 'e')) {
+// ★ 修正：テキスト編集中でも Cmd+E (F4) を最優先でキャッチして装飾を反復！(大文字小文字に対応)
+if (e.key === 'F4' || ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'e')) {
     e.preventDefault();
     const action = lastActionRef.current;
     if (action) {
@@ -1916,39 +1944,7 @@ const onNodeResize = useCallback((id: string, params: any) => {
     const dirX = direction ? direction[0] : 0;
     const dirY = direction ? direction[1] : 0;
 
-    // 現在リサイズ中のノード情報を取得
     const targetNode = nodesRef.current.find(n => n.id === id);
-
-    // ★ グループコンテナがリサイズされた場合、子要素のサイズと位置を完璧にスケール連動させる
-    if (targetNode?.data?.isGroupContainer) {
-        const startW = targetNode.data._rsStartW || 200;
-        const startH = targetNode.data._rsStartH || 100;
-        const scaleX = width / startW;
-        const scaleY = height / startH;
-        const childIds = targetNode.data?.childIds || [];
-
-        setNodes(nds => nds.map(n => {
-            if (childIds.includes(n.id)) {
-                const origW = n.data._rsStartW || 200;
-                const origH = n.data._rsStartH || 100;
-                const origX = n.data._rsStartX || 0;
-                const origY = n.data._rsStartY || 0;
-                return {
-                    ...n,
-                    position: {
-                        x: origX * scaleX,
-                        y: origY * scaleY
-                    },
-                    style: {
-                        ...n.style,
-                        width: Math.max(20, origW * scaleX),
-                        height: Math.max(20, origH * scaleY)
-                    }
-                };
-            }
-            return n;
-        }));
-    }
 
     nodesRef.current.forEach(t => {
         if (t.id === id || t.id === 'center-mark' || t.selected) return;
@@ -1975,26 +1971,39 @@ const onNodeResize = useCallback((id: string, params: any) => {
     params.x = x; params.y = y; params.width = Math.max(width, 30); params.height = Math.max(height, 30);
     setGuides({ lineX, lineY });
     
+    // ★ 修正：親と子を一気に更新することで、確実なグループスケーリングを実現
     setNodes(nds => nds.map(n => {
+        // 親（リサイズ対象）の更新
         if (n.id === id) {
             let newData = { ...n.data };
-            // ★ 画像トリミング後のリサイズ時、中身も比率に合わせて追従拡大させる
             if ((n.data?.isImage || n.data?.isShape) && !n.data?.isCropping) {
                 const prevW = Number(n.style?.width) || 300;
                 const prevH = Number(n.style?.height) || 200;
                 const scaleX = params.width / prevW;
                 const scaleY = params.height / prevH;
-                newData = {
-                    ...newData,
-                    cropBaseW: (n.data.cropBaseW || prevW) * scaleX,
-                    cropBaseH: (n.data.cropBaseH || prevH) * scaleY,
-                    cropOffsetX: (n.data.cropOffsetX || 0) * scaleX,
-                    cropOffsetY: (n.data.cropOffsetY || 0) * scaleY,
-                    imgPosX: (n.data.imgPosX || 0) * scaleX,
-                    imgPosY: (n.data.imgPosY || 0) * scaleY,
-                };
+                newData = { ...newData, cropBaseW: (n.data.cropBaseW || prevW) * scaleX, cropBaseH: (n.data.cropBaseH || prevH) * scaleY, cropOffsetX: (n.data.cropOffsetX || 0) * scaleX, cropOffsetY: (n.data.cropOffsetY || 0) * scaleY, imgPosX: (n.data.imgPosX || 0) * scaleX, imgPosY: (n.data.imgPosY || 0) * scaleY };
             }
-            return { ...n, position: { x, y }, style: { ...n.style, width: params.width, height: params.height }, data: newData };
+            return { ...n, position: { x: params.x, y: params.y }, style: { ...n.style, width: params.width, height: params.height }, data: newData };
+        }
+        
+        // 子要素（グループ内部）の更新
+        if (targetNode?.data?.isGroupContainer && targetNode.data.childIds?.includes(n.id)) {
+            const startW = targetNode.data._rsStartW || 200;
+            const startH = targetNode.data._rsStartH || 100;
+            const scaleX = params.width / startW;
+            const scaleY = params.height / startH;
+            
+            const origW = n.data._rsStartW || 200;
+            const origH = n.data._rsStartH || 100;
+            const origX = n.data._rsStartX || 0;
+            const origY = n.data._rsStartY || 0;
+            const origFontSize = n.data._rsStartFontSize || parseFloat(n.style?.fontSize) || 14;
+
+            return {
+                ...n,
+                position: { x: origX * scaleX, y: origY * scaleY },
+                style: { ...n.style, width: Math.max(20, origW * scaleX), height: Math.max(20, origH * scaleY), fontSize: `${origFontSize * scaleX}px` }
+            };
         }
         return n;
     }));
@@ -3054,6 +3063,7 @@ el.innerHTML = currentVal;
 <button onClick={handleManualSave} style={{ ...primaryBtnStyle, backgroundColor: '#059669', boxShadow: '0 2px 4px rgba(5, 150, 105, 0.3)' }}>💾 保存</button>
 <button onClick={handleGroupSelection} style={{ ...actionBtnStyle, backgroundColor: '#3b82f6', color: '#fff', border: 'none' }}>🔒 グループ化</button>
 <button onClick={handleUngroupSelection} style={{ ...actionBtnStyle, backgroundColor: '#64748b', color: '#fff', border: 'none' }}>🔓 グループ解除</button>
+<button onClick={handleGroupToStamp} style={{ ...actionBtnStyle, backgroundColor: '#f59e0b', color: '#fff', border: 'none', boxShadow: '0 2px 4px rgba(245, 158, 11, 0.3)' }}>🗃️ 図形として登録</button>
 
 {/* ★ 読込・書出を削除し、カーソルON/OFFボタンを追加 */}
 <button onClick={() => setIsCursorHidden(!isCursorHidden)} style={{ ...actionBtnStyle, backgroundColor: isCursorHidden ? '#ef4444' : '#fff', color: isCursorHidden ? '#fff' : '#333', border: isCursorHidden ? 'none' : '1px solid #ccc' }}>
