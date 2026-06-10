@@ -425,8 +425,9 @@ const handleGroupToStamp = useCallback(() => {
                 y: rect.top, 
                 width: rect.width, 
                 height: rect.height, 
-                backgroundColor: null, 
-                scale: 3 // 超高画質で平坦化
+                // ★ 修正：透明ではなく、現在のノートの背景色（または白）で塗りつぶし、後ろを透けさせない
+                backgroundColor: levelData[currentLevel]?.bgColor || '#ffffff', 
+                scale: 3 
             }).then(canvas => {
                 // UIを元に戻す
                 document.head.removeChild(style);
@@ -435,21 +436,7 @@ const handleGroupToStamp = useCallback(() => {
                 if (ws) ws.style.backgroundColor = origWsBg;
                 if (bgNode) bgNode.style.display = 'block';
 
-                // 背景透過処理
-                const ctx = canvas.getContext('2d', { willReadFrequently: true });
-                if (ctx) {
-                    const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-                    const data = imgData.data;
-                    const bgR = data[0], bgG = data[1], bgB = data[2]; 
-                    for (let i = 0; i < data.length; i += 4) {
-                        const r = data[i], g = data[i+1], b = data[i+2], a = data[i+3];
-                        if (a === 0) continue;
-                        const diff = Math.sqrt(Math.pow(r - bgR, 2) + Math.pow(g - bgG, 2) + Math.pow(b - bgB, 2));
-                        if (diff < 15) { data[i+3] = 0; } 
-                        else if (diff < 80) { data[i+3] = Math.floor(a * ((diff - 15) / 65)); }
-                    }
-                    ctx.putImageData(imgData, 0, 0);
-                }
+                // ★ 修正：透過処理（ピクセル操作）のブロックを完全に消去することで、ソリッドな不透明画像として固める
 
                 const dataUrl = canvas.toDataURL('image/png');
                 const flowW = activeGroup.measured?.width || Number(activeGroup.style?.width) || 200;
@@ -2680,14 +2667,26 @@ style={{ cursor: creationStep ? 'crosshair' : 'default' }}
     )}
 </div>
 
-{/* ★ 追加：詳細なサイズ・位置の数値調整 */}
+{/* ★ 追加：詳細なサイズ・位置の数値調整（タイピングエラー完全ガード版） */}
 <div style={{ padding: '10px', background: '#f8fafc', borderRadius: '8px', marginBottom: '15px', border: '1px solid #e2e8f0' }}>
     <label style={{fontSize: '11px', fontWeight: 'bold', color: '#334155', marginBottom: '8px', display: 'block'}}>🎛️ 詳細サイズ・位置調整 (px)</label>
     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
-        <div style={{display:'flex', alignItems:'center', gap:'4px'}}><span style={{fontSize:'10px', width:'12px', fontWeight:'bold'}}>X:</span><input type="number" value={Math.round(primaryNode.position.x)} onChange={e => { takeSnapshot(); updateSelectedNodes({}, {}, { x: Number(e.target.value) }); }} style={{flex:1, padding:'4px', fontSize:'11px', border:'1px solid #cbd5e1', borderRadius:'4px', outline:'none'}} /></div>
-        <div style={{display:'flex', alignItems:'center', gap:'4px'}}><span style={{fontSize:'10px', width:'12px', fontWeight:'bold'}}>Y:</span><input type="number" value={Math.round(primaryNode.position.y)} onChange={e => { takeSnapshot(); updateSelectedNodes({}, {}, { y: Number(e.target.value) }); }} style={{flex:1, padding:'4px', fontSize:'11px', border:'1px solid #cbd5e1', borderRadius:'4px', outline:'none'}} /></div>
-        <div style={{display:'flex', alignItems:'center', gap:'4px'}}><span style={{fontSize:'10px', width:'12px', fontWeight:'bold'}}>W:</span><input type="number" value={Math.round(primaryNode.measured?.width || Number(primaryNode.style?.width) || 200)} onChange={e => { takeSnapshot(); updateSelectedNodes({}, { width: Number(e.target.value) }); }} style={{flex:1, padding:'4px', fontSize:'11px', border:'1px solid #cbd5e1', borderRadius:'4px', outline:'none'}} /></div>
-        <div style={{display:'flex', alignItems:'center', gap:'4px'}}><span style={{fontSize:'10px', width:'12px', fontWeight:'bold'}}>H:</span><input type="number" value={Math.round(primaryNode.measured?.height || Number(primaryNode.style?.height) || 100)} onChange={e => { takeSnapshot(); updateSelectedNodes({}, { height: Number(e.target.value) }); }} style={{flex:1, padding:'4px', fontSize:'11px', border:'1px solid #cbd5e1', borderRadius:'4px', outline:'none'}} /></div>
+        <div style={{display:'flex', alignItems:'center', gap:'4px'}}>
+            <span style={{fontSize:'10px', width:'12px', fontWeight:'bold'}}>X:</span>
+            <input type="number" value={Math.round(primaryNode.position.x) || 0} onChange={e => { const val = parseInt(e.target.value); if (!isNaN(val)) { takeSnapshot(); updateSelectedNodes({}, {}, { x: val }); } }} style={{flex:1, padding:'4px', fontSize:'11px', border:'1px solid #cbd5e1', borderRadius:'4px', outline:'none'}} />
+        </div>
+        <div style={{display:'flex', alignItems:'center', gap:'4px'}}>
+            <span style={{fontSize:'10px', width:'12px', fontWeight:'bold'}}>Y:</span>
+            <input type="number" value={Math.round(primaryNode.position.y) || 0} onChange={e => { const val = parseInt(e.target.value); if (!isNaN(val)) { takeSnapshot(); updateSelectedNodes({}, {}, { y: val }); } }} style={{flex:1, padding:'4px', fontSize:'11px', border:'1px solid #cbd5e1', borderRadius:'4px', outline:'none'}} />
+        </div>
+        <div style={{display:'flex', alignItems:'center', gap:'4px'}}>
+            <span style={{fontSize:'10px', width:'12px', fontWeight:'bold'}}>W:</span>
+            <input type="number" value={Math.round(primaryNode.measured?.width || Number(primaryNode.style?.width) || 200)} onChange={e => { const val = parseInt(e.target.value); if (!isNaN(val)) { takeSnapshot(); updateSelectedNodes({}, { width: val }); } }} style={{flex:1, padding:'4px', fontSize:'11px', border:'1px solid #cbd5e1', borderRadius:'4px', outline:'none'}} />
+        </div>
+        <div style={{display:'flex', alignItems:'center', gap:'4px'}}>
+            <span style={{fontSize:'10px', width:'12px', fontWeight:'bold'}}>H:</span>
+            <input type="number" value={Math.round(primaryNode.measured?.height || Number(primaryNode.style?.height) || 100)} onChange={e => { const val = parseInt(e.target.value); if (!isNaN(val)) { takeSnapshot(); updateSelectedNodes({}, { height: val }); } }} style={{flex:1, padding:'4px', fontSize:'11px', border:'1px solid #cbd5e1', borderRadius:'4px', outline:'none'}} />
+        </div>
     </div>
 </div>
 
