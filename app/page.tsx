@@ -91,9 +91,11 @@ const [edgePath, labelX, labelY] = getBezierPath({ sourceX, sourceY, sourcePosit
 const isDouble = (data as any)?.double; 
 const isEditing = Boolean((data as any)?.isEditing);
 const hideLine = Boolean((data as any)?.hideLine); 
+const isDashed = Boolean((data as any)?.dashed); // ★ 追加：点線フラグ
 const strokeWidth = Number(style?.strokeWidth) || 1; 
 const edgeColor = (data as any)?.color || '#333';
 const labelStyle = (data as any)?.labelStyle || { textAlign: 'center' }; 
+const dashArray = isDashed ? (strokeWidth > 2 ? `${strokeWidth*2} ${strokeWidth*2}` : '4 4') : undefined; // ★ 追加：点線の間隔計算
 const fontSize = (data as any)?.fontSize || 14;
 const mType = (data as any)?.markerType;
 
@@ -129,11 +131,11 @@ return (
 {!hideLine && (
 isDouble ? (
 <>
-<BaseEdge path={edgePath} style={{ ...style, strokeWidth: strokeWidth + 8, stroke: edgeColor }} />
-<BaseEdge path={edgePath} style={{ ...style, strokeWidth: strokeWidth + 4, stroke: 'var(--bg-color, #ffffff)' }} />
+<BaseEdge path={edgePath} style={{ ...style, strokeWidth: strokeWidth + 8, stroke: edgeColor, strokeDasharray: dashArray }} />
+<BaseEdge path={edgePath} style={{ ...style, strokeWidth: strokeWidth + 4, stroke: 'var(--bg-color, #ffffff)', strokeDasharray: dashArray }} />
 <BaseEdge path={edgePath} markerEnd={rMarkerEnd} markerStart={rMarkerStart} style={{ strokeWidth: strokeWidth, stroke: 'transparent', fill: 'none' }} />
 </>
-) : ( <BaseEdge id={id} path={edgePath} markerEnd={rMarkerEnd} markerStart={rMarkerStart} style={{ ...style, strokeWidth, stroke: edgeColor }} /> )
+) : ( <BaseEdge id={id} path={edgePath} markerEnd={rMarkerEnd} markerStart={rMarkerStart} style={{ ...style, strokeWidth, stroke: edgeColor, strokeDasharray: dashArray }} /> )
 )}
 
 {displayLabel || isEditing ? (
@@ -415,6 +417,14 @@ const [customStamps, setCustomStamps] = useState<any[]>([]);
 const [stampCategories, setStampCategories] = useState<string[]>(['未分類']);
 const [activeCategory, setActiveCategory] = useState<string>('未分類');
 const [pendingStampData, setPendingStampData] = useState<{url: string, w: number, h: number} | null>(null);
+
+// ★ 追加：背景色の準選抜用ステート
+const [bgCustomColors, setBgCustomColors] = useState<string[]>([]);
+useEffect(() => { const saved = localStorage.getItem('my-logic-bg-colors'); if (saved) { try { setBgCustomColors(JSON.parse(saved)); } catch(e){} } }, []);
+
+// ★ 追加：枠線色の準選抜用ステート
+const [borderCustomColors, setBorderCustomColors] = useState<string[]>([]);
+useEffect(() => { const saved = localStorage.getItem('my-logic-border-colors'); if (saved) { try { setBorderCustomColors(JSON.parse(saved)); } catch(e){} } }, []);
 
 useEffect(() => {
     const savedStamps = localStorage.getItem('my-logic-stamps-v2');
@@ -878,24 +888,26 @@ const handleCopySize = useCallback(() => {
     });
 }, [primaryNode]);
 
-const handleApplySize = useCallback(() => {
+const handleApplySize = useCallback((mode: 'width' | 'height' | 'both' = 'both') => {
     if (!sizeSource) return;
     takeSnapshot();
     
     setNodes(nds => nds.map(n => {
         if (!n.selected) return n;
         const newData = { ...n.data };
+        let targetW = mode === 'both' || mode === 'width' ? sizeSource.width : (n.measured?.width || Number(n.style?.width) || 200);
+        let targetH = mode === 'both' || mode === 'height' ? sizeSource.height : (n.measured?.height || Number(n.style?.height) || 100);
         if (newData.isImage) {
-            newData.cropBaseW = sizeSource.width;
-            newData.cropBaseH = sizeSource.height;
+            newData.cropBaseW = targetW;
+            newData.cropBaseH = targetH;
         }
         return {
             ...n,
-            width: sizeSource.width,
-            height: sizeSource.height,
+            width: targetW,
+            height: targetH,
             measured: undefined,
             data: newData,
-            style: { ...n.style, width: sizeSource.width, height: sizeSource.height }
+            style: { ...n.style, width: targetW, height: targetH }
         };
     }));
     setSizeSource(null);
@@ -1088,9 +1100,9 @@ if (Object.keys(files).length <= 1) return; if (!confirm("削除しますか？"
 const updated = { ...files }; delete updated[id]; setFiles(updated); if (id === activeFileId) switchFile(Object.keys(updated)[0]);
 };
 
-const updateSelectedNodes = useCallback((newData: any, newStyle: any = {}) => {
-lastActionRef.current = { type: 'updateNodes', args: [newData, newStyle] }; // ★ F4用に記録
-setNodes((nds: any[]) => nds.map((n: any) => n.selected ? { ...n, data: { ...(n.data || {}), ...(typeof newData === 'function' ? newData(n.data) : newData) }, style: { ...(n.style || {}), ...newStyle } } : n));
+const updateSelectedNodes = useCallback((newData: any, newStyle: any = {}, newPosition: any = null) => {
+lastActionRef.current = { type: 'updateNodes', args: [newData, newStyle, newPosition] }; // ★ F4用に記録
+setNodes((nds: any[]) => nds.map((n: any) => n.selected ? { ...n, position: { ...n.position, ...(newPosition || {}) }, data: { ...(n.data || {}), ...(typeof newData === 'function' ? newData(n.data) : newData) }, style: { ...(n.style || {}), ...newStyle } } : n));
 }, []);
 
 const updateEdgeDesign = useCallback((config: any) => {
@@ -1105,6 +1117,7 @@ let newDouble = config.double !== undefined ? config.double : e.data?.double;
 let newMarkerType = config.markerType !== undefined ? config.markerType : e.data?.markerType; 
 let newLabel = config.label !== undefined ? config.label : e.label;
 let newHideLine = config.hideLine !== undefined ? config.hideLine : e.data?.hideLine;
+let newDashed = config.dashed !== undefined ? config.dashed : e.data?.dashed; // ★ 追加
 
 let newSourceHandle = e.sourceHandle;
 let newTargetHandle = e.targetHandle;
@@ -1113,7 +1126,8 @@ if (config.resetDesign) {
 newDouble = config.double || false; 
 newMarkerType = config.markerType || 'none'; 
 newHideLine = config.hideLine || false; 
-if(config.label !== undefined) newLabel = config.label; 
+newDashed = config.dashed || false; // ★ 追加
+if(config.label !== undefined) newLabel = config.label;
 
 const isLogical = newMarkerType === 'custom-double-arrow' || newMarkerType === 'custom-double-both' || newHideLine;
 if (isLogical) {
@@ -1136,8 +1150,8 @@ return {
 sourceHandle: newSourceHandle, 
 targetHandle: newTargetHandle, 
 style: { ...e.style, strokeWidth: newStrokeWidth, stroke: newColor }, 
-data: { ...(e.data || {}), double: newDouble, color: newColor, labelStyle: newLabelStyle, fontSize: newFontSize, markerType: newMarkerType, hideLine: newHideLine }, 
-markerEnd: mEnd, 
+data: { ...(e.data || {}), double: newDouble, color: newColor, labelStyle: newLabelStyle, fontSize: newFontSize, markerType: newMarkerType, hideLine: newHideLine, dashed: newDashed }, 
+markerEnd: mEnd,
 markerStart: mStart, 
 label: newLabel 
 };
@@ -1874,28 +1888,30 @@ const onNodeResize = useCallback((id: string, params: any) => {
     // 現在リサイズ中のノード情報を取得
     const targetNode = nodesRef.current.find(n => n.id === id);
 
-    // ★ グループコンテナがリサイズされた場合、子要素のサイズと位置をスケール連動
+    // ★ グループコンテナがリサイズされた場合、子要素のサイズと位置を完璧にスケール連動させる
     if (targetNode?.data?.isGroupContainer) {
-        const prevW = targetNode.style?.width || targetNode.width || width;
-        const prevH = targetNode.style?.height || targetNode.height || height;
-        const scaleX = width / prevW;
-        const scaleY = height / prevH;
+        const startW = targetNode.data._rsStartW || 200;
+        const startH = targetNode.data._rsStartH || 100;
+        const scaleX = width / startW;
+        const scaleY = height / startH;
         const childIds = targetNode.data?.childIds || [];
 
         setNodes(nds => nds.map(n => {
             if (childIds.includes(n.id)) {
-                const cW = n.style?.width || n.width || 200;
-                const cH = n.style?.height || n.height || 100;
+                const origW = n.data._rsStartW || 200;
+                const origH = n.data._rsStartH || 100;
+                const origX = n.data._rsStartX || 0;
+                const origY = n.data._rsStartY || 0;
                 return {
                     ...n,
                     position: {
-                        x: n.position.x * scaleX,
-                        y: n.position.y * scaleY
+                        x: origX * scaleX,
+                        y: origY * scaleY
                     },
                     style: {
                         ...n.style,
-                        width: Math.max(20, cW * scaleX),
-                        height: Math.max(20, cH * scaleY)
+                        width: Math.max(20, origW * scaleX),
+                        height: Math.max(20, origH * scaleY)
                     }
                 };
             }
@@ -2244,6 +2260,19 @@ else if (el.dataset.editing !== 'true') { el.dataset.editing = 'true'; el.innerH
     handleStyle={{ background: n.data?.isCropping ? '#ef4444' : '#3b82f6', zIndex: 100, borderRadius: '50%' }} 
     onResizeStart={(_, params) => { 
         takeSnapshot(); 
+        // ★ 追加：グループリサイズ用の初期値を確実に保存
+        if (n.data?.isGroupContainer) {
+            n.data._rsStartW = n.style?.width || n.width || 200;
+            n.data._rsStartH = n.style?.height || n.height || 100;
+            nodesRef.current.forEach((cn: any) => {
+                if (n.data.childIds?.includes(cn.id)) {
+                    cn.data._rsStartW = cn.style?.width || cn.width || 200;
+                    cn.data._rsStartH = cn.style?.height || cn.height || 100;
+                    cn.data._rsStartX = cn.position.x;
+                    cn.data._rsStartY = cn.position.y;
+                }
+            });
+        }
         if (n.data?.isCropping) {
             n.data._rsX = params.x; n.data._rsY = params.y; 
             n.data._rsCropOffX = n.data.cropOffsetX || 0; n.data._rsCropOffY = n.data.cropOffsetY || 0; 
@@ -2535,13 +2564,28 @@ style={{ cursor: creationStep ? 'crosshair' : 'default' }}
             現在のサイズをコピー
         </button>
     ) : (
-        <div style={{ display: 'flex', gap: '5px' }}>
-            <button onClick={handleApplySize} style={{ flex: 1, padding: '8px', fontSize: '11px', background: '#10b981', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}>
-                適用する ({Math.round(sizeSource.width)}×{Math.round(sizeSource.height)})
-            </button>
-            <button onClick={() => setSizeSource(null)} style={{ padding: '8px', fontSize: '11px', background: '#f1f5f9', color: '#64748b', border: '1px solid #cbd5e1', borderRadius: '4px', cursor: 'pointer' }}>解除</button>
+        <div style={{ display: 'flex', gap: '3px', flexDirection: 'column' }}>
+            <div style={{ display: 'flex', gap: '3px' }}>
+                <button onClick={() => handleApplySize('height')} style={{ flex: 1, padding: '6px', fontSize: '10px', background: '#34d399', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}>縦の長さを適用</button>
+                <button onClick={() => handleApplySize('width')} style={{ flex: 1, padding: '6px', fontSize: '10px', background: '#34d399', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}>横の長さを適用</button>
+            </div>
+            <div style={{ display: 'flex', gap: '3px' }}>
+                <button onClick={() => handleApplySize('both')} style={{ flex: 2, padding: '8px', fontSize: '11px', background: '#10b981', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}>全体を適用 ({Math.round(sizeSource.width)}×{Math.round(sizeSource.height)})</button>
+                <button onClick={() => setSizeSource(null)} style={{ flex: 1, padding: '8px', fontSize: '11px', background: '#f1f5f9', color: '#64748b', border: '1px solid #cbd5e1', borderRadius: '4px', cursor: 'pointer' }}>解除</button>
+            </div>
         </div>
     )}
+</div>
+
+{/* ★ 追加：詳細なサイズ・位置の数値調整 */}
+<div style={{ padding: '10px', background: '#f8fafc', borderRadius: '8px', marginBottom: '15px', border: '1px solid #e2e8f0' }}>
+    <label style={{fontSize: '11px', fontWeight: 'bold', color: '#334155', marginBottom: '8px', display: 'block'}}>🎛️ 詳細サイズ・位置調整 (px)</label>
+    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+        <div style={{display:'flex', alignItems:'center', gap:'4px'}}><span style={{fontSize:'10px', width:'12px', fontWeight:'bold'}}>X:</span><input type="number" value={Math.round(primaryNode.position.x)} onChange={e => { takeSnapshot(); updateSelectedNodes({}, {}, { x: Number(e.target.value) }); }} style={{flex:1, padding:'4px', fontSize:'11px', border:'1px solid #cbd5e1', borderRadius:'4px', outline:'none'}} /></div>
+        <div style={{display:'flex', alignItems:'center', gap:'4px'}}><span style={{fontSize:'10px', width:'12px', fontWeight:'bold'}}>Y:</span><input type="number" value={Math.round(primaryNode.position.y)} onChange={e => { takeSnapshot(); updateSelectedNodes({}, {}, { y: Number(e.target.value) }); }} style={{flex:1, padding:'4px', fontSize:'11px', border:'1px solid #cbd5e1', borderRadius:'4px', outline:'none'}} /></div>
+        <div style={{display:'flex', alignItems:'center', gap:'4px'}}><span style={{fontSize:'10px', width:'12px', fontWeight:'bold'}}>W:</span><input type="number" value={Math.round(primaryNode.measured?.width || Number(primaryNode.style?.width) || 200)} onChange={e => { takeSnapshot(); updateSelectedNodes({}, { width: Number(e.target.value) }); }} style={{flex:1, padding:'4px', fontSize:'11px', border:'1px solid #cbd5e1', borderRadius:'4px', outline:'none'}} /></div>
+        <div style={{display:'flex', alignItems:'center', gap:'4px'}}><span style={{fontSize:'10px', width:'12px', fontWeight:'bold'}}>H:</span><input type="number" value={Math.round(primaryNode.measured?.height || Number(primaryNode.style?.height) || 100)} onChange={e => { takeSnapshot(); updateSelectedNodes({}, { height: Number(e.target.value) }); }} style={{flex:1, padding:'4px', fontSize:'11px', border:'1px solid #cbd5e1', borderRadius:'4px', outline:'none'}} /></div>
+    </div>
 </div>
 
 <div style={{ padding: '10px', background: '#fff7ed', borderRadius: '8px', marginBottom: '15px', border: '1px solid #fed7aa' }}>
@@ -2767,12 +2811,30 @@ style={{ cursor: creationStep ? 'crosshair' : 'default' }}
 </div>
 
 <label style={{fontSize:'10px', fontWeight: 'bold'}}>枠線の色</label>
-<input type="color" value={String(primaryNode.style?.borderColor || '#000000')} onChange={(e) => { takeSnapshot(); updateSelectedNodes({}, { borderColor: e.target.value })}} style={{width:'100%', height:'24px', cursor: 'pointer', border: 'none', padding: 0, marginBottom:'10px'}} />
+<div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '4px', marginTop: '5px', marginBottom: '10px' }}>
+    <button onClick={() => { takeSnapshot(); updateSelectedNodes({}, { borderColor: 'transparent' })}} style={{ width:'100%', aspectRatio:'1', backgroundColor:'transparent', border: '1px solid #ccc', borderRadius: '4px', cursor: 'pointer', backgroundImage: 'url("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAQAAAAECAYAAACp8Z5+AAAADklEQVQIW2NgQAXGv7//bxMQAOQAAMkAAAABJRU5ErkJggg==")' }} title="透明にする" />
+    {PASTEL_COLORS.slice(0, 5).map(c => <button key={'bc'+c} onClick={() => { takeSnapshot(); updateSelectedNodes({}, { borderColor: c })}} style={{ width:'100%', aspectRatio:'1', backgroundColor:c, border: '1px solid #eee', borderRadius: '4px', cursor: 'pointer' }} />)}
+    <input type="color" value={String(primaryNode.style?.borderColor || '#000000')} onChange={(e) => { takeSnapshot(); updateSelectedNodes({}, { borderColor: e.target.value })}} style={{width:'100%', aspectRatio:'1', cursor: 'pointer', border: 'none', padding: 0}} title="自由選択" />
+</div>
+<div style={{ display: 'flex', gap: '5px', marginBottom: '15px', alignItems: 'center', flexWrap: 'wrap' }}>
+    {borderCustomColors.map(c => (
+        <button key={'borderCol'+c} onClick={() => updateSelectedNodes({}, { borderColor: c })} onKeyDown={(e) => { if(e.key === 'Backspace' || e.key === 'Delete') { const nc = borderCustomColors.filter(col => col !== c); setBorderCustomColors(nc); localStorage.setItem('my-logic-border-colors', JSON.stringify(nc)); } }} title="選択してDeleteキーで削除" style={{ width: '24px', height: '24px', backgroundColor: c, border: '1px solid #ddd', borderRadius: '4px', cursor: 'pointer' }} />
+    ))}
+    <button onClick={() => { const currentBc = primaryNode.style?.borderColor; if (currentBc && currentBc !== 'transparent' && !borderCustomColors.includes(currentBc)) { const nc = [...borderCustomColors, currentBc]; setBorderCustomColors(nc); localStorage.setItem('my-logic-border-colors', JSON.stringify(nc)); } }} style={{ fontSize: '10px', padding: '4px 8px', background: '#f8fafc', border: '1px solid #cbd5e1', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}>＋準選抜に追加</button>
+</div>
 
 <label style={{fontSize:'10px', fontWeight: 'bold'}}>背景色</label>
-<div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: '4px', marginTop: '5px', marginBottom: '10px' }}>
-{PASTEL_COLORS.map(c => <button key={c} onClick={() => { takeSnapshot(); updateSelectedNodes({}, { backgroundColor: c })}} style={{ width:'100%', aspectRatio:'1', backgroundColor:c, border: '1px solid #eee', borderRadius: '4px', cursor: 'pointer' }} />)}
-<input type="color" value={String(primaryNode.style?.backgroundColor || '#ffffff')} onChange={(e) => { takeSnapshot(); updateSelectedNodes({}, { backgroundColor: e.target.value })}} style={{width:'100%', aspectRatio:'1', cursor: 'pointer', border: 'none', padding: 0}} />
+<div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '4px', marginTop: '5px', marginBottom: '10px' }}>
+    {/* 透明ボタン */}
+    <button onClick={() => { takeSnapshot(); updateSelectedNodes({}, { backgroundColor: 'transparent' })}} style={{ width:'100%', aspectRatio:'1', backgroundColor:'transparent', border: '1px solid #ccc', borderRadius: '4px', cursor: 'pointer', backgroundImage: 'url("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAQAAAAECAYAAACp8Z5+AAAADklEQVQIW2NgQAXGv7//bxMQAOQAAMkAAAABJRU5ErkJggg==")' }} title="透明にする" />
+    {PASTEL_COLORS.slice(0, 5).map(c => <button key={c} onClick={() => { takeSnapshot(); updateSelectedNodes({}, { backgroundColor: c })}} style={{ width:'100%', aspectRatio:'1', backgroundColor:c, border: '1px solid #eee', borderRadius: '4px', cursor: 'pointer' }} />)}
+    <input type="color" value={String(primaryNode.style?.backgroundColor || '#ffffff')} onChange={(e) => { takeSnapshot(); updateSelectedNodes({}, { backgroundColor: e.target.value })}} style={{width:'100%', aspectRatio:'1', cursor: 'pointer', border: 'none', padding: 0}} title="自由選択" />
+</div>
+<div style={{ display: 'flex', gap: '5px', marginBottom: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
+    {bgCustomColors.map(c => (
+        <button key={'bgCol'+c} onClick={() => updateSelectedNodes({}, { backgroundColor: c })} onKeyDown={(e) => { if(e.key === 'Backspace' || e.key === 'Delete') { const nc = bgCustomColors.filter(col => col !== c); setBgCustomColors(nc); localStorage.setItem('my-logic-bg-colors', JSON.stringify(nc)); } }} title="選択してDeleteキーで削除" style={{ width: '24px', height: '24px', backgroundColor: c, border: '1px solid #ddd', borderRadius: '4px', cursor: 'pointer' }} />
+    ))}
+    <button onClick={() => { const currentBg = primaryNode.style?.backgroundColor; if (currentBg && currentBg !== 'transparent' && !bgCustomColors.includes(currentBg)) { const nc = [...bgCustomColors, currentBg]; setBgCustomColors(nc); localStorage.setItem('my-logic-bg-colors', JSON.stringify(nc)); } }} style={{ fontSize: '10px', padding: '4px 8px', background: '#f8fafc', border: '1px solid #cbd5e1', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}>＋準選抜に追加</button>
 </div>
 
 {!primaryNode.data?.isShape && !primaryNode.data?.isImage && !primaryNode.data?.isTable && (
@@ -2900,6 +2962,12 @@ el.innerHTML = currentVal;
 <div style={{ display:'flex', gap:'5px', marginTop: '5px', marginBottom: '20px' }}>
 <button onClick={() => updateEdgeDesign({ label: '<span style="color: red;">YES</span>', labelStyle: { ...selectedEdge.data?.labelStyle, textAlign: 'center' } })} style={{flex:1, padding:'6px', border: '1px solid #fca5a5', color: 'red', background: '#fef2f2', cursor: 'pointer', borderRadius: '4px', fontWeight: 'bold', fontSize: '11px'}}>YES 線</button>
 <button onClick={() => updateEdgeDesign({ label: '<span style="color: blue;">NO</span>', labelStyle: { ...selectedEdge.data?.labelStyle, textAlign: 'center' } })} style={{flex:1, padding:'6px', border: '1px solid #93c5fd', color: 'blue', background: '#eff6ff', cursor: 'pointer', borderRadius: '4px', fontWeight: 'bold', fontSize: '11px'}}>NO 線</button>
+</div>
+
+<label style={{fontSize:'11px', fontWeight: 'bold'}}>線のスタイル</label>
+<div style={{ display:'flex', gap:'5px', marginTop: '5px', marginBottom: '15px' }}>
+    <button onClick={() => updateEdgeDesign({ dashed: false })} style={{flex:1, padding:'6px', border: !selectedEdge.data?.dashed ? '2px solid #3b82f6' : '1px solid #ccc', background: '#fff', cursor: 'pointer', borderRadius: '4px', fontWeight: 'bold', fontSize: '11px', color: !selectedEdge.data?.dashed ? '#1d4ed8' : '#333'}}>実線</button>
+    <button onClick={() => updateEdgeDesign({ dashed: true })} style={{flex:1, padding:'6px', border: selectedEdge.data?.dashed ? '2px solid #3b82f6' : '1px solid #ccc', background: '#fff', cursor: 'pointer', borderRadius: '4px', fontWeight: 'bold', fontSize: '11px', color: selectedEdge.data?.dashed ? '#1d4ed8' : '#333'}}>点線</button>
 </div>
 
 <label style={{fontSize:'11px', fontWeight: 'bold'}}>線の太さ</label>
