@@ -382,33 +382,37 @@ const handleUngroupSelection = useCallback(() => {
     setTimeout(() => setSaveMessage(null), 2000);
 }, [nodes, takeSnapshot]);
 
+// ★ 修正：グループを「画像」ではなく「編集可能な図形テンプレート」として登録する
 const handleGroupToStamp = useCallback(() => {
     const activeGroup = nodes.find(n => n.selected && n.data?.isGroupContainer);
     if (!activeGroup) {
         alert('図形として登録するグループ（枠）を選択してください。');
         return;
     }
-    const groupEl = document.querySelector(`[data-id="${activeGroup.id}"]`) as HTMLElement;
-    if (!groupEl) return;
     
-    // 一時的にグループの青い点線を消して撮影する
-    const originalBorder = groupEl.style.border;
-    groupEl.style.border = 'none';
+    // 1. グループとその子要素、および内部の線を抽出
+    const childIds = activeGroup.data?.childIds || [];
+    const groupNodes = nodes.filter(n => n.id === activeGroup.id || childIds.includes(n.id));
+    const groupEdges = edges.filter(e => childIds.includes(e.source) && childIds.includes(e.target));
     
-    import('html2canvas').then(({ default: html2canvas }) => {
-        html2canvas(groupEl, { backgroundColor: null, scale: 2 }).then(canvas => {
-            groupEl.style.border = originalBorder; // 枠線を戻す
-            const dataUrl = canvas.toDataURL('image/png');
-            const w = activeGroup.measured?.width || Number(activeGroup.style?.width) || 200;
-            const h = activeGroup.measured?.height || Number(activeGroup.style?.height) || 100;
-            // 準選抜パネルを呼び出す
-            setPendingStampData({ url: dataUrl, w, h });
-        }).catch(err => {
-            console.error(err);
-            groupEl.style.border = originalBorder;
-        });
-    });
-}, [nodes]);
+    const templateData = {
+        nodes: safeCloneNodes(groupNodes),
+        edges: safeCloneEdges(groupEdges)
+    };
+    
+    const w = activeGroup.measured?.width || Number(activeGroup.style?.width) || 200;
+    const h = activeGroup.measured?.height || Number(activeGroup.style?.height) || 100;
+
+    // 2. 視認用サムネイルの生成（画像化バグを回避するためクリーンなSVGアイコンを生成）
+    const svgString = `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">
+        <rect width="${w}" height="${h}" fill="#f8fafc" stroke="#3b82f6" stroke-width="4" stroke-dasharray="8 8" rx="12" />
+        <text x="50%" y="50%" font-family="sans-serif" font-size="16" font-weight="bold" fill="#1d4ed8" text-anchor="middle" dominant-baseline="middle">グループ図形</text>
+    </svg>`;
+    const dataUrl = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(svgString);
+
+    // 3. 準選抜パネルに送る
+    setPendingStampData({ url: dataUrl, w, h, templateData });
+}, [nodes, edges]);
 
 const [saveMessage, setSaveMessage] = useState<string | null>(null);
 const [customColors, setCustomColors] = useState<string[]>([]);
@@ -444,7 +448,7 @@ const drawBtnDragRef = useRef<{ startX: number, startY: number, initX: number, i
 const [customStamps, setCustomStamps] = useState<any[]>([]);
 const [stampCategories, setStampCategories] = useState<string[]>(['未分類']);
 const [activeCategory, setActiveCategory] = useState<string>('未分類');
-const [pendingStampData, setPendingStampData] = useState<{url: string, w: number, h: number} | null>(null);
+const [pendingStampData, setPendingStampData] = useState<{url: string, w: number, h: number, templateData?: any} | null>(null); // ★ 修正：図形データ保持枠を追加
 
 // ★ 追加：背景色の準選抜用ステート
 const [bgCustomColors, setBgCustomColors] = useState<string[]>([]);
@@ -1129,16 +1133,25 @@ const updated = { ...files }; delete updated[id]; setFiles(updated); if (id === 
 };
 
 const updateSelectedNodes = useCallback((newData: any, newStyle: any = {}, newPosition: any = null) => {
-    // ★ 修正：F4用に記録する際、文字の中身自体（コピペ）は反復しないように除外する
-    let recordData = newData;
-    if (newData && typeof newData === 'object') {
-        recordData = { ...newData };
-        delete recordData.content;
-        delete recordData.tableTitle;
-        delete recordData.cells;
-        delete recordData._tempContent;
+    // ★ 修正：文字入力など「中身の変更」だけの時は、F4の装飾記憶を上書きしないように守る
+    let isOnlyContentUpdate = false;
+    if (newData && typeof newData === 'object' && Object.keys(newStyle || {}).length === 0 && !newPosition) {
+        const keys = Object.keys(newData);
+        const contentKeys = ['content', 'tableTitle', 'cells', '_tempContent', 'editingCell', 'isEditing'];
+        isOnlyContentUpdate = keys.every(k => contentKeys.includes(k));
     }
-    lastActionRef.current = { type: 'updateNodes', args: [recordData, newStyle, newPosition] };
+    
+    if (!isOnlyContentUpdate) {
+        let recordData = newData;
+        if (newData && typeof newData === 'object') {
+            recordData = { ...newData };
+            delete recordData.content;
+            delete recordData.tableTitle;
+            delete recordData.cells;
+            delete recordData._tempContent;
+        }
+        lastActionRef.current = { type: 'updateNodes', args: [recordData, newStyle, newPosition] };
+    }
 
     setNodes((nds: any[]) => nds.map((n: any) => {
         if (!n.selected) return n;
@@ -1151,11 +1164,11 @@ const updateSelectedNodes = useCallback((newData: any, newStyle: any = {}, newPo
         };
 
         // 数値入力によるサイズ変更を「絶対優先」させるための強制リセット
-        if (newStyle.width !== undefined) {
+        if (newStyle && newStyle.width !== undefined) {
             updatedNode.width = newStyle.width;
             updatedNode.measured = undefined;
         }
-        if (newStyle.height !== undefined) {
+        if (newStyle && newStyle.height !== undefined) {
             updatedNode.height = newStyle.height;
             updatedNode.measured = undefined;
         }
@@ -3163,7 +3176,42 @@ const newColor = e.target.value; setLevelData(prev => ({ ...prev, [currentLevel]
                                     const maxZ = Math.max(0, ...nodesRef.current.map((n: any) => Number(n.zIndex) || 0));
                                     const sW = stamp.width || 200;
                                     const sH = stamp.height || 100;
-                                    setNodes((nds:any[]) => [...nds.map((n:any) => ({...n, selected: false})), { id: `img-${Date.now()}`, position: { x: center.x - sW/2, y: center.y - sH/2 }, zIndex: maxZ + 1, selected: true, data: { isImage: true, imageUrl: stamp.url, imgPosX: 0, imgPosY: 0, imgZoom: 1, scale: 1, isCropping: false, cropBaseW: Math.round(sW), cropBaseH: Math.round(sH) }, style: { width: Math.round(sW), height: Math.round(sH), backgroundColor: 'transparent', padding: 0, borderColor: 'transparent', borderWidth: 0 } }]);
+
+                                    if (stamp.templateData) {
+                                        // ★ 修正：画像ではなく、保存された構造データから新しくIDを振り直して図形群を展開する
+                                        const idMap = new Map<string, string>();
+                                        const newNodes = stamp.templateData.nodes.map((original: any) => { 
+                                            const newId = `node-${Date.now()}-${Math.random()}`; 
+                                            idMap.set(original.id, newId);
+                                            return { ...original, id: newId, selected: true }; 
+                                        });
+
+                                        const finalNodes = newNodes.map((n: any) => {
+                                            if (n.data?.isGroupContainer) {
+                                                n.data.childIds = n.data.childIds.map((cid: string) => idMap.get(cid) || cid);
+                                                n.position = { x: center.x - sW/2, y: center.y - sH/2 };
+                                                n.zIndex = maxZ + 1;
+                                            } else if (n.parentId) {
+                                                n.parentId = idMap.get(n.parentId) || n.parentId;
+                                                n.zIndex = maxZ + 2;
+                                            }
+                                            return n;
+                                        });
+
+                                        const newEdges = (stamp.templateData.edges || []).map((originalEdge: any) => {
+                                            if (idMap.has(originalEdge.source) && idMap.has(originalEdge.target)) {
+                                                return { ...originalEdge, id: `edge-${Date.now()}-${Math.random()}`, source: idMap.get(originalEdge.source)!, target: idMap.get(originalEdge.target)!, selected: true, zIndex: maxZ + 1 };
+                                            }
+                                            return null;
+                                        }).filter(Boolean);
+
+                                        setNodes((nds: any[]) => [...nds.map((n: any) => ({...n, selected: false})), ...finalNodes]);
+                                        setEdges((eds: any[]) => [...eds.map((e: any) => ({...e, selected: false})), ...newEdges]);
+                                    } else {
+                                        // 通常の画像読み取りスタンプの場合
+                                        setNodes((nds:any[]) => [...nds.map((n:any) => ({...n, selected: false})), { id: `img-${Date.now()}`, position: { x: center.x - sW/2, y: center.y - sH/2 }, zIndex: maxZ + 1, selected: true, data: { isImage: true, imageUrl: stamp.url, imgPosX: 0, imgPosY: 0, imgZoom: 1, scale: 1, isCropping: false, cropBaseW: Math.round(sW), cropBaseH: Math.round(sH) }, style: { width: Math.round(sW), height: Math.round(sH), backgroundColor: 'transparent', padding: 0, borderColor: 'transparent', borderWidth: 0 } }]);
+                                    }
+                                    
                                     setIsShapeMenuOpen(false);
                                     setIsStampMenuOpen(false);
                                 }}
@@ -3269,7 +3317,8 @@ const newColor = e.target.value; setLevelData(prev => ({ ...prev, [currentLevel]
     </div>
 
     <button onClick={() => {
-        const newStamps = [...customStamps, { url: pendingStampData.url, category: activeCategory, width: pendingStampData.w, height: pendingStampData.h }];
+        // ★ 修正：templateData も一緒に保存する
+        const newStamps = [...customStamps, { url: pendingStampData.url, category: activeCategory, width: pendingStampData.w, height: pendingStampData.h, templateData: pendingStampData.templateData }];
         setCustomStamps(newStamps);
         localStorage.setItem('my-logic-stamps-v2', JSON.stringify({ stamps: newStamps, categories: stampCategories }));
         setPendingStampData(null);
