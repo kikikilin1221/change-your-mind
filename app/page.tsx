@@ -1102,7 +1102,29 @@ const updated = { ...files }; delete updated[id]; setFiles(updated); if (id === 
 
 const updateSelectedNodes = useCallback((newData: any, newStyle: any = {}, newPosition: any = null) => {
 lastActionRef.current = { type: 'updateNodes', args: [newData, newStyle, newPosition] }; // ★ F4用に記録
-setNodes((nds: any[]) => nds.map((n: any) => n.selected ? { ...n, position: { ...n.position, ...(newPosition || {}) }, data: { ...(n.data || {}), ...(typeof newData === 'function' ? newData(n.data) : newData) }, style: { ...(n.style || {}), ...newStyle } } : n));
+setNodes((nds: any[]) => nds.map((n: any) => {
+    if (!n.selected) return n;
+    
+    let updatedNode = { 
+        ...n, 
+        position: { ...n.position, ...(newPosition || {}) }, 
+        data: { ...(n.data || {}), ...(typeof newData === 'function' ? newData(n.data) : newData) }, 
+        style: { ...(n.style || {}), ...newStyle } 
+    };
+
+    // ★ 修正：数値入力によるサイズ変更を「絶対優先」させるための強制リセット
+    // 周囲の図形とのスナップやキャッシュを無視して、確実に数値を反映させる
+    if (newStyle.width !== undefined) {
+        updatedNode.width = newStyle.width;
+        updatedNode.measured = undefined; // 内部のサイズ記憶を破棄
+    }
+    if (newStyle.height !== undefined) {
+        updatedNode.height = newStyle.height;
+        updatedNode.measured = undefined; // 内部のサイズ記憶を破棄
+    }
+
+    return updatedNode;
+}));
 }, []);
 
 const updateEdgeDesign = useCallback((config: any) => {
