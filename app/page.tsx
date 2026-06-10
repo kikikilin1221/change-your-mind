@@ -382,37 +382,87 @@ const handleUngroupSelection = useCallback(() => {
     setTimeout(() => setSaveMessage(null), 2000);
 }, [nodes, takeSnapshot]);
 
-// ★ 修正：グループを「画像」ではなく「編集可能な図形テンプレート」として登録する
+// ★ 修正：グループの見た目を完全に1枚の図形（画像スタンプ）として平坦化して登録する
 const handleGroupToStamp = useCallback(() => {
     const activeGroup = nodes.find(n => n.selected && n.data?.isGroupContainer);
     if (!activeGroup) {
         alert('図形として登録するグループ（枠）を選択してください。');
         return;
     }
+    const groupEl = document.querySelector(`[data-id="${activeGroup.id}"]`) as HTMLElement;
+    if (!groupEl) return;
     
-    // 1. グループとその子要素、および内部の線を抽出
-    const childIds = activeGroup.data?.childIds || [];
-    const groupNodes = nodes.filter(n => n.id === activeGroup.id || childIds.includes(n.id));
-    const groupEdges = edges.filter(e => childIds.includes(e.source) && childIds.includes(e.target));
-    
-    const templateData = {
-        nodes: safeCloneNodes(groupNodes),
-        edges: safeCloneEdges(groupEdges)
-    };
-    
-    const w = activeGroup.measured?.width || Number(activeGroup.style?.width) || 200;
-    const h = activeGroup.measured?.height || Number(activeGroup.style?.height) || 100;
+    // 画面上の全ハンドルと選択枠を一時的に隠して綺麗な状態を作る
+    const style = document.createElement('style');
+    style.innerHTML = `
+        .react-flow__handle, .custom-handle, .custom-handle-target, .react-flow__resize-control { display: none !important; }
+        [data-id="${activeGroup.id}"] { border: none !important; background: transparent !important; }
+    `;
+    document.head.appendChild(style);
 
-    // 2. 視認用サムネイルの生成（画像化バグを回避するためクリーンなSVGアイコンを生成）
-    const svgString = `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">
-        <rect width="${w}" height="${h}" fill="#f8fafc" stroke="#3b82f6" stroke-width="4" stroke-dasharray="8 8" rx="12" />
-        <text x="50%" y="50%" font-family="sans-serif" font-size="16" font-weight="bold" fill="#1d4ed8" text-anchor="middle" dominant-baseline="middle">グループ図形</text>
-    </svg>`;
-    const dataUrl = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(svgString);
+    // グループの枠の正確な座標を取得
+    const rect = groupEl.getBoundingClientRect();
 
-    // 3. 準選抜パネルに送る
-    setPendingStampData({ url: dataUrl, w, h, templateData });
-}, [nodes, edges]);
+    // DOM更新を待ってから自動でピッタリ撮影
+    setTimeout(() => {
+        const htmlNode = document.documentElement;
+        const originalHtmlBg = htmlNode.style.backgroundColor;
+        const originalBodyBg = document.body.style.backgroundColor;
+        
+        htmlNode.style.backgroundColor = 'transparent';
+        document.body.style.backgroundColor = 'transparent';
+        
+        const ws = document.getElementById('main-editor-wrapper');
+        const origWsBg = ws ? ws.style.backgroundColor : '';
+        if (ws) ws.style.backgroundColor = 'transparent';
+        
+        const bgNode = document.querySelector('.react-flow__background') as HTMLElement;
+        if (bgNode) bgNode.style.display = 'none';
+
+        import('html2canvas').then(({ default: html2canvas }) => {
+            html2canvas(document.body, { 
+                x: rect.left, 
+                y: rect.top, 
+                width: rect.width, 
+                height: rect.height, 
+                backgroundColor: null, 
+                scale: 3 // 超高画質で平坦化
+            }).then(canvas => {
+                // UIを元に戻す
+                document.head.removeChild(style);
+                htmlNode.style.backgroundColor = originalHtmlBg;
+                document.body.style.backgroundColor = originalBodyBg;
+                if (ws) ws.style.backgroundColor = origWsBg;
+                if (bgNode) bgNode.style.display = 'block';
+
+                // 背景透過処理
+                const ctx = canvas.getContext('2d', { willReadFrequently: true });
+                if (ctx) {
+                    const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+                    const data = imgData.data;
+                    const bgR = data[0], bgG = data[1], bgB = data[2]; 
+                    for (let i = 0; i < data.length; i += 4) {
+                        const r = data[i], g = data[i+1], b = data[i+2], a = data[i+3];
+                        if (a === 0) continue;
+                        const diff = Math.sqrt(Math.pow(r - bgR, 2) + Math.pow(g - bgG, 2) + Math.pow(b - bgB, 2));
+                        if (diff < 15) { data[i+3] = 0; } 
+                        else if (diff < 80) { data[i+3] = Math.floor(a * ((diff - 15) / 65)); }
+                    }
+                    ctx.putImageData(imgData, 0, 0);
+                }
+
+                const dataUrl = canvas.toDataURL('image/png');
+                const flowW = activeGroup.measured?.width || Number(activeGroup.style?.width) || 200;
+                const flowH = activeGroup.measured?.height || Number(activeGroup.style?.height) || 100;
+                
+                setPendingStampData({ url: dataUrl, w: flowW, h: flowH }); 
+            }).catch(err => {
+                console.error(err);
+                document.head.removeChild(style);
+            });
+        });
+    }, 100);
+}, [nodes]);
 
 const [saveMessage, setSaveMessage] = useState<string | null>(null);
 const [customColors, setCustomColors] = useState<string[]>([]);
@@ -448,7 +498,7 @@ const drawBtnDragRef = useRef<{ startX: number, startY: number, initX: number, i
 const [customStamps, setCustomStamps] = useState<any[]>([]);
 const [stampCategories, setStampCategories] = useState<string[]>(['未分類']);
 const [activeCategory, setActiveCategory] = useState<string>('未分類');
-const [pendingStampData, setPendingStampData] = useState<{url: string, w: number, h: number, templateData?: any} | null>(null); // ★ 修正：図形データ保持枠を追加
+const [pendingStampData, setPendingStampData] = useState<{url: string, w: number, h: number} | null>(null);
 
 // ★ 追加：背景色の準選抜用ステート
 const [bgCustomColors, setBgCustomColors] = useState<string[]>([]);
@@ -3170,52 +3220,20 @@ const newColor = e.target.value; setLevelData(prev => ({ ...prev, [currentLevel]
                     customStamps.filter(s => s.category === activeCategory).map((stamp, i) => (
                         <div key={i} style={{ position: 'relative' }}>
                             <img src={stamp.url} style={{ height: '50px', border: '1px solid #ccc', borderRadius: '4px', cursor: 'pointer', backgroundColor: '#fff' }} 
-                                onClick={() => {
-                                    takeSnapshot();
-                                    const center = screenToFlowPosition({ x: window.innerWidth / 2, y: window.innerHeight / 2 });
-                                    const maxZ = Math.max(0, ...nodesRef.current.map((n: any) => Number(n.zIndex) || 0));
-                                    const sW = stamp.width || 200;
-                                    const sH = stamp.height || 100;
-
-                                    if (stamp.templateData) {
-                                        // ★ 修正：画像ではなく、保存された構造データから新しくIDを振り直して図形群を展開する
-                                        const idMap = new Map<string, string>();
-                                        const newNodes = stamp.templateData.nodes.map((original: any) => { 
-                                            const newId = `node-${Date.now()}-${Math.random()}`; 
-                                            idMap.set(original.id, newId);
-                                            return { ...original, id: newId, selected: true }; 
-                                        });
-
-                                        const finalNodes = newNodes.map((n: any) => {
-                                            if (n.data?.isGroupContainer) {
-                                                n.data.childIds = n.data.childIds.map((cid: string) => idMap.get(cid) || cid);
-                                                n.position = { x: center.x - sW/2, y: center.y - sH/2 };
-                                                n.zIndex = maxZ + 1;
-                                            } else if (n.parentId) {
-                                                n.parentId = idMap.get(n.parentId) || n.parentId;
-                                                n.zIndex = maxZ + 2;
-                                            }
-                                            return n;
-                                        });
-
-                                        const newEdges = (stamp.templateData.edges || []).map((originalEdge: any) => {
-                                            if (idMap.has(originalEdge.source) && idMap.has(originalEdge.target)) {
-                                                return { ...originalEdge, id: `edge-${Date.now()}-${Math.random()}`, source: idMap.get(originalEdge.source)!, target: idMap.get(originalEdge.target)!, selected: true, zIndex: maxZ + 1 };
-                                            }
-                                            return null;
-                                        }).filter(Boolean);
-
-                                        setNodes((nds: any[]) => [...nds.map((n: any) => ({...n, selected: false})), ...finalNodes]);
-                                        setEdges((eds: any[]) => [...eds.map((e: any) => ({...e, selected: false})), ...newEdges]);
-                                    } else {
-                                        // 通常の画像読み取りスタンプの場合
+                                    onClick={() => {
+                                        takeSnapshot();
+                                        const center = screenToFlowPosition({ x: window.innerWidth / 2, y: window.innerHeight / 2 });
+                                        const maxZ = Math.max(0, ...nodesRef.current.map((n: any) => Number(n.zIndex) || 0));
+                                        const sW = stamp.width || 200;
+                                        const sH = stamp.height || 100;
+                                        
+                                        // ★ 完全に1つの図形(画像ノード)として展開。バラバラにならず、拡大縮小も容易。
                                         setNodes((nds:any[]) => [...nds.map((n:any) => ({...n, selected: false})), { id: `img-${Date.now()}`, position: { x: center.x - sW/2, y: center.y - sH/2 }, zIndex: maxZ + 1, selected: true, data: { isImage: true, imageUrl: stamp.url, imgPosX: 0, imgPosY: 0, imgZoom: 1, scale: 1, isCropping: false, cropBaseW: Math.round(sW), cropBaseH: Math.round(sH) }, style: { width: Math.round(sW), height: Math.round(sH), backgroundColor: 'transparent', padding: 0, borderColor: 'transparent', borderWidth: 0 } }]);
-                                    }
-                                    
-                                    setIsShapeMenuOpen(false);
-                                    setIsStampMenuOpen(false);
-                                }}
-                            />
+                                        
+                                        setIsShapeMenuOpen(false);
+                                        setIsStampMenuOpen(false);
+                                    }}
+                                />
                             <button onClick={() => { const ns = customStamps.filter(s => s.url !== stamp.url); setCustomStamps(ns); localStorage.setItem('my-logic-stamps-v2', JSON.stringify({ stamps: ns, categories: stampCategories })); }} style={{ position: 'absolute', top: -8, right: -8, background: '#ef4444', color: 'white', borderRadius: '50%', width: '20px', height: '20px', fontSize: '12px', fontWeight: 'bold', border: '2px solid #fff', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 2px 4px rgba(0,0,0,0.2)' }}>×</button>
                         </div>
                     ))
@@ -3316,9 +3334,8 @@ const newColor = e.target.value; setLevelData(prev => ({ ...prev, [currentLevel]
         }} style={{ padding: '6px 10px', fontSize: '12px', background: '#e2e8f0', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}>作成</button>
     </div>
 
-    <button onClick={() => {
-        // ★ 修正：templateData も一緒に保存する
-        const newStamps = [...customStamps, { url: pendingStampData.url, category: activeCategory, width: pendingStampData.w, height: pendingStampData.h, templateData: pendingStampData.templateData }];
+   <button onClick={() => {
+        const newStamps = [...customStamps, { url: pendingStampData.url, category: activeCategory, width: pendingStampData.w, height: pendingStampData.h }];
         setCustomStamps(newStamps);
         localStorage.setItem('my-logic-stamps-v2', JSON.stringify({ stamps: newStamps, categories: stampCategories }));
         setPendingStampData(null);
