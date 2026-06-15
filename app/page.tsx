@@ -3123,6 +3123,11 @@ el.innerHTML = currentVal;
 <button onClick={redo} disabled={future.length === 0} style={{ ...actionBtnStyle, opacity: future.length === 0 ? 0.4 : 1, cursor: future.length === 0 ? 'default' : 'pointer' }}>↪️ 進む</button>
 <div style={{ width: '1px', height: '24px', backgroundColor: '#ddd', margin: '0 2px' }} />
 <button onClick={handleManualSave} style={{ ...primaryBtnStyle, backgroundColor: '#059669', boxShadow: '0 2px 4px rgba(5, 150, 105, 0.3)' }}>💾 保存</button>
+
+{/* ★ 追加：JSONファイルとしての出力と読み込みボタン */}
+<button onClick={exportData} style={{ ...actionBtnStyle, color: '#059669', border: '1px solid #059669' }}>📤 JSON書出</button>
+<button onClick={() => jsonImportRef.current?.click()} style={{ ...actionBtnStyle, color: '#3b82f6', border: '1px solid #3b82f6' }}>📥 読込</button>
+
 <button onClick={handleGroupSelection} style={{ ...actionBtnStyle, backgroundColor: '#3b82f6', color: '#fff', border: 'none' }}>🔒 グループ化</button>
 <button onClick={handleUngroupSelection} style={{ ...actionBtnStyle, backgroundColor: '#64748b', color: '#fff', border: 'none' }}>🔓 グループ解除</button>
 <button onClick={handleGroupToStamp} style={{ ...actionBtnStyle, backgroundColor: '#f59e0b', color: '#fff', border: 'none', boxShadow: '0 2px 4px rgba(245, 158, 11, 0.3)' }}>🗃️ 図形として登録</button>
