@@ -526,6 +526,38 @@ const sketchRef = useRef<any>(null);
 const [layers, setLayers] = useState<{id: string, name: string, visible: boolean, fileId?: string, levelId?: string}[]>([]);
 const [activeLayerId, setActiveLayerId] = useState<string | null>(null);
 
+// 描画レイヤーからパス情報を抽出するユーティリティ
+const getLayersPaths = useCallback(async () => {
+    const result: Record<string, any> = {};
+    try {
+        const relevant = layers.filter(l => l.fileId === activeFileId && l.levelId === currentLevel);
+        for (const l of relevant) {
+            const ref = canvasRefs.current[l.id];
+            if (!ref) continue;
+            // try standard ReactSketchCanvas methods
+            if (typeof ref.exportPaths === 'function') {
+                try {
+                    result[l.id] = { paths: await ref.exportPaths() };
+                    continue;
+                } catch(_) {}
+            }
+            if (typeof ref.exportPathsAsSVG === 'function') {
+                try {
+                    result[l.id] = { svg: await ref.exportPathsAsSVG() };
+                    continue;
+                } catch(_) {}
+            }
+            if (typeof ref.toDataURL === 'function') {
+                try {
+                    result[l.id] = { image: ref.toDataURL() };
+                    continue;
+                } catch(_) {}
+            }
+        }
+    } catch (e) { console.error(e); }
+    return result;
+}, [layers, activeFileId, currentLevel]);
+
 // ★ 新機能用ステート（枠線・定規・論理記号）
 const [shapeStrokeColor, setShapeStrokeColor] = useState('#000000');
 const [shapeStrokeWidth, setShapeStrokeWidth] = useState(2);
@@ -1079,15 +1111,55 @@ setSaveMessage('💾 保存が完了しました');
 setTimeout(() => setSaveMessage(null), 2000);
 }, [activeFileId, currentLevel, levelData]);
 
-const exportData = useCallback(() => {
-handleManualSave(); 
-setTimeout(() => {
-const currentData = localStorage.getItem('my-logic-files'); if (!currentData) return;
-const blob = new Blob([currentData], { type: "application/json" }); const url = URL.createObjectURL(blob);
-const a = document.createElement('a'); a.href = url; a.download = `logic-notes-backup-${new Date().toISOString().slice(0,10)}.json`;
-document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
-}, 100);
-}, [handleManualSave]);
+// ★ 修正：確実に最新のデータ（描画含む）を生成し、直接JSONとして書き出す
+const exportData = useCallback(async () => {
+    const pathsData = await getLayersPaths(); // 最新の手書き描画を抽出
+    setFiles(prev => {
+        const currentFileData = prev[activeFileId]; 
+        if (!currentFileData) return prev;
+        
+        const updatedLevelData = { 
+            ...levelData, 
+            [currentLevel]: { 
+                nodes: safeCloneNodes(nodesRef.current), 
+                edges: safeCloneEdges(edgesRef.current), 
+                bgColor: levelData[currentLevel]?.bgColor, 
+                label: currentLabelRef.current, 
+                drawPaths: pathsData 
+            } 
+        };
+        
+        // ★ 読み込み時に「今開いているノート」が必ず最初に開くように、順序を入れ替えて保存する
+        const { [activeFileId]: current, ...restFiles } = prev;
+        const updatedFiles = { 
+            [activeFileId]: { 
+                ...currentFileData, 
+                levelData: updatedLevelData, 
+                currentLevel, 
+                currentLabel: currentLabelRef.current 
+            },
+            ...restFiles
+        };
+        
+        localStorage.setItem('my-logic-files', JSON.stringify(updatedFiles));
+        localStorage.setItem('my-logic-active-id', activeFileId);
+        
+        // ★ 古いストレージデータではなく、ここで計算した完璧な「最新データ」を書き出す
+        const blob = new Blob([JSON.stringify(updatedFiles)], { type: "application/json" }); 
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a'); 
+        a.href = url; 
+        a.download = `logic-notes-backup-${new Date().toISOString().slice(0,10)}.json`;
+        document.body.appendChild(a); 
+        a.click(); 
+        document.body.removeChild(a); 
+        URL.revokeObjectURL(url);
+
+        return updatedFiles;
+    });
+    setSaveMessage('📤 エクスポートが完了しました');
+    setTimeout(() => setSaveMessage(null), 2000);
+}, [activeFileId, currentLevel, levelData, getLayersPaths]);
 
 const importData = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
 const file = e.target.files?.[0]; if (!file) return;
