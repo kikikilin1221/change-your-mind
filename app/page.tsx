@@ -451,6 +451,38 @@ const handleGroupToStamp = useCallback(() => {
     }, 100);
 }, [nodes]);
 
+// ★ 追加：テキスト最長行に合わせてノードの横幅を自動ジャストフィットさせる関数
+const handleAutoFitWidth = useCallback(() => {
+    const node = nodes.find((n: any) => n.selected) || null;
+    if (!node) return;
+    takeSnapshot();
+
+    // 画面外に測定用の透明ボックスを作り、改行込みの「一番右に飛び出ているピクセル」を精密に測る
+    const measurer = document.createElement('div');
+    measurer.className = 'html-content';
+    measurer.style.position = 'absolute';
+    measurer.style.left = '-9999px';
+    measurer.style.top = '-9999px';
+    measurer.style.width = 'max-content'; // 改行されるまで横に伸びる魔法の設定
+    measurer.style.height = 'auto';
+    measurer.style.whiteSpace = 'pre-wrap';
+    measurer.style.fontFamily = node.style?.fontFamily || 'sans-serif';
+    measurer.style.fontSize = node.style?.fontSize || '14px';
+    measurer.style.fontWeight = node.style?.fontWeight || 'normal';
+    measurer.style.lineHeight = '1.2';
+    measurer.style.padding = '0px';
+    measurer.innerHTML = node.data?.content || 'テキスト';
+
+    document.body.appendChild(measurer);
+    const exactWidth = measurer.getBoundingClientRect().width;
+    document.body.removeChild(measurer);
+
+    // 左右の快適な余白バッファ（18px）を足してジャストサイズを算出
+    const fittedW = Math.max(40, Math.ceil(exactWidth + 18));
+
+    updateSelectedNodes({}, { width: fittedW });
+}, [nodes, takeSnapshot]);
+
 const [saveMessage, setSaveMessage] = useState<string | null>(null);
 const [customColors, setCustomColors] = useState<string[]>([]);
 const [tempColor, setTempColor] = useState('#f59e0b');
@@ -2760,6 +2792,12 @@ style={{ cursor: creationStep ? 'crosshair' : 'default' }}
             <input type="number" value={Math.round(primaryNode.measured?.height || Number(primaryNode.style?.height) || 100)} onChange={e => { const val = parseInt(e.target.value); if (!isNaN(val)) { takeSnapshot(); updateSelectedNodes({}, { height: val }); } }} style={{flex:1, padding:'4px', fontSize:'11px', border:'1px solid #cbd5e1', borderRadius:'4px', outline:'none'}} />
         </div>
     </div>
+    {/* ★ 追加：テキスト自動ジャストフィットボタン（図形や表以外のテキスト時に出現） */}
+    {!primaryNode.data?.isShape && !primaryNode.data?.isImage && !primaryNode.data?.isTable && (
+        <button onClick={handleAutoFitWidth} style={{ width: '100%', padding: '7px', fontSize: '11px', background: '#e0e7ff', color: '#3730a3', border: '1px solid #c7d2fe', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold', transition: 'all 0.2s', boxShadow: '0 1px 2px rgba(0,0,0,0.05)' }}>
+            ↔️ 文字の最長幅に自動フィット
+        </button>
+    )}
 </div>
 
 <div style={{ padding: '10px', background: '#fff7ed', borderRadius: '8px', marginBottom: '15px', border: '1px solid #fed7aa' }}>
