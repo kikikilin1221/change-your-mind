@@ -213,7 +213,42 @@ const QUICK_TEXT_COLORS = ['#000000', '#ef4444', '#eab308', '#10b981', '#3b82f6'
 
 type TableActionType = { id: string; type: string; startX: number; startY: number; startR: number; startC: number; minC: number; maxC: number; minR: number; maxR: number; initWidths: number[]; initHeights: number[]; };
 
+// --- ★ 追加：大容量保存用 IndexedDB ユーティリティ ---
+const DB_NAME = 'MyLogicAppDB';
+const STORE_NAME = 'MyLogicStore';
+
+const initDB = () => {
+    return new Promise<IDBDatabase>((resolve, reject) => {
+        const request = indexedDB.open(DB_NAME, 1);
+        request.onupgradeneeded = (e: any) => { e.target.result.createObjectStore(STORE_NAME); };
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+    });
+};
+
+const dbSet = async (key: string, val: any) => {
+    const db = await initDB();
+    return new Promise<void>((resolve, reject) => {
+        const tx = db.transaction(STORE_NAME, 'readwrite');
+        tx.objectStore(STORE_NAME).put(val, key);
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error);
+    });
+};
+
+const dbGet = async (key: string) => {
+    const db = await initDB();
+    return new Promise<any>((resolve, reject) => {
+        const tx = db.transaction(STORE_NAME, 'readonly');
+        const req = tx.objectStore(STORE_NAME).get(key);
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => reject(req.error);
+    });
+};
+// ----------------------------------------------------
+
 function FlowEditor() {
+
 const { setViewport, getZoom, screenToFlowPosition, getViewport } = useReactFlow();
 const transform = useStore(s => s.transform); // ★追加：画面のズーム・パン位置をリアルタイム取得
 const fileInputRef = useRef<HTMLInputElement>(null);
@@ -527,27 +562,37 @@ useEffect(() => { const saved = localStorage.getItem('my-logic-bg-colors'); if (
 const [borderCustomColors, setBorderCustomColors] = useState<string[]>([]);
 useEffect(() => { const saved = localStorage.getItem('my-logic-border-colors'); if (saved) { try { setBorderCustomColors(JSON.parse(saved)); } catch(e){} } }, []);
 
+// ★ 修正：図形スタンプを大容量の IndexedDB から読み込む（古いデータも自動引き継ぎ）
 useEffect(() => {
-    const savedStamps = localStorage.getItem('my-logic-stamps-v2');
-    if (savedStamps) { 
-        try { 
-            const parsed = JSON.parse(savedStamps);
-            setCustomStamps(parsed.stamps || []);
-            setStampCategories(parsed.categories || ['未分類']);
-        } catch(e){} 
-    } else {
-        const oldStamps = localStorage.getItem('my-logic-stamps');
-        if (oldStamps) {
-            try {
-                const parsedOld = JSON.parse(oldStamps);
-                const migrated = parsedOld.map((url:string) => ({ url, category: '未分類' }));
-                setCustomStamps(migrated);
-            } catch(e) {}
-        }
-    }
+    const loadStamps = async () => {
+        try {
+            let parsed = await dbGet('my-logic-stamps-v2');
+            if (!parsed) {
+                // 古い localStorage にデータがあれば救出してDBに引っ越し
+                const savedStamps = localStorage.getItem('my-logic-stamps-v2');
+                if (savedStamps) {
+                    parsed = JSON.parse(savedStamps);
+                    await dbSet('my-logic-stamps-v2', parsed);
+                } else {
+                    const oldStamps = localStorage.getItem('my-logic-stamps');
+                    if (oldStamps) {
+                        const parsedOld = JSON.parse(oldStamps);
+                        parsed = { stamps: parsedOld.map((url:string) => ({ url, category: '未分類' })), categories: ['未分類'] };
+                        await dbSet('my-logic-stamps-v2', parsed);
+                    }
+                }
+            }
+            if (parsed) {
+                setCustomStamps(parsed.stamps || []);
+                setStampCategories(parsed.categories || ['未分類']);
+            }
+        } catch(e) { console.error(e); }
+    };
+    loadStamps();
 }, []);
 
 // ★ ゴミ箱（Trash）機能のステート
+
 const [trashPos, setTrashPos] = useState({ left: 20, top: -1000 }); // サーバー側では適当な固定値にしておく
 useEffect(() => { setTrashPos({ left: 20, top: window.innerHeight - 80 }); }, []); // ブラウザ側で正しく計算される
 const trashDragRef = useRef<{ startX: number, startY: number, initX: number, initY: number } | null>(null);
@@ -1119,33 +1164,51 @@ setPartialFontSize(parseInt(String(size || 14)));
 }, [primaryNode?.id, primaryNode?.style?.fontSize, primaryNode?.data?.isTable]);
 
 useEffect(() => {
-const saved = localStorage.getItem('my-logic-files');
-if (saved) {
-const parsed = JSON.parse(saved); setFiles(parsed);
-const lastId = localStorage.getItem('my-logic-active-id') || 'default';
-if (parsed[lastId]) loadFileInitial(lastId, parsed);
-} else {
-const initial = { 'default': { name: '無題のノート', levelData: { root: { nodes: [], edges: [], bgColor: '#ffffff', label: 'TOP層' } }, currentLevel: 'root', currentLabel: 'TOP層' } };
-setFiles(initial); localStorage.setItem('my-logic-files', JSON.stringify(initial));
-}
+    const loadFiles = async () => {
+        try {
+            let parsed = await dbGet('my-logic-files');
+            if (!parsed) {
+                // 古い localStorage にデータがあれば救出して引っ越し
+                const saved = localStorage.getItem('my-logic-files');
+                if (saved) {
+                    parsed = JSON.parse(saved);
+                    await dbSet('my-logic-files', parsed);
+                }
+            }
+            
+            if (parsed) {
+                setFiles(parsed);
+                let lastId = await dbGet('my-logic-active-id');
+                if (!lastId) lastId = localStorage.getItem('my-logic-active-id') || 'default';
+                if (parsed[lastId]) loadFileInitial(lastId, parsed);
+            } else {
+                const initial = { 'default': { name: '無題のノート', levelData: { root: { nodes: [], edges: [], bgColor: '#ffffff', label: 'TOP層' } }, currentLevel: 'root', currentLabel: 'TOP層' } };
+                setFiles(initial); 
+                await dbSet('my-logic-files', initial);
+            }
+        } catch(e) { console.error(e); }
+    };
+    loadFiles();
 }, []);
 
 const handleManualSave = useCallback(() => {
-setFiles(prev => {
-const currentFileData = prev[activeFileId]; if (!currentFileData) return prev;
-const updatedLevelData = { ...levelData, [currentLevel]: { nodes: safeCloneNodes(nodesRef.current), edges: safeCloneEdges(edgesRef.current), bgColor: levelData[currentLevel]?.bgColor, label: currentLabelRef.current } };
-const updatedFiles = { ...prev, [activeFileId]: { ...currentFileData, levelData: updatedLevelData, currentLevel, currentLabel: currentLabelRef.current } };
-localStorage.setItem('my-logic-files', JSON.stringify(updatedFiles));
-localStorage.setItem('my-logic-active-id', activeFileId);
-return updatedFiles;
-});
-setSaveMessage('💾 保存が完了しました');
-setTimeout(() => setSaveMessage(null), 2000);
+    setFiles(prev => {
+        const currentFileData = prev[activeFileId]; if (!currentFileData) return prev;
+        const updatedLevelData = { ...levelData, [currentLevel]: { nodes: safeCloneNodes(nodesRef.current), edges: safeCloneEdges(edgesRef.current), bgColor: levelData[currentLevel]?.bgColor, label: currentLabelRef.current } };
+        const updatedFiles = { ...prev, [activeFileId]: { ...currentFileData, levelData: updatedLevelData, currentLevel, currentLabel: currentLabelRef.current } };
+        
+        // ★ localStorage の代わりに IndexedDB へ非同期でサクサク保存
+        dbSet('my-logic-files', updatedFiles).catch(console.error);
+        dbSet('my-logic-active-id', activeFileId).catch(console.error);
+        
+        return updatedFiles;
+    });
+    setSaveMessage('💾 保存が完了しました');
+    setTimeout(() => setSaveMessage(null), 2000);
 }, [activeFileId, currentLevel, levelData]);
 
-// ★ 修正：確実に最新のデータ（描画含む）を生成し、直接JSONとして書き出す
 const exportData = useCallback(async () => {
-    const pathsData = await getLayersPaths(); // 最新の手書き描画を抽出
+    const pathsData = await getLayersPaths(); 
     setFiles(prev => {
         const currentFileData = prev[activeFileId]; 
         if (!currentFileData) return prev;
@@ -1161,7 +1224,6 @@ const exportData = useCallback(async () => {
             } 
         };
         
-        // ★ 読み込み時に「今開いているノート」が必ず最初に開くように、順序を入れ替えて保存する
         const { [activeFileId]: current, ...restFiles } = prev;
         const updatedFiles = { 
             [activeFileId]: { 
@@ -1173,10 +1235,10 @@ const exportData = useCallback(async () => {
             ...restFiles
         };
         
-        localStorage.setItem('my-logic-files', JSON.stringify(updatedFiles));
-        localStorage.setItem('my-logic-active-id', activeFileId);
+        // ★ IndexedDB にも状態をセーブ
+        dbSet('my-logic-files', updatedFiles).catch(console.error);
+        dbSet('my-logic-active-id', activeFileId).catch(console.error);
         
-        // ★ 古いストレージデータではなく、ここで計算した完璧な「最新データ」を書き出す
         const blob = new Blob([JSON.stringify(updatedFiles)], { type: "application/json" }); 
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a'); 
@@ -1194,20 +1256,25 @@ const exportData = useCallback(async () => {
 }, [activeFileId, currentLevel, levelData, getLayersPaths]);
 
 const importData = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-const file = e.target.files?.[0]; if (!file) return;
-const reader = new FileReader();
-reader.onload = (ev) => {
-try {
-const parsed = JSON.parse(ev.target?.result as string);
-if (parsed && typeof parsed === 'object') {
-setFiles(parsed); localStorage.setItem('my-logic-files', JSON.stringify(parsed));
-const firstId = Object.keys(parsed)[0];
-if (firstId) { localStorage.setItem('my-logic-active-id', firstId); loadFileInitial(firstId, parsed); }
-alert('🎉 データを正常に読み込みました！');
-}
-} catch(err) { alert('❌ ファイルの読み込みに失敗しました。'); }
-};
-reader.readAsText(file); if (jsonImportRef.current) jsonImportRef.current.value = ''; 
+    const file = e.target.files?.[0]; if (!file) return;
+    const reader = new FileReader();
+    reader.onload = async (ev) => {
+        try {
+            const parsed = JSON.parse(ev.target?.result as string);
+            if (parsed && typeof parsed === 'object') {
+                setFiles(parsed); 
+                // ★ 読み込んだデータを IndexedDB に保存
+                await dbSet('my-logic-files', parsed);
+                const firstId = Object.keys(parsed)[0];
+                if (firstId) { 
+                    await dbSet('my-logic-active-id', firstId); 
+                    loadFileInitial(firstId, parsed); 
+                }
+                alert('🎉 データを正常に読み込みました！');
+            }
+        } catch(err) { alert('❌ ファイルの読み込みに失敗しました。'); }
+    };
+    reader.readAsText(file); if (jsonImportRef.current) jsonImportRef.current.value = ''; 
 }, []);
 
 const togglePrintMode = useCallback(() => {
@@ -3348,7 +3415,8 @@ const newColor = e.target.value; setLevelData(prev => ({ ...prev, [currentLevel]
                                         setIsStampMenuOpen(false);
                                     }}
                                 />
-                            <button onClick={() => { const ns = customStamps.filter(s => s.url !== stamp.url); setCustomStamps(ns); localStorage.setItem('my-logic-stamps-v2', JSON.stringify({ stamps: ns, categories: stampCategories })); }} style={{ position: 'absolute', top: -8, right: -8, background: '#ef4444', color: 'white', borderRadius: '50%', width: '20px', height: '20px', fontSize: '12px', fontWeight: 'bold', border: '2px solid #fff', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 2px 4px rgba(0,0,0,0.2)' }}>×</button>
+                            {/* ★ localStorage から dbSet に変更 */}
+                            <button onClick={() => { const ns = customStamps.filter(s => s.url !== stamp.url); setCustomStamps(ns); dbSet('my-logic-stamps-v2', { stamps: ns, categories: stampCategories }); }} style={{ position: 'absolute', top: -8, right: -8, background: '#ef4444', color: 'white', borderRadius: '50%', width: '20px', height: '20px', fontSize: '12px', fontWeight: 'bold', border: '2px solid #fff', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 2px 4px rgba(0,0,0,0.2)' }}>×</button>
                         </div>
                     ))
                 )}
@@ -3361,7 +3429,7 @@ const newColor = e.target.value; setLevelData(prev => ({ ...prev, [currentLevel]
                         const newCats = [...stampCategories, newCat];
                         setStampCategories(newCats);
                         setActiveCategory(newCat);
-                        localStorage.setItem('my-logic-stamps-v2', JSON.stringify({ stamps: customStamps, categories: newCats }));
+                        dbSet('my-logic-stamps-v2', { stamps: customStamps, categories: newCats });
                     }
                 }} style={{ fontSize: '11px', padding: '4px 8px', background: '#fff', border: '1px solid #ccc', borderRadius: '4px', cursor: 'pointer' }}>＋ 新しい分類を作成</button>
 
@@ -3373,7 +3441,7 @@ const newColor = e.target.value; setLevelData(prev => ({ ...prev, [currentLevel]
                             setCustomStamps(newStamps);
                             setStampCategories(newCats);
                             setActiveCategory('未分類');
-                            localStorage.setItem('my-logic-stamps-v2', JSON.stringify({ stamps: newStamps, categories: newCats }));
+                            dbSet('my-logic-stamps-v2', { stamps: newStamps, categories: newCats });
                         }
                     }} style={{ fontSize: '11px', padding: '4px 8px', background: '#fef2f2', color: '#dc2626', border: '1px solid #fca5a5', borderRadius: '4px', cursor: 'pointer' }}>🗑️ この分類を削除</button>
                 )}
@@ -3384,6 +3452,7 @@ const newColor = e.target.value; setLevelData(prev => ({ ...prev, [currentLevel]
 )}
 
 {/* ★ 追加：枠線・定規・読み取り時の補助線（ラバーバンド） */}
+
 {creationStep && creationStep.rawX !== undefined && creationStep.rawY !== undefined && previewMousePos && (
     <div style={{ position: 'fixed', inset: 0, zIndex: 10000, pointerEvents: 'none' }}>
         {(() => {
@@ -3451,7 +3520,8 @@ const newColor = e.target.value; setLevelData(prev => ({ ...prev, [currentLevel]
    <button onClick={() => {
         const newStamps = [...customStamps, { url: pendingStampData.url, category: activeCategory, width: pendingStampData.w, height: pendingStampData.h }];
         setCustomStamps(newStamps);
-        localStorage.setItem('my-logic-stamps-v2', JSON.stringify({ stamps: newStamps, categories: stampCategories }));
+        // ★ localStorage から dbSet に変更
+        dbSet('my-logic-stamps-v2', { stamps: newStamps, categories: stampCategories });
         setPendingStampData(null);
         setSaveMessage(`「${activeCategory}」に保存しました！`);
         setTimeout(() => setSaveMessage(null), 2000);
