@@ -517,6 +517,42 @@ const handleAutoFitWidth = useCallback(() => {
 
     updateSelectedNodes({}, { width: fittedW });
 }, [nodes, takeSnapshot]);
+// ★ 追加：テキストの行数（高さ）に合わせてノードの縦幅を自動ジャストフィットさせる関数
+const handleAutoFitHeight = useCallback(() => {
+    const node = nodes.find((n: any) => n.selected) || null;
+    if (!node) return;
+    takeSnapshot();
+
+    // 現在の「横幅」を取得（この幅の中でどれだけ改行されるかを計算するため）
+    const currentW = node.measured?.width || Number(node.style?.width) || 200;
+
+    // 画面外に測定用の透明ボックスを作る
+    const measurer = document.createElement('div');
+    measurer.className = 'html-content';
+    measurer.style.position = 'absolute';
+    measurer.style.left = '-9999px';
+    measurer.style.top = '-9999px';
+    measurer.style.width = `${currentW}px`; // ★ 現在の横幅で固定して改行を完全に再現
+    measurer.style.height = 'auto';
+    measurer.style.whiteSpace = 'pre-wrap';
+    measurer.style.fontFamily = node.style?.fontFamily || 'sans-serif';
+    measurer.style.fontSize = node.style?.fontSize || '14px';
+    measurer.style.fontWeight = node.style?.fontWeight || 'normal';
+    measurer.style.lineHeight = '1.2';
+    measurer.style.padding = node.style?.padding || '4px'; // 図形と同じ余白を設定
+    measurer.style.boxSizing = 'border-box'; // paddingをwidthに含めて正確に計算
+    measurer.innerHTML = node.data?.content || 'テキスト';
+
+    document.body.appendChild(measurer);
+    // 実際の描画高さを取得
+    const exactHeight = measurer.getBoundingClientRect().height;
+    document.body.removeChild(measurer);
+
+    // ボーダー分の微小なズレ（4px）を足して、はみ出しを「絶対」に防止する
+    const fittedH = Math.max(30, Math.ceil(exactHeight + 4));
+
+    updateSelectedNodes({}, { height: fittedH });
+}, [nodes, takeSnapshot]);
 
 const [saveMessage, setSaveMessage] = useState<string | null>(null);
 const [customColors, setCustomColors] = useState<string[]>([]);
@@ -2861,9 +2897,14 @@ style={{ cursor: creationStep ? 'crosshair' : 'default' }}
     </div>
     {/* ★ 追加：テキスト自動ジャストフィットボタン（図形や表以外のテキスト時に出現） */}
     {!primaryNode.data?.isShape && !primaryNode.data?.isImage && !primaryNode.data?.isTable && (
-        <button onClick={handleAutoFitWidth} style={{ width: '100%', padding: '7px', fontSize: '11px', background: '#e0e7ff', color: '#3730a3', border: '1px solid #c7d2fe', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold', transition: 'all 0.2s', boxShadow: '0 1px 2px rgba(0,0,0,0.05)' }}>
-            ↔️ 文字の最長幅に自動フィット
-        </button>
+        <div style={{ display: 'flex', gap: '6px', marginTop: '8px' }}>
+            <button onClick={handleAutoFitWidth} style={{ flex: 1, padding: '7px 4px', fontSize: '11px', background: '#e0e7ff', color: '#3730a3', border: '1px solid #c7d2fe', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold', transition: 'all 0.2s', boxShadow: '0 1px 2px rgba(0,0,0,0.05)' }}>
+                ↔️ 幅を合わせる
+            </button>
+            <button onClick={handleAutoFitHeight} style={{ flex: 1, padding: '7px 4px', fontSize: '11px', background: '#e0e7ff', color: '#3730a3', border: '1px solid #c7d2fe', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold', transition: 'all 0.2s', boxShadow: '0 1px 2px rgba(0,0,0,0.05)' }}>
+                ↕️ 高さを合わせる
+            </button>
+        </div>
     )}
 </div>
 
