@@ -548,8 +548,8 @@ const handleAutoFitHeight = useCallback(() => {
     const exactHeight = measurer.getBoundingClientRect().height;
     document.body.removeChild(measurer);
 
-    // ボーダー分の微小なズレ（4px）を足して、はみ出しを「絶対」に防止する
-    const fittedH = Math.max(30, Math.ceil(exactHeight + 4));
+    // ★ 修正：不要な隙間を削って、文字にギリギリまでタイトにジャストフィットさせる
+    const fittedH = Math.max(20, Math.ceil(exactHeight - 2));
 
     updateSelectedNodes({}, { height: fittedH });
 }, [nodes, takeSnapshot]);
