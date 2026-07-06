@@ -3028,7 +3028,8 @@ style={{ cursor: creationStep ? 'crosshair' : 'default' }}
 <label style={{fontSize:'10px', fontWeight: 'bold'}}>文字サイズ (px)</label>
 <div style={{display:'flex', alignItems:'center', gap:'8px', marginBottom: '15px'}}>
 <input type="range" min="10" max="100" value={partialFontSize} onChange={(e) => handleFontSizeChange(Number(e.target.value), partialFontSize, 'node')} style={{flex:1}} />
-<input type="number" min="10" max="100" value={partialFontSize} onChange={(e) => handleFontSizeChange(Number(e.target.value), partialFontSize, 'node')} style={{width:'40px', padding:'2px', fontSize:'11px', border:'1px solid #ccc', borderRadius:'4px'}} />
+{/* ★ 修正: 直接入力の max="100" を削除し、上限をなくす（3桁入力用に width を 50px に拡大） */}
+<input type="number" min="10" value={partialFontSize} onChange={(e) => handleFontSizeChange(Number(e.target.value), partialFontSize, 'node')} style={{width:'50px', padding:'2px', fontSize:'11px', border:'1px solid #ccc', borderRadius:'4px'}} />
 <button onMouseDown={(e) => e.preventDefault()} onClick={handleResetFormat} style={{fontSize:'10px', padding:'4px 6px', border:'1px solid #ccc', borderRadius:'4px', cursor:'pointer', background:'#fff', fontWeight:'bold'}}>標準へ</button>
 </div>
 </div>
@@ -3233,7 +3234,8 @@ el.innerHTML = currentVal;
 <label style={{fontSize:'10px', fontWeight: 'bold'}}>線の文字サイズ (px)</label>
 <div style={{display:'flex', alignItems:'center', gap:'8px', marginTop: '5px'}}>
 <input type="range" min="10" max="50" value={Number(selectedEdge.data?.fontSize || 14)} onChange={(e) => handleFontSizeChange(Number(e.target.value), Number(selectedEdge.data?.fontSize || 14), 'edge')} style={{flex:1}} />
-<input type="number" min="10" max="50" value={Number(selectedEdge.data?.fontSize || 14)} onChange={(e) => handleFontSizeChange(Number(e.target.value), Number(selectedEdge.data?.fontSize || 14), 'edge')} style={{width:'40px', padding:'2px', fontSize:'11px', border:'1px solid #ccc', borderRadius:'4px'}} />
+{/* ★ 修正: 直接入力の max="50" を削除し、上限をなくす（3桁入力用に width を 50px に拡大） */}
+<input type="number" min="10" value={Number(selectedEdge.data?.fontSize || 14)} onChange={(e) => handleFontSizeChange(Number(e.target.value), Number(selectedEdge.data?.fontSize || 14), 'edge')} style={{width:'50px', padding:'2px', fontSize:'11px', border:'1px solid #ccc', borderRadius:'4px'}} />
 </div>
 </div>
 
