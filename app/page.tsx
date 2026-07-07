@@ -492,13 +492,12 @@ const handleAutoFitWidth = useCallback(() => {
     if (!node) return;
     takeSnapshot();
 
-    // 画面外に測定用の透明ボックスを作り、改行込みの「一番右に飛び出ているピクセル」を精密に測る
     const measurer = document.createElement('div');
     measurer.className = 'html-content';
     measurer.style.position = 'absolute';
     measurer.style.left = '-9999px';
     measurer.style.top = '-9999px';
-    measurer.style.width = 'max-content'; // 改行されるまで横に伸びる魔法の設定
+    measurer.style.width = 'max-content';
     measurer.style.height = 'auto';
     measurer.style.whiteSpace = 'pre-wrap';
     measurer.style.fontFamily = node.style?.fontFamily || 'sans-serif';
@@ -512,49 +511,49 @@ const handleAutoFitWidth = useCallback(() => {
     const exactWidth = measurer.getBoundingClientRect().width;
     document.body.removeChild(measurer);
 
-    // 左右の快適な余白バッファ（18px）を足してジャストサイズを算出
     const fittedW = Math.max(40, Math.ceil(exactWidth + 18));
 
-    updateSelectedNodes({}, { width: fittedW });
+    // ★ 修正：横幅を合わせると同時に、文字を「左右中央揃え(hAlign)」にして手動ズレをリセットする
+    updateSelectedNodes({ textOffsetX: 0 }, { width: fittedW, hAlign: 'center' });
 }, [nodes, takeSnapshot]);
+
 // ★ 追加：テキストの行数（高さ）に合わせてノードの縦幅を自動ジャストフィットさせる関数
 const handleAutoFitHeight = useCallback(() => {
     const node = nodes.find((n: any) => n.selected) || null;
     if (!node) return;
     takeSnapshot();
 
-    // 現在の「横幅」を取得（この幅の中でどれだけ改行されるかを計算するため）
     const currentW = node.measured?.width || Number(node.style?.width) || 200;
 
-    // 画面外に測定用の透明ボックスを作る
     const measurer = document.createElement('div');
     measurer.className = 'html-content';
     measurer.style.position = 'absolute';
     measurer.style.left = '-9999px';
     measurer.style.top = '-9999px';
-    measurer.style.width = `${currentW}px`; // ★ 現在の横幅で固定して改行を完全に再現
+    measurer.style.width = `${currentW}px`;
     measurer.style.height = 'auto';
     measurer.style.whiteSpace = 'pre-wrap';
     measurer.style.fontFamily = node.style?.fontFamily || 'sans-serif';
     measurer.style.fontSize = node.style?.fontSize || '14px';
     measurer.style.fontWeight = node.style?.fontWeight || 'normal';
     measurer.style.lineHeight = '1.2';
-    measurer.style.padding = node.style?.padding || '4px'; // 図形と同じ余白を設定
-    measurer.style.boxSizing = 'border-box'; // paddingをwidthに含めて正確に計算
+    measurer.style.padding = node.style?.padding || '4px';
+    measurer.style.boxSizing = 'border-box';
     measurer.innerHTML = node.data?.content || 'テキスト';
 
     document.body.appendChild(measurer);
-    // 実際の描画高さを取得
     const exactHeight = measurer.getBoundingClientRect().height;
     document.body.removeChild(measurer);
 
-    // ★ 修正：不要な隙間を削って、文字にギリギリまでタイトにジャストフィットさせる
-    const fittedH = Math.max(20, Math.ceil(exactHeight - 2));
+    // ★ 修正：文字が下にはみ出さないよう数ピクセル(+2px)の余裕を持たせる
+    const fittedH = Math.max(24, Math.ceil(exactHeight + 2));
 
-    updateSelectedNodes({}, { height: fittedH });
+    // ★ 修正：縦幅を合わせると同時に、文字を「上下中央揃え(vAlign)」にして手動ズレをリセットする
+    updateSelectedNodes({ textOffsetY: 0 }, { height: fittedH, vAlign: 'center' });
 }, [nodes, takeSnapshot]);
 
 const [saveMessage, setSaveMessage] = useState<string | null>(null);
+
 const [customColors, setCustomColors] = useState<string[]>([]);
 const [tempColor, setTempColor] = useState('#f59e0b');
 // 🎨 描画（手書き）機能用ステートとRef
