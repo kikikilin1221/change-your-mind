@@ -259,6 +259,7 @@ const [isBottomBarOpen, setIsBottomBarOpen] = useState(true);
 
 const [isPrintMode, setIsPrintMode] = useState(false);
 const [isExecutingPrint, setIsExecutingPrint] = useState(false);
+const [printImageUrl, setPrintImageUrl] = useState<string | null>(null); // ★ 追加：印刷用スクショ画像の保存先
 const [isLassoMode, setIsLassoMode] = useState(false);
 const [isCursorHidden, setIsCursorHidden] = useState(false); // ★ 追加：カーソルON/OFF用のステート
 
@@ -1331,7 +1332,39 @@ return [...nds, { id: `print-zone-${Date.now()}`, type: 'printZone', position: {
 });
 }, []);
 
-const executePrint = useCallback(() => { clearSelection(); setIsExecutingPrint(true); setTimeout(() => { window.print(); setTimeout(() => { setIsExecutingPrint(false); }, 500); }, 1500); }, [clearSelection]);
+// ★ 修正：印刷時に画面全体を高画質なスクショ（画像）に変換してから印刷する
+const executePrint = useCallback(() => { 
+    clearSelection(); 
+    setIsExecutingPrint(true); 
+    
+    // UIの青い選択枠などが消えるのを待ってから撮影
+    setTimeout(() => {
+        const flowEl = document.querySelector('.react-flow') as HTMLElement;
+        if (!flowEl) { setIsExecutingPrint(false); return; }
+
+        import('html2canvas').then(({ default: html2canvas }) => {
+            html2canvas(flowEl, { 
+                backgroundColor: levelData[currentLevel]?.bgColor || '#ffffff', 
+                scale: 2, // 高画質でキャプチャ
+                // コントロールボタンなどの不要なUIを画像から除外する
+                ignoreElements: (el) => el.classList.contains('react-flow__panel') || el.classList.contains('react-flow__controls') || el.classList.contains('no-print')
+            }).then(canvas => {
+                setPrintImageUrl(canvas.toDataURL('image/png'));
+                // 画像が画面に表示されるのを待ってから印刷ダイアログを開く
+                setTimeout(() => {
+                    window.print(); 
+                    setTimeout(() => { 
+                        setIsExecutingPrint(false); 
+                        setPrintImageUrl(null); // 印刷が終わったら画像を破棄
+                    }, 500); 
+                }, 500);
+            }).catch(err => {
+                console.error(err);
+                setIsExecutingPrint(false);
+            });
+        });
+    }, 500);
+}, [clearSelection, currentLevel, levelData]);
 
 const loadFileInitial = (id: string, allFiles = files) => {
 const target = allFiles[id]; if (!target) return;
@@ -2596,28 +2629,23 @@ const isRoot = historyLevel.length === 0;
 const actionBtnStyle = { padding: '5px 8px', borderRadius: '6px', border: '1px solid #ccc', backgroundColor: '#fff', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '3px', boxShadow: '0 2px 4px rgba(0,0,0,0.05)', fontWeight: 'bold', fontSize: '11px', transition: 'all 0.2s', whiteSpace: 'nowrap' };
 const primaryBtnStyle = { ...actionBtnStyle, backgroundColor: '#3b82f6', color: '#fff', border: 'none', boxShadow: '0 2px 4px rgba(59, 130, 246, 0.3)' };
 
+// ★ 修正：印刷時はReactFlowを再描画するのではなく、撮ったスクショ画像を1枚バーンと表示する
 if (isExecutingPrint) {
-const printBoxes = nodes.filter(n => n.type === 'printZone'); const printableNodes = flowNodes.filter(n => n.type !== 'printZone' && n.id !== 'center-mark');
-return (
-<div style={{ backgroundColor: '#fff', width: '100%', minHeight: '100vh' }}>
-<style>{GLOBAL_CSS}</style>
-<div className="no-print" style={{position: 'fixed', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: 'rgba(255,255,255,0.95)', zIndex: 99999}}>
-<h2 style={{color: '#10b981', fontSize: '24px', marginBottom: '10px'}}>🖨️ 印刷データを精密生成中...</h2>
-<p style={{color: '#666', fontWeight: 'bold'}}>ダイアログが開くまで、このままお待ちください（約1秒）</p>
-</div>
-{printBoxes.map((box) => {
-const boxW = (box.width ?? box.measured?.width ?? Number(box.style?.width)) || 800; const boxH = (box.height ?? box.measured?.height ?? Number(box.style?.height)) || 1130; const boxX = box.position.x; const boxY = box.position.y;
-return (
-<div key={box.id} className="print-page-wrapper" style={{ width: `${boxW}px`, height: `${boxH}px`, backgroundColor: levelData[currentLevel]?.bgColor || '#ffffff' }}>
-<ReactFlowProvider>
-{/* ★ 修正：印刷時に線が確実に出るように、defaultViewportをviewportに変更し、明示的にサイズ100%を指定 */}
-<ReactFlow nodes={printableNodes} edges={edges} edgeTypes={edgeTypes} viewport={{ x: -boxX, y: -boxY, zoom: 1 }} style={{ width: '100%', height: '100%' }} panOnDrag={false} zoomOnScroll={false} nodesDraggable={false} elementsSelectable={false} preventScrolling={false} />
-</ReactFlowProvider>
-</div>
-);
-})}
-</div>
-);
+    return (
+        <div style={{ backgroundColor: levelData[currentLevel]?.bgColor || '#ffffff', width: '100%', minHeight: '100vh', display: 'flex', justifyContent: 'center', alignItems: 'flex-start' }}>
+            <style>{GLOBAL_CSS}</style>
+            {!printImageUrl ? (
+                <div className="no-print" style={{position: 'fixed', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: 'rgba(255,255,255,0.95)', zIndex: 99999}}>
+                    <h2 style={{color: '#3b82f6', fontSize: '24px', marginBottom: '10px'}}>📸 画面をキャプチャ中...</h2>
+                    <p style={{color: '#666', fontWeight: 'bold'}}>そのままの見た目で印刷用画像を生成しています</p>
+                </div>
+            ) : (
+                <div className="print-page-wrapper" style={{ width: '100%', textAlign: 'center', padding: '20px' }}>
+                    <img src={printImageUrl} style={{ maxWidth: '100%', height: 'auto', display: 'block', margin: '0 auto' }} alt="print-preview" />
+                </div>
+            )}
+        </div>
+    );
 }
 
 return (
