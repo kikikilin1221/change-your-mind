@@ -1332,27 +1332,46 @@ return [...nds, { id: `print-zone-${Date.now()}`, type: 'printZone', position: {
 });
 }, []);
 
-// ★ 修正：撮影範囲(枠)がある場合はその範囲を個別に、ない場合は全体をスクショして保存する
+// ★ 修正：画面を一切切り替えず、CSSでメニューだけを透明にして安全に連続スクショする
 const executePrint = useCallback(() => { 
     clearSelection(); 
-    setIsExecutingPrint(true); 
+    setSaveMessage('📸 スクショを撮影中...（そのままお待ちください）');
     
     setTimeout(async () => {
         const flowEl = document.querySelector('.react-flow') as HTMLElement;
-        if (!flowEl) { setIsExecutingPrint(false); return; }
+        if (!flowEl) return;
 
-        // 配置されている「撮影範囲(枠)」をすべて取得
         const printZones = nodesRef.current.filter((n: any) => n.type === 'printZone');
 
         try {
             const { default: html2canvas } = await import('html2canvas');
 
+            // ★ 修正：Reactの再描画に頼らず、CSSの魔法で一瞬だけメニューや枠線を「完全に透明」にする
+            const hideStyle = document.createElement('style');
+            hideStyle.innerHTML = `
+                .react-flow__node-printZone { opacity: 0 !important; pointer-events: none !important; }
+                .react-flow__handle, .custom-handle, .custom-handle-target, .react-flow__resize-control { opacity: 0 !important; display: none !important; }
+                .no-print { opacity: 0 !important; pointer-events: none !important; } 
+            `;
+            document.head.appendChild(hideStyle);
+
+            // CSSが完全に適用されるまで少しだけ待機（画面の切り替わりバグを完全に防止）
+            await new Promise(resolve => setTimeout(resolve, 200));
+
+            const ignoreFunc = (el: Element) => {
+                return (el.classList && (
+                    el.classList.contains('react-flow__panel') || 
+                    el.classList.contains('react-flow__controls') || 
+                    el.hasAttribute('data-html2canvas-ignore') // ★ 追加：撮影から除外するタグ
+                ));
+            };
+
             if (printZones.length === 0) {
-                // ★ 枠がない場合は、今まで通り全体をスクショ
+                // 枠がない場合は全体スクショ
                 const canvas = await html2canvas(flowEl, { 
                     backgroundColor: levelData[currentLevel]?.bgColor || '#ffffff', 
                     scale: 3, 
-                    ignoreElements: (el) => el.classList.contains('react-flow__panel') || el.classList.contains('react-flow__controls') || el.classList.contains('no-print')
+                    ignoreElements: ignoreFunc
                 });
                 const dataUrl = canvas.toDataURL('image/png');
                 const a = document.createElement('a');
@@ -1362,13 +1381,7 @@ const executePrint = useCallback(() => {
                 a.click();
                 document.body.removeChild(a);
             } else {
-                // ★ 枠が配置されている場合は、枠ごとに座標を計算してスクショ
-                // 青い枠線や「印刷範囲」というラベルが画像に写り込まないように、一時的に透明化する魔法のCSS
-                const hideStyle = document.createElement('style');
-                hideStyle.innerHTML = `.react-flow__node-printZone { opacity: 0 !important; }`;
-                document.head.appendChild(hideStyle);
-
-                // 枠の数だけ順番に撮影してダウンロードしていく
+                // 枠が配置されている場合は、枠ごとにスクショ
                 for (let i = 0; i < printZones.length; i++) {
                     const zone = printZones[i];
                     const zoneEl = document.querySelector(`[data-id="${zone.id}"]`) as HTMLElement;
@@ -1377,13 +1390,13 @@ const executePrint = useCallback(() => {
                     const rect = zoneEl.getBoundingClientRect();
                     
                     const canvas = await html2canvas(document.body, { 
-                        x: rect.left, 
-                        y: rect.top, 
+                        x: window.scrollX + rect.left, 
+                        y: window.scrollY + rect.top, 
                         width: rect.width, 
                         height: rect.height, 
                         backgroundColor: levelData[currentLevel]?.bgColor || '#ffffff', 
                         scale: 3, 
-                        ignoreElements: (el) => el.classList.contains('react-flow__panel') || el.classList.contains('react-flow__controls') || el.classList.contains('no-print')
+                        ignoreElements: ignoreFunc
                     });
 
                     const dataUrl = canvas.toDataURL('image/png');
@@ -1394,22 +1407,21 @@ const executePrint = useCallback(() => {
                     a.click();
                     document.body.removeChild(a);
 
-                    // 複数ダウンロードがブラウザに「スパム」としてブロックされないよう、1枚ごとに0.5秒のインターバルを挟む
                     await new Promise(resolve => setTimeout(resolve, 500));
                 }
-                
-                // 撮影が終わったら透明化を解除
-                document.head.removeChild(hideStyle);
             }
-
-            setIsExecutingPrint(false); 
-            setSaveMessage('📸 スクショを保存しました！');
+            
+            // 撮影が終わったら透明化CSSを削除して元に戻す
+            document.head.removeChild(hideStyle);
+            setSaveMessage('✅ スクショを保存しました！');
             setTimeout(() => setSaveMessage(null), 3000);
+            
         } catch (err) {
             console.error(err);
-            setIsExecutingPrint(false);
+            setSaveMessage('❌ エラーが発生しました');
+            setTimeout(() => setSaveMessage(null), 3000);
         }
-    }, 500);
+    }, 500); // 選択枠(青線)が消えるのを待つための時間
 }, [clearSelection, currentLevel, levelData]);
 
 const loadFileInitial = (id: string, allFiles = files) => {
@@ -2680,14 +2692,8 @@ const primaryBtnStyle = { ...actionBtnStyle, backgroundColor: '#3b82f6', color: 
 return (
 <div style={{ width: '100vw', height: '100vh', display: 'flex', flexDirection: 'row', overflow: 'hidden' }}>
 <style>{GLOBAL_CSS}</style>
-{/* ★ 追加：スクショ撮影中のローディング画面（裏のDOMを残すことでバグを防止） */}
-{isExecutingPrint && (
-    <div style={{position: 'fixed', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: 'rgba(255,255,255,0.85)', zIndex: 999999, backdropFilter: 'blur(4px)'}}>
-        <h2 style={{color: '#3b82f6', fontSize: '28px', marginBottom: '15px'}}>📸 スクショを撮影中...</h2>
-        <p style={{color: '#333', fontWeight: 'bold'}}>高画質な画像を生成しています。少々お待ちください。</p>
-    </div>
-)}
 {isCursorHidden && <style>{`* { cursor: none !important; }`}</style>} {/* ★ 追加：カーソルを強制的に透明にする魔法 */}
+
 <input type="file" ref={jsonImportRef} style={{ display: 'none' }} onChange={importData} accept=".json" />
 <input type="file" ref={fileInputRef} style={{ display: 'none' }} onChange={handleFileChange} accept="image/*" />
 
@@ -3638,7 +3644,8 @@ const newColor = e.target.value; setLevelData(prev => ({ ...prev, [currentLevel]
 )}
 
 {saveMessage && (
-    <div style={{ position: 'fixed', bottom: '130px', left: '50%', transform: 'translateX(-50%)', background: '#333', color: '#fff', padding: '10px 20px', borderRadius: '20px', zIndex: 9999, fontSize: '12px', fontWeight: 'bold', boxShadow: '0 4px 12px rgba(0,0,0,0.15)' }}>
+    // ★ 追加：data-html2canvas-ignore="true" をつけることで、この黒いメッセージボックスがスクショに映り込むのを防ぐ
+    <div data-html2canvas-ignore="true" style={{ position: 'fixed', bottom: '130px', left: '50%', transform: 'translateX(-50%)', background: '#333', color: '#fff', padding: '10px 20px', borderRadius: '20px', zIndex: 9999, fontSize: '12px', fontWeight: 'bold', boxShadow: '0 4px 12px rgba(0,0,0,0.15)' }}>
         {saveMessage}
     </div>
 )}
