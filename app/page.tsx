@@ -1332,38 +1332,83 @@ return [...nds, { id: `print-zone-${Date.now()}`, type: 'printZone', position: {
 });
 }, []);
 
-// ★ 修正：印刷をやめて、画面のスクショを撮影して直接ダウンロードする機能に変更
+// ★ 修正：撮影範囲(枠)がある場合はその範囲を個別に、ない場合は全体をスクショして保存する
 const executePrint = useCallback(() => { 
     clearSelection(); 
     setIsExecutingPrint(true); 
     
-    setTimeout(() => {
+    setTimeout(async () => {
         const flowEl = document.querySelector('.react-flow') as HTMLElement;
         if (!flowEl) { setIsExecutingPrint(false); return; }
 
-        import('html2canvas').then(({ default: html2canvas }) => {
-            html2canvas(flowEl, { 
-                backgroundColor: levelData[currentLevel]?.bgColor || '#ffffff', 
-                scale: 3, // ★ 超高画質でキャプチャ
-                ignoreElements: (el) => el.classList.contains('react-flow__panel') || el.classList.contains('react-flow__controls') || el.classList.contains('no-print')
-            }).then(canvas => {
-                // ★ 印刷プレビューを開かず、直接画像ファイルとしてダウンロードする
+        // 配置されている「撮影範囲(枠)」をすべて取得
+        const printZones = nodesRef.current.filter((n: any) => n.type === 'printZone');
+
+        try {
+            const { default: html2canvas } = await import('html2canvas');
+
+            if (printZones.length === 0) {
+                // ★ 枠がない場合は、今まで通り全体をスクショ
+                const canvas = await html2canvas(flowEl, { 
+                    backgroundColor: levelData[currentLevel]?.bgColor || '#ffffff', 
+                    scale: 3, 
+                    ignoreElements: (el) => el.classList.contains('react-flow__panel') || el.classList.contains('react-flow__controls') || el.classList.contains('no-print')
+                });
                 const dataUrl = canvas.toDataURL('image/png');
                 const a = document.createElement('a');
                 a.href = dataUrl;
-                a.download = `マップのスクショ-${new Date().toISOString().slice(0,10)}.png`;
+                a.download = `マップ全体-${new Date().toISOString().slice(0,10)}.png`;
                 document.body.appendChild(a);
                 a.click();
                 document.body.removeChild(a);
+            } else {
+                // ★ 枠が配置されている場合は、枠ごとに座標を計算してスクショ
+                // 青い枠線や「印刷範囲」というラベルが画像に写り込まないように、一時的に透明化する魔法のCSS
+                const hideStyle = document.createElement('style');
+                hideStyle.innerHTML = `.react-flow__node-printZone { opacity: 0 !important; }`;
+                document.head.appendChild(hideStyle);
 
-                setIsExecutingPrint(false); 
-                setSaveMessage('📸 スクショを保存しました！');
-                setTimeout(() => setSaveMessage(null), 3000);
-            }).catch(err => {
-                console.error(err);
-                setIsExecutingPrint(false);
-            });
-        });
+                // 枠の数だけ順番に撮影してダウンロードしていく
+                for (let i = 0; i < printZones.length; i++) {
+                    const zone = printZones[i];
+                    const zoneEl = document.querySelector(`[data-id="${zone.id}"]`) as HTMLElement;
+                    if (!zoneEl) continue;
+
+                    const rect = zoneEl.getBoundingClientRect();
+                    
+                    const canvas = await html2canvas(document.body, { 
+                        x: rect.left, 
+                        y: rect.top, 
+                        width: rect.width, 
+                        height: rect.height, 
+                        backgroundColor: levelData[currentLevel]?.bgColor || '#ffffff', 
+                        scale: 3, 
+                        ignoreElements: (el) => el.classList.contains('react-flow__panel') || el.classList.contains('react-flow__controls') || el.classList.contains('no-print')
+                    });
+
+                    const dataUrl = canvas.toDataURL('image/png');
+                    const a = document.createElement('a');
+                    a.href = dataUrl;
+                    a.download = `スクショ枠${i + 1}-${new Date().toISOString().slice(0,10)}.png`;
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+
+                    // 複数ダウンロードがブラウザに「スパム」としてブロックされないよう、1枚ごとに0.5秒のインターバルを挟む
+                    await new Promise(resolve => setTimeout(resolve, 500));
+                }
+                
+                // 撮影が終わったら透明化を解除
+                document.head.removeChild(hideStyle);
+            }
+
+            setIsExecutingPrint(false); 
+            setSaveMessage('📸 スクショを保存しました！');
+            setTimeout(() => setSaveMessage(null), 3000);
+        } catch (err) {
+            console.error(err);
+            setIsExecutingPrint(false);
+        }
     }, 500);
 }, [clearSelection, currentLevel, levelData]);
 
