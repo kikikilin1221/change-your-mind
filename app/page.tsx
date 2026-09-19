@@ -435,56 +435,48 @@ const handleGroupToStamp = useCallback(() => {
     `;
     document.head.appendChild(style);
 
-    // グループの枠の正確な座標を取得
-    const rect = groupEl.getBoundingClientRect();
+    setTimeout(async () => {
+        const flowEl = document.querySelector('.react-flow') as HTMLElement;
+        if (!flowEl) return;
 
-    // DOM更新を待ってから自動でピッタリ撮影
-    setTimeout(() => {
-        const htmlNode = document.documentElement;
-        const originalHtmlBg = htmlNode.style.backgroundColor;
-        const originalBodyBg = document.body.style.backgroundColor;
-        
-        htmlNode.style.backgroundColor = 'transparent';
-        document.body.style.backgroundColor = 'transparent';
-        
-        const ws = document.getElementById('main-editor-wrapper');
-        const origWsBg = ws ? ws.style.backgroundColor : '';
-        if (ws) ws.style.backgroundColor = 'transparent';
-        
-        const bgNode = document.querySelector('.react-flow__background') as HTMLElement;
-        if (bgNode) bgNode.style.display = 'none';
+        try {
+            const htmlToImage = await import('html-to-image');
+            const scale = 3;
 
-        import('html2canvas').then(({ default: html2canvas }) => {
-            html2canvas(document.body, { 
-                x: rect.left, 
-                y: rect.top, 
-                width: rect.width, 
-                height: rect.height, 
-                // ★ 修正：透明ではなく、現在のノートの背景色（または白）で塗りつぶし、後ろを透けさせない
+            // ズレない高画質エンジンで画面全体をCanvas化
+            const fullCanvas = await htmlToImage.toCanvas(flowEl, { 
                 backgroundColor: levelData[currentLevel]?.bgColor || '#ffffff', 
-                scale: 3 
-            }).then(canvas => {
-                // UIを元に戻す
-                document.head.removeChild(style);
-                htmlNode.style.backgroundColor = originalHtmlBg;
-                document.body.style.backgroundColor = originalBodyBg;
-                if (ws) ws.style.backgroundColor = origWsBg;
-                if (bgNode) bgNode.style.display = 'block';
-
-                // ★ 修正：透過処理（ピクセル操作）のブロックを完全に消去することで、ソリッドな不透明画像として固める
-
-                const dataUrl = canvas.toDataURL('image/png');
-                const flowW = activeGroup.measured?.width || Number(activeGroup.style?.width) || 200;
-                const flowH = activeGroup.measured?.height || Number(activeGroup.style?.height) || 100;
-                
-                setPendingStampData({ url: dataUrl, w: flowW, h: flowH }); 
-            }).catch(err => {
-                console.error(err);
-                document.head.removeChild(style);
+                pixelRatio: scale 
             });
-        });
+
+            // 必要な部分だけを正確にトリミング
+            const rect = groupEl.getBoundingClientRect();
+            const flowRect = flowEl.getBoundingClientRect();
+
+            const cropCanvas = document.createElement('canvas');
+            cropCanvas.width = rect.width * scale;
+            cropCanvas.height = rect.height * scale;
+            const ctx = cropCanvas.getContext('2d');
+            
+            if (ctx) {
+                const offsetX = (rect.left - flowRect.left) * scale;
+                const offsetY = (rect.top - flowRect.top) * scale;
+                ctx.drawImage(fullCanvas, offsetX, offsetY, cropCanvas.width, cropCanvas.height, 0, 0, cropCanvas.width, cropCanvas.height);
+            }
+
+            const dataUrl = cropCanvas.toDataURL('image/png');
+            const flowW = activeGroup.measured?.width || Number(activeGroup.style?.width) || 200;
+            const flowH = activeGroup.measured?.height || Number(activeGroup.style?.height) || 100;
+            
+            setPendingStampData({ url: dataUrl, w: flowW, h: flowH }); 
+            document.head.removeChild(style);
+
+        } catch (err) {
+            console.error(err);
+            document.head.removeChild(style);
+        }
     }, 100);
-}, [nodes]);
+}, [nodes, levelData, currentLevel]);
 
 // ★ 追加：テキスト最長行に合わせてノードの横幅を自動ジャストフィットさせる関数
 const handleAutoFitWidth = useCallback(() => {
@@ -1345,9 +1337,10 @@ const executePrint = useCallback(() => {
         const printZones = nodesRef.current.filter((n: any) => n.type === 'printZone');
 
         try {
-            const { default: html2canvas } = await import('html2canvas');
+            // ★ html2canvas からズレない＆消えない html-to-image に完全移行！
+            const htmlToImage = await import('html-to-image');
 
-            // ★ 修正：青枠やラベル、ハンドルを撮影から「完全に」除外するCSS
+            // 青枠やラベル、ハンドルを撮影から「完全に」除外するCSS
             const hideStyle = document.createElement('style');
             hideStyle.innerHTML = `
                 .print-zone-box { border: none !important; background-color: transparent !important; }
@@ -1359,29 +1352,30 @@ const executePrint = useCallback(() => {
 
             await new Promise(resolve => setTimeout(resolve, 300)); // CSS適用待ち
 
-            const ignoreFunc = (el: Element) => {
-                if (!el.classList) return false; // ★ 修正：SVG等でclassListが無い場合のエラー回避
-                return (
-                    el.classList.contains('react-flow__panel') || 
-                    el.classList.contains('react-flow__controls') || 
-                    el.hasAttribute('data-html2canvas-ignore')
-                );
+            // ★ html-to-image 用の除外フィルター（false を返した要素が除外される）
+            const filterFunc = (el: Element | HTMLElement | any) => {
+                if (el?.classList) {
+                    if (el.classList.contains('react-flow__panel')) return false;
+                    if (el.classList.contains('react-flow__controls')) return false;
+                }
+                if (el?.hasAttribute && el.hasAttribute('data-html2canvas-ignore')) return false;
+                return true;
             };
 
+            const scale = 3;
+
             if (printZones.length === 0) {
-                // 枠がない場合は、全体を少しズームインして撮影（画質担保のため）
+                // 枠がない場合は全体撮影
                 const { x: origX, y: origY, zoom: origZoom } = getViewport();
                 setViewport({ x: origX, y: origY, zoom: 1 }, { duration: 0 });
-                await new Promise(resolve => setTimeout(resolve, 600)); // ★ 修正：矢印等の再描画を確実に待つ
+                await new Promise(resolve => setTimeout(resolve, 800)); // SVG等の再描画待ち
 
-                const canvas = await html2canvas(flowEl, { 
+                const dataUrl = await htmlToImage.toPng(flowEl, { 
                     backgroundColor: levelData[currentLevel]?.bgColor || '#ffffff', 
-                    scale: 3, 
-                    ignoreElements: ignoreFunc,
-                    useCORS: true // ★ 追加：外部画像やSVGマーカーの描画安定化
+                    pixelRatio: scale, 
+                    filter: filterFunc
                 });
                 
-                const dataUrl = canvas.toDataURL('image/png');
                 const a = document.createElement('a');
                 a.href = dataUrl;
                 a.download = `マップ全体-${new Date().toISOString().slice(0,10)}.png`;
@@ -1389,17 +1383,14 @@ const executePrint = useCallback(() => {
                 a.click();
                 document.body.removeChild(a);
 
-                // 元の視点に戻す
                 setViewport({ x: origX, y: origY, zoom: origZoom }, { duration: 0 });
 
             } else {
-                // ★ 枠が配置されている場合：現在の視点を記憶
                 const { x: origX, y: origY, zoom: origZoom } = getViewport();
-                // ★ 修正：windowサイズではなく、実際のアプリの表示領域サイズを取得
                 const containerW = flowEl.clientWidth;
                 const containerH = flowEl.clientHeight;
 
-                // 枠の数だけ順番にカメラを移動（ズームイン）させて撮影
+                // 枠の数だけ順番に撮影
                 for (let i = 0; i < printZones.length; i++) {
                     const zone = printZones[i];
                     const zW = Number(zone.style?.width) || 800;
@@ -1407,34 +1398,39 @@ const executePrint = useCallback(() => {
                     const zX = zone.position.x;
                     const zY = zone.position.y;
 
-                    // ★ 修正：枠が画面に絶対に収まるよう、0.9倍の余裕を持たせて計算する
+                    // 枠が画面に絶対に収まるよう、0.9倍の余裕を持たせて計算
                     const targetZoom = Math.min(2.0, (containerW / zW) * 0.9, (containerH / zH) * 0.9);
-                    
-                    // 枠の中央を画面の中央に合わせる計算
                     const targetX = (containerW / 2) - ((zX + zW / 2) * targetZoom);
                     const targetY = (containerH / 2) - ((zY + zH / 2) * targetZoom);
 
                     setViewport({ x: targetX, y: targetY, zoom: targetZoom }, { duration: 0 });
-                    
-                    // ★ 修正：アニメーションと「矢印（SVG）の再描画」が完全に終わるのを長めに待つ
-                    await new Promise(resolve => setTimeout(resolve, 800));
+                    await new Promise(resolve => setTimeout(resolve, 800)); // 矢印(SVG)等の再描画を確実に待つ
 
                     const zoneEl = document.querySelector(`[data-id="${zone.id}"]`) as HTMLElement;
                     if (!zoneEl) continue;
-                    const rect = zoneEl.getBoundingClientRect();
-                    
-                    const canvas = await html2canvas(document.body, { 
-                        x: window.scrollX + rect.left, 
-                        y: window.scrollY + rect.top, 
-                        width: rect.width, 
-                        height: rect.height, 
+
+                    // ★ 画面全体(flowEl)をCanvas化してから、対象枠だけを正確にトリミングする
+                    const fullCanvas = await htmlToImage.toCanvas(flowEl, { 
                         backgroundColor: levelData[currentLevel]?.bgColor || '#ffffff', 
-                        scale: 3, 
-                        ignoreElements: ignoreFunc,
-                        useCORS: true // ★ 追加：SVGマーカー(矢印)の描画安定化
+                        pixelRatio: scale, 
+                        filter: filterFunc
                     });
 
-                    const dataUrl = canvas.toDataURL('image/png');
+                    const rect = zoneEl.getBoundingClientRect();
+                    const flowRect = flowEl.getBoundingClientRect();
+
+                    const cropCanvas = document.createElement('canvas');
+                    cropCanvas.width = rect.width * scale;
+                    cropCanvas.height = rect.height * scale;
+                    const ctx = cropCanvas.getContext('2d');
+
+                    if (ctx) {
+                        const offsetX = (rect.left - flowRect.left) * scale;
+                        const offsetY = (rect.top - flowRect.top) * scale;
+                        ctx.drawImage(fullCanvas, offsetX, offsetY, cropCanvas.width, cropCanvas.height, 0, 0, cropCanvas.width, cropCanvas.height);
+                    }
+
+                    const dataUrl = cropCanvas.toDataURL('image/png');
                     const a = document.createElement('a');
                     a.href = dataUrl;
                     a.download = `スクショ枠${i + 1}-${new Date().toISOString().slice(0,10)}.png`;
@@ -1445,7 +1441,6 @@ const executePrint = useCallback(() => {
                     await new Promise(resolve => setTimeout(resolve, 300));
                 }
 
-                // すべての撮影が終わったら、一瞬で元の「引いた視点」に戻す
                 setViewport({ x: origX, y: origY, zoom: origZoom }, { duration: 0 });
             }
             
