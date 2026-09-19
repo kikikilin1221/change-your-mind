@@ -1332,21 +1332,22 @@ return [...nds, { id: `print-zone-${Date.now()}`, type: 'printZone', position: {
 });
 }, []);
 
-// ★ 修正：画面を一切切り替えず、CSSでメニューだけを透明にして安全に連続スクショする
+// ★ 修正：各「撮影範囲(枠)」に自動でズームインして最高画質で巡回撮影するロジック
 const executePrint = useCallback(() => { 
     clearSelection(); 
-    setSaveMessage('📸 スクショを撮影中...（そのままお待ちください）');
+    setIsExecutingPrint(true);
+    setSaveMessage('📸 高画質スクショを生成中...（画面が動きます）');
     
     setTimeout(async () => {
         const flowEl = document.querySelector('.react-flow') as HTMLElement;
-        if (!flowEl) return;
+        if (!flowEl) { setIsExecutingPrint(false); return; }
 
         const printZones = nodesRef.current.filter((n: any) => n.type === 'printZone');
 
         try {
             const { default: html2canvas } = await import('html2canvas');
 
-            // ★ 修正：Reactの再描画に頼らず、CSSの魔法で一瞬だけメニューや枠線を「完全に透明」にする
+            // 青枠やハンドルを撮影から除外するCSS
             const hideStyle = document.createElement('style');
             hideStyle.innerHTML = `
                 .react-flow__node-printZone { opacity: 0 !important; pointer-events: none !important; }
@@ -1355,24 +1356,28 @@ const executePrint = useCallback(() => {
             `;
             document.head.appendChild(hideStyle);
 
-            // CSSが完全に適用されるまで少しだけ待機（画面の切り替わりバグを完全に防止）
             await new Promise(resolve => setTimeout(resolve, 200));
 
             const ignoreFunc = (el: Element) => {
                 return (el.classList && (
                     el.classList.contains('react-flow__panel') || 
                     el.classList.contains('react-flow__controls') || 
-                    el.hasAttribute('data-html2canvas-ignore') // ★ 追加：撮影から除外するタグ
+                    el.hasAttribute('data-html2canvas-ignore')
                 ));
             };
 
             if (printZones.length === 0) {
-                // 枠がない場合は全体スクショ
+                // 枠がない場合は、全体を少しズームインして撮影（画質担保のため）
+                const { x: origX, y: origY, zoom: origZoom } = getViewport();
+                setViewport({ x: origX, y: origY, zoom: 1 }, { duration: 0 }); // ズーム100%に強制
+                await new Promise(resolve => setTimeout(resolve, 300)); // 描画待ち
+
                 const canvas = await html2canvas(flowEl, { 
                     backgroundColor: levelData[currentLevel]?.bgColor || '#ffffff', 
                     scale: 3, 
                     ignoreElements: ignoreFunc
                 });
+                
                 const dataUrl = canvas.toDataURL('image/png');
                 const a = document.createElement('a');
                 a.href = dataUrl;
@@ -1380,13 +1385,38 @@ const executePrint = useCallback(() => {
                 document.body.appendChild(a);
                 a.click();
                 document.body.removeChild(a);
+
+                // 元の視点に戻す
+                setViewport({ x: origX, y: origY, zoom: origZoom }, { duration: 0 });
+
             } else {
-                // 枠が配置されている場合は、枠ごとにスクショ
+                // ★ 枠が配置されている場合：現在の視点を記憶
+                const { x: origX, y: origY, zoom: origZoom } = getViewport();
+
+                // 枠の数だけ順番にカメラを移動（ズームイン）させて撮影
                 for (let i = 0; i < printZones.length; i++) {
                     const zone = printZones[i];
+                    const zW = Number(zone.style?.width) || 800;
+                    const zH = Number(zone.style?.height) || 1130;
+                    const zX = zone.position.x;
+                    const zY = zone.position.y;
+
+                    // 1. その枠が画面いっぱいに（かつ高画質に）なるようカメラを移動させる
+                    // ※ズーム倍率は1〜1.5程度にして、文字が潰れないようにする
+                    const targetZoom = Math.min(1.5, window.innerWidth / zW, window.innerHeight / zH);
+                    
+                    // 枠の中央を画面の中央に合わせる計算
+                    const targetX = (window.innerWidth / 2) - ((zX + zW / 2) * targetZoom);
+                    const targetY = (window.innerHeight / 2) - ((zY + zH / 2) * targetZoom);
+
+                    setViewport({ x: targetX, y: targetY, zoom: targetZoom }, { duration: 0 });
+                    
+                    // アニメーションと再描画が完全に終わるのを待つ
+                    await new Promise(resolve => setTimeout(resolve, 600));
+
+                    // 2. ズームされた状態で撮影！
                     const zoneEl = document.querySelector(`[data-id="${zone.id}"]`) as HTMLElement;
                     if (!zoneEl) continue;
-
                     const rect = zoneEl.getBoundingClientRect();
                     
                     const canvas = await html2canvas(document.body, { 
@@ -1395,7 +1425,7 @@ const executePrint = useCallback(() => {
                         width: rect.width, 
                         height: rect.height, 
                         backgroundColor: levelData[currentLevel]?.bgColor || '#ffffff', 
-                        scale: 3, 
+                        scale: 3, // さらに3倍の解像度でキャプチャ
                         ignoreElements: ignoreFunc
                     });
 
@@ -1407,22 +1437,26 @@ const executePrint = useCallback(() => {
                     a.click();
                     document.body.removeChild(a);
 
-                    await new Promise(resolve => setTimeout(resolve, 500));
+                    await new Promise(resolve => setTimeout(resolve, 300));
                 }
+
+                // 3. すべての撮影が終わったら、一瞬で元の「引いた視点」に戻す
+                setViewport({ x: origX, y: origY, zoom: origZoom }, { duration: 0 });
             }
             
-            // 撮影が終わったら透明化CSSを削除して元に戻す
             document.head.removeChild(hideStyle);
-            setSaveMessage('✅ スクショを保存しました！');
+            setIsExecutingPrint(false); 
+            setSaveMessage('✅ 高画質スクショを保存しました！');
             setTimeout(() => setSaveMessage(null), 3000);
             
         } catch (err) {
             console.error(err);
+            setIsExecutingPrint(false); 
             setSaveMessage('❌ エラーが発生しました');
             setTimeout(() => setSaveMessage(null), 3000);
         }
-    }, 500); // 選択枠(青線)が消えるのを待つための時間
-}, [clearSelection, currentLevel, levelData]);
+    }, 500); 
+}, [clearSelection, currentLevel, levelData, getViewport, setViewport]);
 
 const loadFileInitial = (id: string, allFiles = files) => {
 const target = allFiles[id]; if (!target) return;
