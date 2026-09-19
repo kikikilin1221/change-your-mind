@@ -1332,12 +1332,11 @@ return [...nds, { id: `print-zone-${Date.now()}`, type: 'printZone', position: {
 });
 }, []);
 
-// ★ 修正：印刷時に画面全体を高画質なスクショ（画像）に変換してから印刷する
+// ★ 修正：印刷をやめて、画面のスクショを撮影して直接ダウンロードする機能に変更
 const executePrint = useCallback(() => { 
     clearSelection(); 
     setIsExecutingPrint(true); 
     
-    // UIの青い選択枠などが消えるのを待ってから撮影
     setTimeout(() => {
         const flowEl = document.querySelector('.react-flow') as HTMLElement;
         if (!flowEl) { setIsExecutingPrint(false); return; }
@@ -1345,19 +1344,21 @@ const executePrint = useCallback(() => {
         import('html2canvas').then(({ default: html2canvas }) => {
             html2canvas(flowEl, { 
                 backgroundColor: levelData[currentLevel]?.bgColor || '#ffffff', 
-                scale: 2, // 高画質でキャプチャ
-                // コントロールボタンなどの不要なUIを画像から除外する
+                scale: 3, // ★ 超高画質でキャプチャ
                 ignoreElements: (el) => el.classList.contains('react-flow__panel') || el.classList.contains('react-flow__controls') || el.classList.contains('no-print')
             }).then(canvas => {
-                setPrintImageUrl(canvas.toDataURL('image/png'));
-                // 画像が画面に表示されるのを待ってから印刷ダイアログを開く
-                setTimeout(() => {
-                    window.print(); 
-                    setTimeout(() => { 
-                        setIsExecutingPrint(false); 
-                        setPrintImageUrl(null); // 印刷が終わったら画像を破棄
-                    }, 500); 
-                }, 500);
+                // ★ 印刷プレビューを開かず、直接画像ファイルとしてダウンロードする
+                const dataUrl = canvas.toDataURL('image/png');
+                const a = document.createElement('a');
+                a.href = dataUrl;
+                a.download = `マップのスクショ-${new Date().toISOString().slice(0,10)}.png`;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+
+                setIsExecutingPrint(false); 
+                setSaveMessage('📸 スクショを保存しました！');
+                setTimeout(() => setSaveMessage(null), 3000);
             }).catch(err => {
                 console.error(err);
                 setIsExecutingPrint(false);
@@ -2629,28 +2630,18 @@ const isRoot = historyLevel.length === 0;
 const actionBtnStyle = { padding: '5px 8px', borderRadius: '6px', border: '1px solid #ccc', backgroundColor: '#fff', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '3px', boxShadow: '0 2px 4px rgba(0,0,0,0.05)', fontWeight: 'bold', fontSize: '11px', transition: 'all 0.2s', whiteSpace: 'nowrap' };
 const primaryBtnStyle = { ...actionBtnStyle, backgroundColor: '#3b82f6', color: '#fff', border: 'none', boxShadow: '0 2px 4px rgba(59, 130, 246, 0.3)' };
 
-// ★ 修正：印刷時はReactFlowを再描画するのではなく、撮ったスクショ画像を1枚バーンと表示する
-if (isExecutingPrint) {
-    return (
-        <div style={{ backgroundColor: levelData[currentLevel]?.bgColor || '#ffffff', width: '100%', minHeight: '100vh', display: 'flex', justifyContent: 'center', alignItems: 'flex-start' }}>
-            <style>{GLOBAL_CSS}</style>
-            {!printImageUrl ? (
-                <div className="no-print" style={{position: 'fixed', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: 'rgba(255,255,255,0.95)', zIndex: 99999}}>
-                    <h2 style={{color: '#3b82f6', fontSize: '24px', marginBottom: '10px'}}>📸 画面をキャプチャ中...</h2>
-                    <p style={{color: '#666', fontWeight: 'bold'}}>そのままの見た目で印刷用画像を生成しています</p>
-                </div>
-            ) : (
-                <div className="print-page-wrapper" style={{ width: '100%', textAlign: 'center', padding: '20px' }}>
-                    <img src={printImageUrl} style={{ maxWidth: '100%', height: 'auto', display: 'block', margin: '0 auto' }} alt="print-preview" />
-                </div>
-            )}
-        </div>
-    );
-}
+// ★ プレビュー画面を削除し、直接下のアプリ本体の描画に入ります
 
 return (
 <div style={{ width: '100vw', height: '100vh', display: 'flex', flexDirection: 'row', overflow: 'hidden' }}>
 <style>{GLOBAL_CSS}</style>
+{/* ★ 追加：スクショ撮影中のローディング画面（裏のDOMを残すことでバグを防止） */}
+{isExecutingPrint && (
+    <div style={{position: 'fixed', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: 'rgba(255,255,255,0.85)', zIndex: 999999, backdropFilter: 'blur(4px)'}}>
+        <h2 style={{color: '#3b82f6', fontSize: '28px', marginBottom: '15px'}}>📸 スクショを撮影中...</h2>
+        <p style={{color: '#333', fontWeight: 'bold'}}>高画質な画像を生成しています。少々お待ちください。</p>
+    </div>
+)}
 {isCursorHidden && <style>{`* { cursor: none !important; }`}</style>} {/* ★ 追加：カーソルを強制的に透明にする魔法 */}
 <input type="file" ref={jsonImportRef} style={{ display: 'none' }} onChange={importData} accept=".json" />
 <input type="file" ref={fileInputRef} style={{ display: 'none' }} onChange={handleFileChange} accept="image/*" />
@@ -3357,10 +3348,10 @@ el.innerHTML = currentVal;
 <div className="no-print" style={{ padding: '6px 8px', backgroundColor: 'rgba(255,255,255,0.95)', borderTop: '1px solid #eee', display: 'flex', flexWrap: 'nowrap', overflowX: 'auto', justifyContent: 'flex-start', alignItems: 'center', gap: '4px', zIndex: 1001, boxShadow: '0 -4px 10px rgba(0,0,0,0.03)', backdropFilter: 'blur(4px)', width: '100%', maxWidth: '100%', boxSizing: 'border-box' }}>
 {isPrintMode ? (
 <>
-<div style={{ fontWeight: 'bold', fontSize: '12px', color: '#b91c1c', padding: '0 10px' }}>🖨️ 印刷モード</div>
+<div style={{ fontWeight: 'bold', fontSize: '12px', color: '#b91c1c', padding: '0 10px' }}>📸 スクショモード</div>
 <div style={{ width: '1px', height: '24px', backgroundColor: '#ddd', margin: '0 2px' }} />
-<button onClick={addPrintZone} style={{ ...actionBtnStyle, backgroundColor: '#eff6ff', color: '#1d4ed8', border: '1px solid #bfdbfe' }}>📄 印刷範囲を追加</button>
-<button onClick={executePrint} style={{ ...actionBtnStyle, backgroundColor: '#10b981', color: '#fff', border: 'none', boxShadow: '0 2px 4px rgba(16, 185, 129, 0.3)' }}>✅ 印刷を実行</button>
+<button onClick={addPrintZone} style={{ ...actionBtnStyle, backgroundColor: '#eff6ff', color: '#1d4ed8', border: '1px solid #bfdbfe' }}>📄 撮影範囲(枠)を追加</button>
+<button onClick={executePrint} style={{ ...actionBtnStyle, backgroundColor: '#10b981', color: '#fff', border: 'none', boxShadow: '0 2px 4px rgba(16, 185, 129, 0.3)' }}>✅ スクショを保存</button>
 <div style={{ width: '1px', height: '24px', backgroundColor: '#ddd', margin: '0 2px' }} />
 <button onClick={togglePrintMode} style={{ ...actionBtnStyle, color: '#4b5563' }}>❌ キャンセル</button>
 </>
@@ -3395,7 +3386,7 @@ el.innerHTML = currentVal;
 
 <div style={{ width: '1px', height: '24px', backgroundColor: '#ddd', margin: '0 2px' }} />
 <button onClick={() => setViewport({ x: 0, y: 0, zoom: 1 }, { duration: 800 })} style={actionBtnStyle}>🎯 中央</button>
-<button onClick={togglePrintMode} style={{ ...actionBtnStyle, backgroundColor: '#f1f5f9' }}>🖨️ 印刷設定</button>
+<button onClick={togglePrintMode} style={{ ...actionBtnStyle, backgroundColor: '#f1f5f9' }}>📸 スクショ撮影</button>
 <div style={{ width: '1px', height: '24px', backgroundColor: '#ddd', margin: '0 2px' }} />
 <button onClick={() => addNode('text')} style={primaryBtnStyle}>📝 テキスト</button>
 <button onClick={() => addNode('image')} style={{ ...primaryBtnStyle, backgroundColor: '#10b981', boxShadow: '0 2px 4px rgba(16, 185, 129, 0.3)' }}>📸 画像</button>
