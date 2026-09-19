@@ -114,7 +114,6 @@ return (
 )}
 
 {isDouble && !hideLine && (
-<svg style={{ position: 'absolute', width: 0, height: 0 }}>
 <defs>
 <marker id={`custom-arrow-${id}`} viewBox="0 0 24 24" refX="12" refY="12" markerWidth={customArrowSize} markerHeight={customArrowSize} markerUnits="userSpaceOnUse" orient="auto">
 <polygon points="0,0 20,12 0,24" fill="var(--bg-color, #ffffff)" stroke="none" />
@@ -125,7 +124,6 @@ return (
 <polyline points="20,4 6,12 20,20" fill="none" stroke={edgeColor} strokeWidth={strokeWidth >= 3 ? 3 : 2} strokeLinecap="round" strokeLinejoin="round" />
 </marker>
 </defs>
-</svg>
 )}
 
 {!hideLine && (
@@ -140,7 +138,8 @@ isDouble ? (
 
 {displayLabel || isEditing ? (
 <EdgeLabelRenderer>
-<div className="no-print" style={{ position: 'absolute', transform: `translate(-50%, -50%) translate(${labelX}px,${labelY}px)`, zIndex: 1000, pointerEvents: 'auto' }}>
+{/* ★ 修正：印刷時に文字が消えないように「no-print」クラスを削除 */}
+<div style={{ position: 'absolute', transform: `translate(-50%, -50%) translate(${labelX}px,${labelY}px)`, zIndex: 1000, pointerEvents: 'auto' }}>
 <div
 id={`edit-edge-${id}`} className={isEditing ? "nodrag html-content editing-mode" : "nodrag html-content"} contentEditable={isEditing} suppressContentEditableWarning
 onMouseDown={(e) => { if (isEditing) e.stopPropagation(); }} onKeyDown={(e) => { if (isEditing) e.stopPropagation(); }}
@@ -2611,7 +2610,8 @@ const boxW = (box.width ?? box.measured?.width ?? Number(box.style?.width)) || 8
 return (
 <div key={box.id} className="print-page-wrapper" style={{ width: `${boxW}px`, height: `${boxH}px`, backgroundColor: levelData[currentLevel]?.bgColor || '#ffffff' }}>
 <ReactFlowProvider>
-<ReactFlow nodes={printableNodes} edges={edges} edgeTypes={edgeTypes} defaultViewport={{ x: -boxX, y: -boxY, zoom: 1 }} panOnDrag={false} zoomOnScroll={false} nodesDraggable={false} elementsSelectable={false} preventScrolling={false} />
+{/* ★ 修正：印刷時に線が確実に出るように、defaultViewportをviewportに変更し、明示的にサイズ100%を指定 */}
+<ReactFlow nodes={printableNodes} edges={edges} edgeTypes={edgeTypes} viewport={{ x: -boxX, y: -boxY, zoom: 1 }} style={{ width: '100%', height: '100%' }} panOnDrag={false} zoomOnScroll={false} nodesDraggable={false} elementsSelectable={false} preventScrolling={false} />
 </ReactFlowProvider>
 </div>
 );
