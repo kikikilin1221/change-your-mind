@@ -1347,35 +1347,38 @@ const executePrint = useCallback(() => {
         try {
             const { default: html2canvas } = await import('html2canvas');
 
-            // 青枠やハンドルを撮影から除外するCSS
+            // ★ 修正：青枠やラベル、ハンドルを撮影から「完全に」除外するCSS
             const hideStyle = document.createElement('style');
             hideStyle.innerHTML = `
-                .react-flow__node-printZone { opacity: 0 !important; pointer-events: none !important; }
+                .print-zone-box { border: none !important; background-color: transparent !important; }
+                .print-zone-label { opacity: 0 !important; display: none !important; }
                 .react-flow__handle, .custom-handle, .custom-handle-target, .react-flow__resize-control { opacity: 0 !important; display: none !important; }
                 .no-print { opacity: 0 !important; pointer-events: none !important; } 
             `;
             document.head.appendChild(hideStyle);
 
-            await new Promise(resolve => setTimeout(resolve, 200));
+            await new Promise(resolve => setTimeout(resolve, 300)); // CSS適用待ち
 
             const ignoreFunc = (el: Element) => {
-                return (el.classList && (
+                if (!el.classList) return false; // ★ 修正：SVG等でclassListが無い場合のエラー回避
+                return (
                     el.classList.contains('react-flow__panel') || 
                     el.classList.contains('react-flow__controls') || 
                     el.hasAttribute('data-html2canvas-ignore')
-                ));
+                );
             };
 
             if (printZones.length === 0) {
                 // 枠がない場合は、全体を少しズームインして撮影（画質担保のため）
                 const { x: origX, y: origY, zoom: origZoom } = getViewport();
-                setViewport({ x: origX, y: origY, zoom: 1 }, { duration: 0 }); // ズーム100%に強制
-                await new Promise(resolve => setTimeout(resolve, 300)); // 描画待ち
+                setViewport({ x: origX, y: origY, zoom: 1 }, { duration: 0 });
+                await new Promise(resolve => setTimeout(resolve, 600)); // ★ 修正：矢印等の再描画を確実に待つ
 
                 const canvas = await html2canvas(flowEl, { 
                     backgroundColor: levelData[currentLevel]?.bgColor || '#ffffff', 
                     scale: 3, 
-                    ignoreElements: ignoreFunc
+                    ignoreElements: ignoreFunc,
+                    useCORS: true // ★ 追加：外部画像やSVGマーカーの描画安定化
                 });
                 
                 const dataUrl = canvas.toDataURL('image/png');
@@ -1392,6 +1395,9 @@ const executePrint = useCallback(() => {
             } else {
                 // ★ 枠が配置されている場合：現在の視点を記憶
                 const { x: origX, y: origY, zoom: origZoom } = getViewport();
+                // ★ 修正：windowサイズではなく、実際のアプリの表示領域サイズを取得
+                const containerW = flowEl.clientWidth;
+                const containerH = flowEl.clientHeight;
 
                 // 枠の数だけ順番にカメラを移動（ズームイン）させて撮影
                 for (let i = 0; i < printZones.length; i++) {
@@ -1401,20 +1407,18 @@ const executePrint = useCallback(() => {
                     const zX = zone.position.x;
                     const zY = zone.position.y;
 
-                    // 1. その枠が画面いっぱいに（かつ高画質に）なるようカメラを移動させる
-                    // ※ズーム倍率は1〜1.5程度にして、文字が潰れないようにする
-                    const targetZoom = Math.min(1.5, window.innerWidth / zW, window.innerHeight / zH);
+                    // ★ 修正：枠が画面に絶対に収まるよう、0.9倍の余裕を持たせて計算する
+                    const targetZoom = Math.min(2.0, (containerW / zW) * 0.9, (containerH / zH) * 0.9);
                     
                     // 枠の中央を画面の中央に合わせる計算
-                    const targetX = (window.innerWidth / 2) - ((zX + zW / 2) * targetZoom);
-                    const targetY = (window.innerHeight / 2) - ((zY + zH / 2) * targetZoom);
+                    const targetX = (containerW / 2) - ((zX + zW / 2) * targetZoom);
+                    const targetY = (containerH / 2) - ((zY + zH / 2) * targetZoom);
 
                     setViewport({ x: targetX, y: targetY, zoom: targetZoom }, { duration: 0 });
                     
-                    // アニメーションと再描画が完全に終わるのを待つ
-                    await new Promise(resolve => setTimeout(resolve, 600));
+                    // ★ 修正：アニメーションと「矢印（SVG）の再描画」が完全に終わるのを長めに待つ
+                    await new Promise(resolve => setTimeout(resolve, 800));
 
-                    // 2. ズームされた状態で撮影！
                     const zoneEl = document.querySelector(`[data-id="${zone.id}"]`) as HTMLElement;
                     if (!zoneEl) continue;
                     const rect = zoneEl.getBoundingClientRect();
@@ -1425,8 +1429,9 @@ const executePrint = useCallback(() => {
                         width: rect.width, 
                         height: rect.height, 
                         backgroundColor: levelData[currentLevel]?.bgColor || '#ffffff', 
-                        scale: 3, // さらに3倍の解像度でキャプチャ
-                        ignoreElements: ignoreFunc
+                        scale: 3, 
+                        ignoreElements: ignoreFunc,
+                        useCORS: true // ★ 追加：SVGマーカー(矢印)の描画安定化
                     });
 
                     const dataUrl = canvas.toDataURL('image/png');
@@ -1440,7 +1445,7 @@ const executePrint = useCallback(() => {
                     await new Promise(resolve => setTimeout(resolve, 300));
                 }
 
-                // 3. すべての撮影が終わったら、一瞬で元の「引いた視点」に戻す
+                // すべての撮影が終わったら、一瞬で元の「引いた視点」に戻す
                 setViewport({ x: origX, y: origY, zoom: origZoom }, { duration: 0 });
             }
             
@@ -2431,7 +2436,7 @@ return [centerNode, ...nodes.map(n => {
 if (n.type === 'printZone') {
 return {
 ...n, draggable: true,
-data: { label: ( <div style={{ width: '100%', height: '100%', border: '4px dashed #3b82f6', backgroundColor: 'rgba(59, 130, 246, 0.05)', position: 'relative' }}> <div style={{ position: 'absolute', top: 0, left: 0, background: '#3b82f6', color: '#fff', padding: '4px 12px', fontSize: '14px', fontWeight: 'bold' }}>{n.data.label}</div> <NodeResizer isVisible={true} minWidth={200} minHeight={200} handleStyle={{ width: 12, height: 12, background: '#3b82f6' }} lineStyle={{ border: 'none' }} onResize={(_, params) => { setNodes((nds: any[]) => nds.map((node: any) => node.id === n.id ? { ...node, position: { x: params.x, y: params.y }, width: params.width, height: params.height, style: { ...node.style, width: params.width, height: params.height } } : node)); }} /> </div> ) }, style: { ...n.style, border: 'none', backgroundColor: 'transparent', padding: 0 }
+data: { label: ( <div className="print-zone-box" style={{ width: '100%', height: '100%', border: '4px dashed #3b82f6', backgroundColor: 'rgba(59, 130, 246, 0.05)', position: 'relative' }}> <div className="print-zone-label" style={{ position: 'absolute', top: 0, left: 0, background: '#3b82f6', color: '#fff', padding: '4px 12px', fontSize: '14px', fontWeight: 'bold' }}>{n.data.label}</div> <NodeResizer isVisible={true} minWidth={200} minHeight={200} handleStyle={{ width: 12, height: 12, background: '#3b82f6' }} lineStyle={{ border: 'none' }} onResize={(_, params) => { setNodes((nds: any[]) => nds.map((node: any) => node.id === n.id ? { ...node, position: { x: params.x, y: params.y }, width: params.width, height: params.height, style: { ...node.style, width: params.width, height: params.height } } : node)); }} /> </div> ) }, style: { ...n.style, border: 'none', backgroundColor: 'transparent', padding: 0 }
 };
 }
 
